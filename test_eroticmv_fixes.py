@@ -2,20 +2,30 @@
 
 Nothing here re-implements the logic: each function body is lifted verbatim
 out of main.py by AST and exec'd, so a regression in main.py fails these.
+Runs without PyQt, mpv or network access.
 """
 import ast
 import os
 import re
 from html import unescape as html_unescape
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 SRC = open('main.py', encoding='utf-8').read()
 TREE = ast.parse(SRC)
 
 
+class _FakeQTimer:
+    """Captures singleShot callbacks so the test can fire them."""
+    callbacks = []
+
+    @staticmethod
+    def singleShot(ms, fn):
+        _FakeQTimer.callbacks.append((ms, fn))
+
+
 G = {
-    're': re, 'os': os, 'urlparse': urlparse,
-    'html_unescape': html_unescape, 'print': print,
+    're': re, 'os': os, 'urlparse': urlparse, 'unquote': unquote,
+    'html_unescape': html_unescape, 'print': print, 'QTimer': _FakeQTimer,
 }
 
 
@@ -32,7 +42,6 @@ def lift(class_name, func_name):
     raise AssertionError(f'{class_name}.{func_name} not found in main.py')
 
 
-# ── 1. title cleaning ────────────────────────────────────────────────────────
 def lift_attr(class_name, attr_name):
     """Exec a class-body assignment from main.py verbatim and return its value."""
     for node in ast.walk(TREE):
@@ -48,6 +57,16 @@ def lift_attr(class_name, attr_name):
     raise AssertionError(f'{class_name}.{attr_name} not found in main.py')
 
 
+FAILS = 0
+
+
+def report(ok, label, detail=''):
+    global FAILS
+    FAILS += (not ok)
+    print(f"  {'PASS' if ok else 'FAIL'}  {label}{('  ' + detail) if detail else ''}")
+
+
+# ── 1. title cleaning ────────────────────────────────────────────────────────
 banned = lift('VideoPlayer', '_is_banned_stream_title')
 banned_fn = banned.__func__ if isinstance(banned, classmethod) else banned
 clean = lift('VideoPlayer', '_clean_remote_title')
@@ -64,7 +83,7 @@ class TitleStub:
 
 
 t = TitleStub()
-cases = [
+for raw, want in [
     ('Watch Dressage (1986) - Erotic Movies', 'Dressage (1986)'),
     ('Watch Dressage (1986) | Erotic Movies', 'Dressage (1986)'),
     ('Watch Dressage (1986) – Erotic Movies', 'Dressage (1986)'),
@@ -72,19 +91,12 @@ cases = [
     ('Watch Dressage (1986) - eroticmv.com', 'Dressage (1986)'),
     ('Dressage (1986)', 'Dressage (1986)'),
     ('  Watch   Some Film   -   Erotic Movies  ', 'Some Film'),
-]
-fails = 0
-for raw, want in cases:
+]:
     got = t._clean_remote_title(raw)
-    ok = got == want
-    fails += (not ok)
-    print(f"  {'PASS' if ok else 'FAIL'}  {raw!r} -> {got!r} (want {want!r})")
+    report(got == want, f'title {raw!r} -> {got!r}', f'(want {want!r})')
+
 
 # ── 2. seekRelative ──────────────────────────────────────────────────────────
-lifted_time_pos = lift('MpvMediaPlayerAdapter', '_mpv_time_pos_ms')
-lifted_seek = lift('MpvMediaPlayerAdapter', 'seekRelative')
-
-
 class FakeMpv:
     def __init__(self, time_pos):
         self.time_pos = time_pos
@@ -96,14 +108,18 @@ class FakeMpv:
 
     def seek(self, seconds, *flags):
         self.calls.append((seconds, flags))
+        # Real mpv moves time-pos on a honoured seek.
+        self.time_pos = seconds
 
     def command(self, *a):
         pass
 
 
 class SeekStub:
-    _mpv_time_pos_ms = lifted_time_pos
-    seekRelative = lifted_seek
+    _mpv_time_pos_ms = lift('MpvMediaPlayerAdapter', '_mpv_time_pos_ms')
+    seekRelative = lift('MpvMediaPlayerAdapter', 'seekRelative')
+    _issue_absolute_seek = lift('MpvMediaPlayerAdapter', '_issue_absolute_seek')
+    _verify_seek_landed = lift('MpvMediaPlayerAdapter', '_verify_seek_landed')
 
     def __init__(self, time_pos_s, duration_ms, file_loaded=True):
         self._mpv = FakeMpv(time_pos_s)
@@ -124,36 +140,44 @@ class SeekStub:
             self._mpv.calls.append((self._last_set_position / 1000.0, ('setPosition',)))
 
 
+def fire_timers():
+    cbs, _FakeQTimer.callbacks[:] = _FakeQTimer.callbacks[:], []
+    _FakeQTimer.callbacks.clear()
+    for _ms, fn in cbs:
+        fn()
+
+
 def check_seek(label, stub, delta, want_s, want_flags):
+    _FakeQTimer.callbacks.clear()
     stub.seekRelative(delta)
     got = stub._mpv.calls
     ok = len(got) == 1 and abs(got[0][0] - want_s) < 1e-6 \
         and tuple(got[0][1]) == tuple(want_flags)
-    print(f"  {'PASS' if ok else 'FAIL'}  {label}: seek{got} (want {want_s}s {want_flags})")
-    return 0 if ok else 1
+    report(ok, label, f'seek{got} (want {want_s}s {want_flags})')
 
 
-fails += check_seek('right arrow at 100s, dur 1h',
-                    SeekStub(100.0, 3600_000), 3000, 103.0, ('absolute', 'exact'))
-fails += check_seek('left arrow at 100s, dur 1h',
-                    SeekStub(100.0, 3600_000), -3000, 97.0, ('absolute', 'exact'))
-fails += check_seek('left arrow at 1.5s clamps to 0',
-                    SeekStub(1.5, 3600_000), -3000, 0.0, ('absolute', 'exact'))
-fails += check_seek('right arrow past end clamps to duration',
-                    SeekStub(3599.0, 3600_000), 3000, 3600.0, ('absolute', 'exact'))
-fails += check_seek('left after clicking bar to 1800s',
-                    SeekStub(1800.0, 3600_000), -3000, 1797.0, ('absolute', 'exact'))
+check_seek('right arrow at 100s, dur 1h',
+           SeekStub(100.0, 3600_000), 3000, 103.0, ('absolute', 'exact'))
+check_seek('left arrow at 100s, dur 1h',
+           SeekStub(100.0, 3600_000), -3000, 97.0, ('absolute', 'exact'))
+check_seek('left arrow at 1.5s clamps to 0',
+           SeekStub(1.5, 3600_000), -3000, 0.0, ('absolute', 'exact'))
+check_seek('right arrow past end clamps to duration',
+           SeekStub(3599.0, 3600_000), 3000, 3600.0, ('absolute', 'exact'))
+check_seek('left after clicking bar to 1800s',
+           SeekStub(1800.0, 3600_000), -3000, 1797.0, ('absolute', 'exact'))
+report(len(_FakeQTimer.callbacks) == 1, 'a verification callback was scheduled')
 
 # time-pos unavailable -> cached position() is the base
 s = SeekStub(None, 3600_000)
 s._position_ms = 500_000
 s.seekRelative(-3000)
 got = s._mpv.calls
-ok = len(got) == 1 and abs(got[0][0] - 497.0) < 1e-6 and got[0][1] == ('absolute', 'exact')
-fails += (not ok)
-print(f"  {'PASS' if ok else 'FAIL'}  time-pos None falls back to position(): {got}")
+report(len(got) == 1 and abs(got[0][0] - 497.0) < 1e-6
+       and got[0][1] == ('absolute', 'exact'),
+       f'time-pos None falls back to position(): {got}')
 
-# exact rejected -> keyframe ABSOLUTE fallback, never 'relative'
+# exact RAISES -> keyframe ABSOLUTE fallback, never 'relative'
 s = SeekStub(100.0, 3600_000)
 
 
@@ -165,20 +189,80 @@ def _raise(seconds, *flags):
 
 s._mpv.seek = _raise
 s.seekRelative(3000)
-ok = len(s._mpv.calls) == 1 and abs(s._mpv.calls[0][0] - 103.0) < 1e-6 \
-    and s._mpv.calls[0][1] == ('absolute',)
-fails += (not ok)
-print(f"  {'PASS' if ok else 'FAIL'}  exact unsupported -> absolute fallback: {s._mpv.calls}")
+report(len(s._mpv.calls) == 1 and abs(s._mpv.calls[0][0] - 103.0) < 1e-6
+       and s._mpv.calls[0][1] == ('absolute',),
+       f'exact raises -> absolute fallback: {s._mpv.calls}')
+
+# exact SILENTLY no-ops (mpv honours nothing, time-pos stays) -> keyframe retry
+s = SeekStub(1800.0, 3600_000)
+
+
+def _noop_exact(seconds, *flags):
+    if 'exact' in flags:
+        return                      # accepted but ignored: the reported bug
+    s._mpv.calls.append((seconds, flags))
+    s._mpv.time_pos = seconds
+
+
+s._mpv.seek = _noop_exact
+_FakeQTimer.callbacks.clear()
+s.seekRelative(-3000)             # user pressed Left after clicking to 1800s
+report(len(s._mpv.calls) == 0, 'silent no-op: nothing moved yet')
+fire_timers()
+report(len(s._mpv.calls) == 1 and abs(s._mpv.calls[0][0] - 1797.0) < 1e-6
+       and s._mpv.calls[0][1] == ('absolute',),
+       f'silent no-op -> keyframe absolute retry: {s._mpv.calls}')
+
+# exact landed -> verification must NOT seek again
+s = SeekStub(1800.0, 3600_000)
+_FakeQTimer.callbacks.clear()
+s.seekRelative(-3000)
+fire_timers()
+report(len(s._mpv.calls) == 1, f'honoured exact seek: no duplicate seek {s._mpv.calls}')
+
+# a newer seek supersedes an outstanding verification
+s = SeekStub(1800.0, 3600_000)
+s._mpv.seek = _noop_exact
+_FakeQTimer.callbacks.clear()
+s.seekRelative(-3000)
+first = _FakeQTimer.callbacks[:]
+s._mpv.time_pos = 900.0           # playback jumped elsewhere
+s.seekRelative(-3000)             # second seek replaces the token
+_FakeQTimer.callbacks.clear()
+for _ms, fn in first:             # fire only the STALE callback
+    fn()
+report(len(s._mpv.calls) == 0, f'stale verification is ignored {s._mpv.calls}')
 
 # mpv absent -> setPosition path, still absolute target
 s = SeekStub(100.0, 3600_000)
 s._mpv = None
 s.seekRelative(3000)
-ok = getattr(s, '_last_set_position', None) == 103000
-fails += (not ok)
-_last = getattr(s, '_last_set_position', None)
-print(f"  {'PASS' if ok else 'FAIL'}  no-mpv path -> setPosition({_last}) (want 103000)")
+report(getattr(s, '_last_set_position', None) == 103000,
+       f"no-mpv path -> setPosition({getattr(s, '_last_set_position', None)}) (want 103000)")
+
+
+# ── 3. eroticmv must route through the VOD-rewriting proxy ───────────────────
+class ProxyStub:
+    _is_hls_stream_url = lift('VideoPlayer', '_is_hls_stream_url')
+    _hls_needs_vod_playlist_proxy = lift('VideoPlayer', '_hls_needs_vod_playlist_proxy')
+    _HLS_VOD_PROXY_HOST_TOKENS = lift_attr(
+        'VideoPlayer', '_HLS_VOD_PROXY_HOST_TOKENS')
+
+
+p = ProxyStub()
+for playback, source, want, label in [
+    ('https://vidcdn2.eroticmv.com/dat1/abc/abc.m3u8',
+     'https://eroticmv.com/watch/dressage-1986', True, 'vidcdn m3u8 + eroticmv page'),
+    ('https://vidcdn2.eroticmv.com/dat1/abc/abc.m3u8', '', True, 'vidcdn host alone'),
+    ('https://cdn.example.com/x/master.m3u8',
+     'https://eroticmv.com/watch/dressage-1986', True, 'any CDN under an eroticmv page'),
+    ('https://othercdn.com/x.m3u8', 'https://javdock.com/v/1', False, 'unrelated jav page'),
+    ('https://vidcdn2.eroticmv.com/movie.mp4',
+     'https://eroticmv.com/watch/x', False, 'non-HLS eroticmv file stays direct'),
+]:
+    got = p._hls_needs_vod_playlist_proxy(playback, source)
+    report(got is want, f'{label} -> {got}', f'(want {want})')
 
 print()
-print('FAILURES:', fails)
-raise SystemExit(1 if fails else 0)
+print('FAILURES:', FAILS)
+raise SystemExit(1 if FAILS else 0)

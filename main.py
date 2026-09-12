@@ -3580,6 +3580,36 @@ class MpvMediaPlayerAdapter(QObject):
         except Exception:
             return None
 
+    def _issue_absolute_seek(self, target_ms, exact=True):
+        """Seek to an absolute millisecond target. Returns True on success."""
+        flags = ('absolute', 'exact') if exact else ('absolute',)
+        try:
+            self._mpv.seek(target_ms / 1000.0, *flags)
+            self._pending_seek_ms = None
+            return True
+        except Exception as exc:
+            print(f"[mpv] {'exact ' if exact else 'keyframe '}seek to {target_ms}ms failed: {exc}")
+            return False
+
+    def _verify_seek_landed(self, target_ms, token):
+        """mpv swallows an 'exact' seek it cannot honour instead of raising,
+        so confirm time-pos actually moved and retry keyframe absolute if it
+        did not. Still an ABSOLUTE seek at the 3s target — never 'relative',
+        which is what produced the long GOP-sized skip."""
+        if getattr(self, '_seek_verify_token', None) is not token:
+            return  # a newer seek superseded this one
+        self._seek_verify_token = None
+        if self._mpv is None:
+            return
+        actual = self._mpv_time_pos_ms()
+        if actual is None:
+            return
+        if abs(actual - target_ms) <= 1500:
+            return
+        print(f"[mpv] exact seek to {target_ms}ms did not land (time-pos {actual}ms); "
+              f"retrying keyframe absolute")
+        self._issue_absolute_seek(target_ms, exact=False)
+
     def seekRelative(self, delta_ms):
         """Arrow-key seek: move by exactly *delta_ms* around the current
         position, on HLS as well as local files.
@@ -3588,9 +3618,9 @@ class MpvMediaPlayerAdapter(QObject):
         neighbouring GOP, which for HLS is routinely 8-10s — far more than
         the 3s the arrow keys promise. Instead read mpv's own ``time-pos``,
         add the delta, clamp to the media duration and seek to that absolute
-        target with 'exact'. This is also what makes Left work after clicking
-        ahead on the time bar: the target is absolute, so it is not limited
-        to already-buffered time.
+        target with 'exact'. Absolute is also what makes Left work after
+        clicking ahead on the time bar: the target is a timestamp, not an
+        offset into whatever happens to be buffered.
         """
         try:
             delta_ms = int(delta_ms or 0)
@@ -3613,20 +3643,16 @@ class MpvMediaPlayerAdapter(QObject):
         total_ms = self.duration()
         if total_ms > 0:
             target_ms = min(target_ms, total_ms)
-        try:
-            self._mpv.seek(target_ms / 1000.0, 'absolute', 'exact')
-            self._pending_seek_ms = None
-        except Exception as exc:
-            # Some CDNs reject/no-op 'exact'. Degrade to a keyframe seek but
-            # keep it ABSOLUTE at the 3s target — never 'relative', which is
-            # what produced the long GOP-sized skip.
-            print(f"[mpv] exact seek to {target_ms}ms failed ({exc}); retrying keyframe absolute")
+        if self._issue_absolute_seek(target_ms, exact=True):
+            token = object()
+            self._seek_verify_token = token
             try:
-                self._mpv.seek(target_ms / 1000.0, 'absolute')
-                self._pending_seek_ms = None
-            except Exception as exc2:
-                print(f"[mpv] seek failed: {exc2}")
-                self.setPosition(target_ms)
+                QTimer.singleShot(
+                    700, lambda: self._verify_seek_landed(target_ms, token))
+            except Exception:
+                self._seek_verify_token = None
+        elif not self._issue_absolute_seek(target_ms, exact=False):
+            self.setPosition(target_ms)
 
     def stepForward(self):
         if not self._mpv:
@@ -37030,6 +37056,41 @@ try {
             'javclan',
         ))
 
+    # Hosts whose HLS is delivered as a live-style media playlist (no
+    # #EXT-X-ENDLIST) even though the content is a finished VOD. Played
+    # direct, ffmpeg/mpv treat the stream as LIVE and the demuxer only
+    # exposes the sliding window: seeking FORWARD streams new segments fine,
+    # but seeking BACKWARD — Left after clicking ahead on the time bar — is
+    # refused, and mpv raises nothing, so no seek fallback ever fires.
+    # Routing these through the local /hls/ proxy lets
+    # _ensure_hls_vod_playlist() stamp #EXT-X-PLAYLIST-TYPE:VOD +
+    # #EXT-X-ENDLIST, which makes the whole timeline seekable (same R59 fix
+    # that already covers turtleviplay).
+    _HLS_VOD_PROXY_HOST_TOKENS = (
+        'eroticmv',   # vidcdn2.eroticmv.com — field: backward seek dead
+        'vidcdn',
+    )
+
+    def _hls_needs_vod_playlist_proxy(self, playback_url='', source_url=''):
+        """True when this HLS must go through the local proxy to be seekable
+        backwards. Matches the playback CDN host and the originating page."""
+        try:
+            if not self._is_hls_stream_url(playback_url):
+                return False
+        except Exception:
+            return False
+        hosts = []
+        for value in (playback_url, source_url):
+            try:
+                hosts.append((urlparse(str(value or '')).netloc or '').lower())
+            except Exception:
+                pass
+        return any(
+            token in host
+            for host in hosts if host
+            for token in self._HLS_VOD_PROXY_HOST_TOKENS
+        )
+
     def _embed_hls_needs_adstrip_proxy(self, embed_host='', playback_url=''):
         """R57: HLS from turbovid family gets stitched post-roll ad
         (turbovidhls froze at 2h25m; emturbovid.com/t/… stuck at 02:42:45).
@@ -39530,9 +39591,16 @@ try {
                 or self._embed_hls_needs_adstrip_proxy(
                     (urlparse(str(file_path or '')).netloc or ''),
                     playback_target)
+                # eroticmv / vidcdn: live-style playlist, so mpv can seek
+                # forward but never back behind the window (Left after
+                # clicking ahead on the bar does nothing). The proxy's
+                # playlist rewrite marks it VOD so any timestamp is reachable.
+                or self._hls_needs_vod_playlist_proxy(playback_target, file_path)
             ):
                 _proxy_label = (
-                    'EMBEDHLS_PROXY'
+                    'HLSVOD_PROXY'
+                    if self._hls_needs_vod_playlist_proxy(playback_target, file_path)
+                    else 'EMBEDHLS_PROXY'
                     if (provider == 'embed_hls_unpack'
                         and stream_info.get('route_local_proxy'))
                     or self._embed_hls_needs_adstrip_proxy(
@@ -39543,6 +39611,12 @@ try {
                         or provider in ('javdock_capture', 'fetchv_capture'))
                     else 'MISSAV_PROXY'
                 )
+                if self._hls_needs_vod_playlist_proxy(playback_target, file_path):
+                    # The proxy fetches the manifest itself, so it needs the
+                    # site Referer/Origin the direct mpv request was getting
+                    # from _media_playback_headers — vidcdn 403s without it.
+                    request_headers = self._media_playback_headers(
+                        file_path, playback_target, request_headers)
                 proxied_target = self._remote_playback_proxy_url(
                     playback_target,
                     request_headers,
