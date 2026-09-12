@@ -3570,10 +3570,28 @@ class MpvMediaPlayerAdapter(QObject):
         except Exception as exc:
             print(f"[mpv] seek failed: {exc}")
 
+    def _mpv_time_pos_ms(self):
+        """Live ``time-pos`` from mpv in milliseconds, or None if unreadable."""
+        try:
+            value = self._mpv.get_property('time-pos')
+            if value is None:
+                return None
+            return int(float(value) * 1000)
+        except Exception:
+            return None
+
     def seekRelative(self, delta_ms):
-        """Arrow-key seek. HLS VOD-as-live often reports a stuck time-pos,
-        so absolute position()+N does nothing while the slider (absolute
-        fraction of duration) still works. Relative keyframe seek jumps."""
+        """Arrow-key seek: move by exactly *delta_ms* around the current
+        position, on HLS as well as local files.
+
+        A keyframe-relative seek (``seek(3, 'relative')``) lands on the
+        neighbouring GOP, which for HLS is routinely 8-10s — far more than
+        the 3s the arrow keys promise. Instead read mpv's own ``time-pos``,
+        add the delta, clamp to the media duration and seek to that absolute
+        target with 'exact'. This is also what makes Left work after clicking
+        ahead on the time bar: the target is absolute, so it is not limited
+        to already-buffered time.
+        """
         try:
             delta_ms = int(delta_ms or 0)
         except Exception:
@@ -3583,15 +3601,32 @@ class MpvMediaPlayerAdapter(QObject):
         if self._mpv is None or not self._file_loaded:
             self.setPosition(max(0, self.position() + delta_ms))
             return
+        # mpv's live time-pos is authoritative; the cached observer value is
+        # the fallback when the property read fails.
+        base_ms = self._mpv_time_pos_ms()
+        if base_ms is None:
+            base_ms = self.position()
         try:
-            if self._is_hls_source():
-                self._mpv.seek(delta_ms / 1000.0, 'relative')
-                self._pending_seek_ms = None
-            else:
-                self.setPosition(max(0, self.position() + delta_ms))
+            target_ms = max(0, int(base_ms) + delta_ms)
+        except Exception:
+            target_ms = max(0, delta_ms)
+        total_ms = self.duration()
+        if total_ms > 0:
+            target_ms = min(target_ms, total_ms)
+        try:
+            self._mpv.seek(target_ms / 1000.0, 'absolute', 'exact')
+            self._pending_seek_ms = None
         except Exception as exc:
-            print(f"[mpv] relative seek failed: {exc}")
-            self.setPosition(max(0, self.position() + delta_ms))
+            # Some CDNs reject/no-op 'exact'. Degrade to a keyframe seek but
+            # keep it ABSOLUTE at the 3s target — never 'relative', which is
+            # what produced the long GOP-sized skip.
+            print(f"[mpv] exact seek to {target_ms}ms failed ({exc}); retrying keyframe absolute")
+            try:
+                self._mpv.seek(target_ms / 1000.0, 'absolute')
+                self._pending_seek_ms = None
+            except Exception as exc2:
+                print(f"[mpv] seek failed: {exc2}")
+                self.setPosition(target_ms)
 
     def stepForward(self):
         if not self._mpv:
@@ -27625,6 +27660,16 @@ try {
         # duplicates the count already shown by _remote_folder_count_text.
         title = re.sub(
             r'\s*[-|–—]\s*\d+\s*(?:files?|items?|videos?|images?|photos?|media)\s*$',
+            '',
+            title,
+            flags=re.IGNORECASE,
+        ).strip()
+        # EroticMV (and mirrors) title their watch pages
+        # "Watch <Title> - Erotic Movies"; the playlist row should read
+        # "<Title>" alone, e.g. "Dressage (1986)".
+        title = re.sub(r'^\s*Watch\s+', '', title, flags=re.IGNORECASE).strip()
+        title = re.sub(
+            r'\s*[-|–—]\s*(?:Erotic\s*Movies?|Erotic\s*MV|EroticMV(?:\.(?:com|net))?)\s*$',
             '',
             title,
             flags=re.IGNORECASE,
