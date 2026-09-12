@@ -46,6 +46,8 @@ def _is_generic_jav_url(url: str) -> bool:
             'sextb.net',
             'javgg.net',
             'javdock.com',
+            'eroticmv.com',
+            'eroticmv.net',
         ]
         for t in targets:
             if t in host:
@@ -243,6 +245,7 @@ _AD_M3U8_MARKERS = (
     'doubleclick', 'adnxs', 'exoclick', 'popads', 'popcash', 'trafficjunky',
     'googlesyndication', '/ads/', 'adtag', 'vast', 'taboola', 'outbrain',
     'creativecdn', 'whitetrafsa', 'adserve', 'banner',
+    'trailerhg', '/trailer', 'previewclip', '/preview/', 'sample.m3u8',
 )
 
 

@@ -143,7 +143,7 @@ def grab_all(url: str):
                     final_streams.add(u)
                     continue
             
-            if 'preview' in u_lower:
+            if any(tok in u_lower for tok in ('preview', 'trailer', 'sample', 'trailerhg')):
                 continue
             # For CDN mp4s, check that the JAV code appears in the filename
             if jav_code and u_lower.endswith('.mp4'):
