@@ -19204,6 +19204,8 @@ try {
             return os.path.basename(str(path))
 
     def _show_url_msgbox(self, url):
+        import html as _html
+
         # Handle single url or list of urls.
         # Sanitize immediately so the display, clipboard, and browser all get
         # clean strings (no null bytes / control chars that show as empty rectangles).
@@ -19211,40 +19213,187 @@ try {
         urls = [self._sanitize_url(u) for u in urls if u]
         urls = [u for u in urls if u]
         raw_urls_text = "\n".join(urls) + "\n"
-            
+
         msg = QDialog(self)
         msg.setWindowTitle("URL" if len(urls) == 1 else f"URLs ({len(urls)})")
-        msg.resize(700, 300)
         lay = QVBoxLayout(msg)
-        
-        edit = QTextEdit()
-        edit.setReadOnly(True)
-        edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        
-        # Build html formatting showing name of the file and the URL
-        html_lines = []
-        for u in urls:
+
+        # Text areas (Name/URL/mirror labels) wrap to at most two lines and
+        # ellipsize past that, so long values never force the popup wider
+        # or push buttons off to the side.
+        font_metrics = QFontMetrics(msg.font())
+        ROW_TEXT_WIDTH = 520
+        MIRROR_TEXT_WIDTH = 470
+
+        def _elide_two_lines(text, max_width):
+            text = str(text)
+            if font_metrics.horizontalAdvance(text) <= max_width:
+                return [text]
+            line1 = text
+            while line1 and font_metrics.horizontalAdvance(line1) > max_width:
+                line1 = line1[:-1]
+            # Prefer breaking at the last space so words aren't chopped,
+            # unless that would throw away most of the first line (e.g. a
+            # URL with no spaces at all).
+            space_idx = line1.rfind(' ')
+            if space_idx > len(line1) // 2:
+                line1 = line1[:space_idx]
+            remainder = text[len(line1):].lstrip()
+            if not remainder:
+                return [line1]
+            line2 = font_metrics.elidedText(remainder, Qt.TextElideMode.ElideRight, max_width)
+            return [line1, line2]
+
+        def _playlist_number_for(u):
+            # The playlist position for this URL, 1-based, if it can be
+            # found either directly or via its parent remote folder entry.
+            try:
+                plist = getattr(self, 'playlist', None) or []
+                if u in plist:
+                    return plist.index(u) + 1
+                for i, p in enumerate(plist):
+                    try:
+                        if self._is_remote_folder_entry(p) and self._remote_folder_url(p) == u:
+                            return i + 1
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            return None
+
+        def _row_html(u, max_width):
             name  = self._get_playlist_name_for_path(u)
             dates = self._get_url_dates(u)
             added_str    = self._format_url_date(dates.get('added', ''))
             name_mod_str = self._format_url_date(dates.get('name_modified', ''))
+            playlist_no  = _playlist_number_for(u)
 
-            parts = [f"<b>Name:</b> {name}", f"<b>URL:</b> {u}"]
+            lines = []
+            name_lines = _elide_two_lines(name, max_width)
+            lines.append(f"<b>Name:</b> {_html.escape(name_lines[0])}")
+            for extra in name_lines[1:]:
+                lines.append(f"&nbsp;&nbsp;&nbsp;&nbsp;{_html.escape(extra)}")
+
+            url_lines = _elide_two_lines(u, max_width)
+            lines.append(f"<b>URL:</b> {_html.escape(url_lines[0])}")
+            for extra in url_lines[1:]:
+                lines.append(f"&nbsp;&nbsp;&nbsp;&nbsp;{_html.escape(extra)}")
+
+            if playlist_no:
+                lines.append(f"<b>Playlist #:</b> {playlist_no}")
             if added_str:
-                parts.append(f"<b>Added:</b> {added_str}")
+                lines.append(f"<b>Added:</b> {added_str}")
             if name_mod_str:
-                parts.append(f"<b>Name modified:</b> {name_mod_str}")
-            html_lines.append("<br>".join(parts) + "<br>")
-        edit.setHtml("<br>".join(html_lines))
-        lay.addWidget(edit)
-        
+                lines.append(f"<b>Name modified:</b> {name_mod_str}")
+            return "<br>".join(lines)
+
+        def _open_one(u):
+            # Open just this one URL, independent of the "Open all" button.
+            # Dialog is left open so more rows can be opened individually.
+            try:
+                if not self._open_url_in_brave([u]):
+                    import webbrowser
+                    webbrowser.open(u)
+            except Exception:
+                import webbrowser
+                webbrowser.open(u)
+
+        def _make_copy_handler(btn, u):
+            # Copies every time it's clicked; briefly swaps the label to a
+            # checkmark to confirm the click landed, then reverts so it
+            # reads "Copy" again for the next click.
+            def _copy_one():
+                QApplication.clipboard().setText(u)
+                btn.setText("\u2713")
+
+                def _revert():
+                    try:
+                        btn.setText("Copy")
+                    except RuntimeError:
+                        pass  # popup (and button) was closed before the timer fired
+
+                QTimer.singleShot(1500, _revert)
+            return _copy_one
+
+        def _add_action_buttons(row_lay, u, width=60):
+            open_btn = QPushButton("Open")
+            open_btn.setFixedWidth(width)
+            open_btn.clicked.connect(lambda checked=False, u=u: _open_one(u))
+            row_lay.addWidget(open_btn, 0, Qt.AlignmentFlag.AlignTop)
+
+            copy_btn = QPushButton("Copy")
+            copy_btn.setFixedWidth(width)
+            copy_btn.clicked.connect(_make_copy_handler(copy_btn, u))
+            row_lay.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignTop)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        container = QWidget()
+        rows_lay = QVBoxLayout(container)
+        rows_lay.setContentsMargins(0, 0, 0, 0)
+        rows_lay.setSpacing(8)
+
+        for u in urls:
+            # One card per URL/item; its mirrors (if any) live inside the
+            # same card, visually grouped underneath it.
+            group = QFrame()
+            group.setFrameShape(QFrame.Shape.StyledPanel)
+            group_lay = QVBoxLayout(group)
+            group_lay.setContentsMargins(6, 6, 6, 6)
+            group_lay.setSpacing(4)
+
+            main_row = QHBoxLayout()
+            label = QLabel(_row_html(u, ROW_TEXT_WIDTH))
+            label.setTextFormat(Qt.TextFormat.RichText)
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            main_row.addWidget(label, 1)
+            _add_action_buttons(main_row, u)
+            group_lay.addLayout(main_row)
+
+            try:
+                mirror_urls = [m for m in (self._mirrors_for_visible_url(u) or []) if m and m != u]
+            except Exception:
+                mirror_urls = []
+
+            if mirror_urls:
+                mirrors_label = QLabel(f"<b>Mirrors ({len(mirror_urls)}):</b>")
+                mirrors_label.setTextFormat(Qt.TextFormat.RichText)
+                mirrors_label.setStyleSheet("margin-top: 4px; color: #999999;")
+                group_lay.addWidget(mirrors_label)
+
+                for m in mirror_urls:
+                    m_row = QHBoxLayout()
+                    m_row.setContentsMargins(16, 0, 0, 0)
+                    try:
+                        m_display = self._mirror_label(m)
+                    except Exception:
+                        m_display = m
+                    m_lines = _elide_two_lines(m_display, MIRROR_TEXT_WIDTH)
+                    m_html = "<br>".join(_html.escape(line) for line in m_lines)
+                    m_label = QLabel(m_html)
+                    m_label.setTextFormat(Qt.TextFormat.RichText)
+                    m_label.setWordWrap(True)
+                    m_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                    m_label.setStyleSheet("color: #bbbbbb;")
+                    m_row.addWidget(m_label, 1)
+                    _add_action_buttons(m_row, m, width=50)
+                    group_lay.addLayout(m_row)
+
+            rows_lay.addWidget(group)
+
+        rows_lay.addStretch(1)
+        scroll.setWidget(container)
+        lay.addWidget(scroll)
+
         btn_lay = QHBoxLayout()
-        open_btn = QPushButton("Open in Brave")
+        open_btn = QPushButton("Open in Brave" if len(urls) == 1 else f"Open All ({len(urls)}) in Brave")
         copy_btn = QPushButton("Copy to Clipboard")
         btn_lay.addWidget(open_btn)
         btn_lay.addWidget(copy_btn)
         lay.addLayout(btn_lay)
-        
+
         def _open():
             # Pass the whole list at once so Brave opens every URL as a tab
             # inside the already-running window (no new_window flag = reuse
@@ -19259,15 +19408,29 @@ try {
                 for u in urls:
                     webbrowser.open(u)
             msg.accept()
-            
+
         def _copy():
             QApplication.clipboard().setText(raw_urls_text)
             self.show_osd("Copied to clipboard", duration=1500)
             msg.accept()
-            
+
         open_btn.clicked.connect(_open)
         copy_btn.clicked.connect(_copy)
-        
+
+        # Size the popup to fit every card up front (bounded by the screen),
+        # so it opens tall enough instead of needing a manual resize; the
+        # scroll area still kicks in as a fallback if it doesn't all fit.
+        width = 780
+        msg.resize(width, 300)
+        container.adjustSize()
+        try:
+            screen = QApplication.primaryScreen()
+            avail_height = screen.availableGeometry().height() if screen else 900
+        except Exception:
+            avail_height = 900
+        ideal_height = container.sizeHint().height() + 90
+        msg.resize(width, max(220, min(ideal_height, int(avail_height * 0.85))))
+
         msg.exec()
 
     def _show_fullscreen_overlay_menu(self, global_pos, actions, title=None, clear_existing_menus=True, level=0, anchor_rect_global=None):
