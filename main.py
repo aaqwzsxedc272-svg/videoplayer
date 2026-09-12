@@ -22213,6 +22213,92 @@ try {
             print(f"[FAVICON] placeholder probe failed: {e}")
         return placeholder
 
+    # Icon rel values in preference order. A WordPress site (javgg)
+    # typically serves the WordPress default mark at /favicon.ico while its
+    # HTML declares the real site icon under /wp-content/uploads/, so
+    # declared links must be tried BEFORE the bare well-known paths.
+    _FAVICON_HTML_REL_PREFERENCE = ('icon', 'shortcut icon', 'apple-touch-icon')
+
+    @staticmethod
+    def _favicon_tag_attr(tag, attr):
+        """Value of an HTML attribute inside a tag, quoted or bare."""
+        match = re.search(
+            attr + r'\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))',
+            tag, flags=re.IGNORECASE)
+        if not match:
+            return ''
+        raw = next((g for g in match.groups() if g is not None), '')
+        return html_unescape(raw).strip()
+
+    def _favicon_http_get(self, url, headers, timeout=6, want_text=False):
+        """GET with a browser TLS fingerprint first, then plain requests.
+
+        javgg/eroticmv sit behind anti-bot CDNs that answer a plain
+        ``requests`` call with 403 or a challenge page — the same reason the
+        grabbers fetch those pages through curl_cffi. Returns
+        ``(body, content_type)``; body is None when nothing answered 200.
+        """
+        try:
+            import curl_cffi.requests as cfreq
+            response = cfreq.get(url, impersonate='chrome131', headers=headers,
+                                 timeout=timeout, allow_redirects=True)
+            if getattr(response, 'status_code', 0) == 200:
+                ctype = str((getattr(response, 'headers', None) or {})
+                            .get('Content-Type') or '')
+                body = (response.text or '') if want_text else (response.content or b'')
+                return body, ctype
+        except Exception:
+            pass
+        try:
+            import requests
+            response = requests.get(url, headers=headers, timeout=timeout,
+                                    allow_redirects=True)
+            if response.ok:
+                ctype = str(response.headers.get('Content-Type') or '')
+                return (response.text if want_text else response.content), ctype
+        except Exception:
+            pass
+        return None, ''
+
+    def _favicon_urls_declared_in_html(self, domain, headers):
+        """Absolute icon URLs the site declares in its own HTML, best first.
+
+        Browsers do this before falling back to /favicon.ico, and it is the
+        only way to get a WordPress site's real icon: its /favicon.ico is
+        the generic WP mark, while <link rel="icon"> points at the uploaded
+        site icon.
+        """
+        urls = []
+        page = f'https://{domain}/'
+        try:
+            html_text, _ctype = self._favicon_http_get(page, headers, want_text=True)
+        except Exception as exc:
+            print(f"[FAVICON] {domain}: homepage read failed: {exc}")
+            return urls
+        if not html_text or '<link' not in str(html_text).lower():
+            return urls
+        ranked = []
+        for match in re.finditer(r'<link\b[^>]*>', str(html_text), flags=re.IGNORECASE):
+            tag = match.group(0)
+            rel = self._favicon_tag_attr(tag, 'rel').lower()
+            if rel not in self._FAVICON_HTML_REL_PREFERENCE:
+                continue
+            href = self._favicon_tag_attr(tag, 'href')
+            if not href:
+                continue
+            try:
+                absolute = urljoin(page, href)
+            except Exception:
+                continue
+            if absolute.startswith(('http://', 'https://')):
+                ranked.append((self._FAVICON_HTML_REL_PREFERENCE.index(rel), absolute))
+        for _rank, absolute in sorted(ranked, key=lambda pair: pair[0]):
+            if absolute not in urls:
+                urls.append(absolute)
+        if urls:
+            print(f"[FAVICON] {domain}: {len(urls)} declared icon(s) — {urls[0]}")
+        return urls
+
     def _fetch_favicon_worker(self, domain):
         """Background-thread worker: download a small favicon image for domain."""
         data = None
@@ -22236,19 +22322,20 @@ try {
                 if _alias and _alias not in _candidates:
                     _candidates.append(_alias)
             for _c in _candidates:
-                _own = [f'https://{_c}/favicon.ico']
+                _own = []
+                try:
+                    _own.extend(self._favicon_urls_declared_in_html(_c, headers))
+                except Exception as exc:
+                    print(f"[FAVICON] {_c}: declared-icon lookup failed: {exc}")
+                _own.append(f'https://{_c}/favicon.ico')
                 if not _c.startswith('www.'):
                     _own.append(f'https://www.{_c}/favicon.ico')
                 _own.append(f'https://{_c}/apple-touch-icon.png')
                 for _u in _own:
-                    try:
-                        r = requests.get(_u, headers=headers, timeout=6, allow_redirects=True)
-                    except Exception:
-                        continue
-                    body = r.content if r.ok else b''
+                    body, ctype = self._favicon_http_get(_u, headers)
                     if not body or len(body) < 32:
                         continue
-                    ctype = str(r.headers.get('Content-Type') or '').lower()
+                    ctype = str(ctype or '').lower()
                     if 'text/html' in ctype or 'application/json' in ctype:
                         continue
                     magic = body[:12]

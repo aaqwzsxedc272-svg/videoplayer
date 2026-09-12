@@ -12,7 +12,7 @@ import ast
 import os
 import re
 from html import unescape as html_unescape
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, urljoin
 
 SRC = open('main.py', encoding='utf-8').read()
 TREE = ast.parse(SRC)
@@ -29,7 +29,8 @@ class _FakeQTimer:
 
 G = {
     're': re, 'os': os, 'urlparse': urlparse, 'unquote': unquote,
-    'html_unescape': html_unescape, 'print': print, 'QTimer': _FakeQTimer,
+    'urljoin': urljoin, 'html_unescape': html_unescape, 'print': print,
+    'QTimer': _FakeQTimer,
 }
 
 
@@ -316,6 +317,72 @@ for raw in ('Some Movie.mp4', '- Some Movie.mkv'):
     url = 'https://www.google.com/search?q=' + _qp(q._google_search_query_for_name(raw))
     report('mp4' not in url.lower() and 'mkv' not in url.lower(),
            f'query URL is extension-free: {url}')
+
+# ── 5. favicon: prefer the icon the site DECLARES over /favicon.ico ──────────
+class FaviconStub:
+    _favicon_tag_attr = staticmethod(lift('VideoPlayer', '_favicon_tag_attr'))
+    _FAVICON_HTML_REL_PREFERENCE = lift_attr(
+        'VideoPlayer', '_FAVICON_HTML_REL_PREFERENCE')
+    _favicon_urls_declared_in_html = lift(
+        'VideoPlayer', '_favicon_urls_declared_in_html')
+
+    def __init__(self, html_text, ctype='text/html; charset=utf-8'):
+        self._html = html_text
+        self._ctype = ctype
+        self.requested = []
+
+    # The network layer is stubbed; the parsing under test is real.
+    def _favicon_http_get(self, url, headers, timeout=6, want_text=False):
+        self.requested.append(url)
+        if want_text:
+            return self._html, self._ctype
+        return None, ''
+
+
+WORDPRESS_PAGE = """<!DOCTYPE html><html><head>
+<link rel="profile" href="https://gmpg.org/xfn/11">
+<link rel="apple-touch-icon" sizes="180x180"
+      href="/wp-content/uploads/2021/03/cropped-logo-180.png">
+<link rel="icon" type="image/png" sizes="32x32"
+      href="/wp-content/uploads/2021/03/cropped-logo-32.png">
+<link rel="stylesheet" href="/wp-includes/css/style.css">
+<link rel='shortcut icon' href='https://cdn.javgg.net/old.ico'>
+</head><body></body></html>"""
+
+f = FaviconStub(WORDPRESS_PAGE)
+got = f._favicon_urls_declared_in_html('javgg.net', {})
+report(f.requested == ['https://javgg.net/'],
+       f'homepage probed once: {f.requested}')
+report(len(got) == 3, f'only icon links kept, stylesheet/profile dropped: {got}')
+report(bool(got) and got[0] ==
+       'https://javgg.net/wp-content/uploads/2021/03/cropped-logo-32.png',
+       f'rel="icon" wins and is resolved to an absolute URL: {got[0] if got else None}')
+report(len(got) > 1 and got[1] == 'https://cdn.javgg.net/old.ico',
+       f"single-quoted 'shortcut icon' kept, absolute href untouched: "
+       f'{got[1] if len(got) > 1 else None}')
+report(len(got) > 2 and got[2].endswith('cropped-logo-180.png'),
+       f'apple-touch-icon ranked last: {got[2] if len(got) > 2 else None}')
+
+h = FaviconStub('<html><head><title>x</title></head></html>')
+report(h._favicon_urls_declared_in_html('eroticmv.com', {}) == [],
+       'a page with no <link> tags yields no declared icons')
+
+g = FaviconStub('<html><link rel="icon" href="a.png?x=1&amp;y=2"></html>')
+report(g._favicon_urls_declared_in_html('eroticmv.com', {}) ==
+       ['https://eroticmv.com/a.png?x=1&y=2'],
+       f'HTML entities in href are decoded: '
+       f'{g._favicon_urls_declared_in_html("eroticmv.com", {})}')
+
+for tag, attr, want in [
+    ('<link rel="icon" href="a.png">', 'href', 'a.png'),
+    ("<link rel='icon' href='a.png'>", 'href', 'a.png'),
+    ('<link rel=icon href=a.png>', 'href', 'a.png'),
+    ('<link rel="icon" href="a.png">', 'rel', 'icon'),
+    ('<link rel="icon">', 'href', ''),
+    ('<link href="a&amp;b.png" rel="icon">', 'href', 'a&b.png'),
+]:
+    got_attr = FaviconStub('') ._favicon_tag_attr(tag, attr)
+    report(got_attr == want, f'attr {attr} in {tag!r} -> {got_attr!r}', f'(want {want!r})')
 
 print()
 print('FAILURES:', FAILS)
