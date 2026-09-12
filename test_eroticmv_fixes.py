@@ -2,7 +2,11 @@
 
 Nothing here re-implements the logic: each function body is lifted verbatim
 out of main.py by AST and exec'd, so a regression in main.py fails these.
-Runs without PyQt, mpv or network access.
+Runs without PyQt, mpv or network access. The app never imports this file —
+run it by hand to validate a copy of main.py.
+
+Covers: eroticmv playlist titles, exact 3s arrow seeks, the VOD-proxy routing
+that makes backward seeking work, and the Google search query cleanup.
 """
 import ast
 import os
@@ -262,6 +266,56 @@ for playback, source, want, label in [
 ]:
     got = p._hls_needs_vod_playlist_proxy(playback, source)
     report(got is want, f'{label} -> {got}', f'(want {want})')
+
+# ── 4. Google search query must not carry the file extension ─────────────────
+def lift_module_attr(attr_name):
+    for item in TREE.body:
+        if isinstance(item, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == attr_name
+                for t in item.targets):
+            mod = ast.Module(body=[item], type_ignores=[])
+            ast.fix_missing_locations(mod)
+            exec(compile(mod, f'<module.{attr_name}>', 'exec'), G)
+            return G[attr_name]
+    raise AssertionError(f'module-level {attr_name} not found in main.py')
+
+
+for _ext_tuple in ('VIDEO_EXTENSIONS', 'AUDIO_EXTENSIONS',
+                   'IMAGE_EXTENSIONS', 'ARCHIVE_EXTENSIONS'):
+    lift_module_attr(_ext_tuple)
+
+
+class SearchStub:
+    _strip_seen_display_prefix = lift('VideoPlayer', '_strip_seen_display_prefix')
+    _google_search_query_for_name = lift(
+        'VideoPlayer', '_google_search_query_for_name')
+    _SEARCH_QUERY_STRIPPED_EXTENSIONS = lift_attr(
+        'VideoPlayer', '_SEARCH_QUERY_STRIPPED_EXTENSIONS')
+
+
+q = SearchStub()
+for raw, want, label in [
+    ('Some Movie.mp4', 'Some Movie', 'the reported bug'),
+    ('Some Movie.MP4', 'Some Movie', 'extension is case-insensitive'),
+    ('Some Movie.mkv', 'Some Movie', 'mkv stripped too'),
+    ('Some Movie.webm', 'Some Movie', 'webm stripped too'),
+    ('- Some Movie.mp4', 'Some Movie', 'seen marker AND extension'),
+    ('Movie.1080p.mp4', 'Movie.1080p', 'only the LAST extension goes'),
+    ('Chapter.cbz', 'Chapter', 'archive extension'),
+    ('Dressage (1986)', 'Dressage (1986)', 'clean title untouched'),
+    ('Mr. Robot', 'Mr. Robot', 'a dot inside a title is not eaten'),
+    ('  Some   Movie  ', 'Some Movie', 'whitespace collapsed'),
+    ('.mp4', '', 'a bare extension yields nothing to search'),
+    ('', '', 'empty stays empty'),
+]:
+    got = q._google_search_query_for_name(raw)
+    report(got == want, f'search {raw!r} -> {got!r}  [{label}]', f'(want {want!r})')
+
+from urllib.parse import quote_plus as _qp
+for raw in ('Some Movie.mp4', '- Some Movie.mkv'):
+    url = 'https://www.google.com/search?q=' + _qp(q._google_search_query_for_name(raw))
+    report('mp4' not in url.lower() and 'mkv' not in url.lower(),
+           f'query URL is extension-free: {url}')
 
 print()
 print('FAILURES:', FAILS)

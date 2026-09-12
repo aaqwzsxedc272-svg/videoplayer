@@ -14322,6 +14322,44 @@ try {
             except Exception:
                 return False
 
+    # Extensions removed from a playlist name before it is used as a web
+    # search query. A row's display name is a FILENAME, so local videos
+    # arrive here as "Some Movie.mp4" and Google was searched for the
+    # extension too, which biases results toward file hosts instead of the
+    # title. Same four lists the URL-stem fallback below already used.
+    _SEARCH_QUERY_STRIPPED_EXTENSIONS = (
+        VIDEO_EXTENSIONS + AUDIO_EXTENSIONS + IMAGE_EXTENSIONS + ARCHIVE_EXTENSIONS
+    )
+
+    def _google_search_query_for_name(self, name):
+        """Turn a playlist display name into a clean search query.
+
+        Drops the two pieces of display-only decoration that leak into the
+        Google query: the "- " seen marker prefix and a trailing media /
+        archive extension. Only ONE trailing known extension is removed, so
+        titles that legitimately end in a dot-word ("Mr. Robot",
+        "Dressage (1986)") are untouched.
+        """
+        text = str(name or '')
+        try:
+            text = self._strip_seen_display_prefix(text)
+        except Exception:
+            text = re.sub(r'^\s*-\s+', '', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        if not text:
+            return ''
+        try:
+            pattern = (
+                r'\.(?:'
+                + '|'.join(re.escape(ext.lstrip('.'))
+                           for ext in self._SEARCH_QUERY_STRIPPED_EXTENSIONS)
+                + r')$'
+            )
+            text = re.sub(pattern, '', text, flags=re.IGNORECASE).strip()
+        except Exception:
+            pass
+        return text
+
     def search_playlist_items_in_google(self, rows=None):
         """Open one Google search per selected playlist item, all as tabs in
         ONE Brave window — the user's real/main profile, exactly like the
@@ -14356,15 +14394,15 @@ try {
         seen_names = set()
         for row in rows:
             path = playlist[row]
-            name = self._get_playlist_name_for_path(path)
-            name = str(name or '').strip()
+            # The stored/display name is cleaned the same way as the
+            # filename fallback, so an extension never reaches the query
+            # whichever branch supplied the name.
+            name = self._google_search_query_for_name(
+                self._get_playlist_name_for_path(path))
             if not name:
                 # Fall back to the filename/URL stem for items with no stored name.
                 base = str(path).rstrip('/').split('/')[-1].split('\\')[-1]
-                name = re.sub(r'\.(?:' + '|'.join(ext.lstrip('.') for ext in
-                                                  VIDEO_EXTENSIONS + AUDIO_EXTENSIONS + IMAGE_EXTENSIONS + ARCHIVE_EXTENSIONS)
-                              + r')$', '', base, flags=re.IGNORECASE).strip()
-            name = re.sub(r'\s+', ' ', name).strip()
+                name = self._google_search_query_for_name(base)
             if not name:
                 continue
             key = name.lower()
