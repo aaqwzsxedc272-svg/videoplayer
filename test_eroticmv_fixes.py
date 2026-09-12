@@ -384,6 +384,69 @@ for tag, attr, want in [
     got_attr = FaviconStub('') ._favicon_tag_attr(tag, attr)
     report(got_attr == want, f'attr {attr} in {tag!r} -> {got_attr!r}', f'(want {want!r})')
 
+# ── 6. favicon domain: a CDN row must ask the SITE for its icon ──────────────
+class SiteDomainStub:
+    _JAV_SITE_TOKENS = lift_attr('VideoPlayer', '_JAV_SITE_TOKENS')
+    _is_jav_site_host = lift('VideoPlayer', '_is_jav_site_host')
+    _jav_site_domain_for_host = lift('VideoPlayer', '_jav_site_domain_for_host')
+    _favicon_domains_for_entry = lift('VideoPlayer', '_favicon_domains_for_entry')
+
+    def __init__(self, site_url='', active_mirror=''):
+        self._site_url = site_url
+        self._active_mirror = active_mirror
+
+    # Row-identity lookups are stubbed; the domain maths under test is real.
+    def _jav_site_url_for_entry(self, entry):
+        return self._site_url
+
+    def _active_mirror_for_entry(self, entry):
+        return self._active_mirror
+
+    def _favicon_brand_domain_for_host(self, host):
+        return ''
+
+    def _favicon_hoster_brand_from_context(self, entry):
+        return ''
+
+    def _favicon_host_domain_for_entry(self, entry):
+        return ''
+
+
+d = SiteDomainStub()
+for host, want in [
+    ('vidcdn2.eroticmv.com', 'eroticmv.com'),
+    ('vidcdn.eroticmv.com', 'eroticmv.com'),
+    ('eroticmv.com', 'eroticmv.com'),
+    ('www.eroticmv.com', 'eroticmv.com'),
+    ('eroticmv.net', 'eroticmv.net'),
+    ('javgg.net', 'javgg.net'),
+    ('roshy.tv', 'roshy.tv'),
+    ('cdn.roshy.tv', 'roshy.tv'),
+    ('jav.guru', 'jav.guru'),
+    ('sextb.net', 'sextb.net'),
+    ('javhd.today', 'javhd.today'),
+    ('eporner.com', 'eporner.com'),
+    ('vid-eporner.com', ''),
+    ('doodstream.com', ''),
+    ('', ''),
+]:
+    got_dom = d._jav_site_domain_for_host(host)
+    report(got_dom == want, f'site domain {host!r} -> {got_dom!r}', f'(want {want!r})')
+
+CDN_ROW = 'https://vidcdn2.eroticmv.com/dat1/dressage/dressage.m3u8'
+site, hoster = SiteDomainStub()._favicon_domains_for_entry(CDN_ROW)
+report(site == 'eroticmv.com',
+       f'CDN row with no harvested page still asks the site: {site!r}')
+
+site, hoster = SiteDomainStub(
+    site_url='https://eroticmv.com/watch/dressage-1986'
+)._favicon_domains_for_entry(CDN_ROW)
+report(site == 'eroticmv.com',
+       f'harvested page host wins for the site icon: {site!r}')
+
+site, hoster = SiteDomainStub()._favicon_domains_for_entry('https://javgg.net/v/abc123')
+report(site == 'javgg.net', f'javgg row unchanged: {site!r}')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

@@ -21862,6 +21862,37 @@ try {
             return bare in ('eporner.com', 'eporner.eu')
         return any(t in host for t in self._JAV_SITE_TOKENS if t != 'eporner')
 
+    def _jav_site_domain_for_host(self, host):
+        """Registrable jav-site domain for *host*, or '' when it isn't one.
+
+        eroticmv rows point at the CDN (vidcdn2.eroticmv.com) once the
+        base64 hostname is unwrapped, and _is_jav_site_host matches that on
+        a substring test — but a bare CDN host serves no website and no
+        favicon. The icon belongs to the site (eroticmv.com), so collapse
+        the host to the domain the site token names.
+        """
+        host = str(host or '').lower().strip('.')
+        if not host:
+            return ''
+        bare = host[4:] if host.startswith('www.') else host
+        if not self._is_jav_site_host(bare):
+            return ''
+        if 'eporner' in bare:
+            return bare if bare in ('eporner.com', 'eporner.eu') else ''
+        labels = bare.split('.')
+        for token in self._JAV_SITE_TOKENS:
+            if token == 'eporner' or token not in bare:
+                continue
+            if '.' in token:
+                # The token already names a registrable domain (roshy.tv,
+                # jav.guru, sextb.net, javhd.today) — accept it only when
+                # the host really is that domain or a subdomain of it.
+                if bare == token or bare.endswith('.' + token):
+                    return token
+                continue
+            return '.'.join(labels[-2:]) if len(labels) >= 2 else bare
+        return ''
+
     def _jav_identity_key(self, url):
         try:
             return self._canonicalize_remote_source_url(
@@ -22064,14 +22095,25 @@ try {
                 hoster = self._favicon_hoster_brand_from_context(entry)
             if not hoster:
                 hoster = self._favicon_brand_domain_for_host(entry_host)
-            return entry_host, (hoster or '')
+            # The row URL is not always the site: an eroticmv row points at
+            # vidcdn2.eroticmv.com once the base64 hostname is unwrapped,
+            # and a CDN host has no favicon to fetch. Prefer the harvested
+            # page's host, then the registrable site domain the host names.
+            site_domain = ''
+            if site_host:
+                site_domain = self._jav_site_domain_for_host(site_host) or site_host
+            if not site_domain:
+                site_domain = (self._jav_site_domain_for_host(entry_host)
+                               or entry_host)
+            return site_domain, (hoster or '')
         if site_host:
             # R57: after a mirror switch the row URL is the hoster
             # (emturbovid / vidara / dood / …). Keep the jav-site icon
             # and pair it with THIS hoster's icon.
             hoster = self._favicon_brand_domain_for_host(entry_host) \
                 or self._favicon_hoster_brand_from_context(entry)
-            return site_host, (hoster or '')
+            return (self._jav_site_domain_for_host(site_host) or site_host), \
+                (hoster or '')
         return '', self._favicon_host_domain_for_entry(entry)
 
     def _favicon_host_domain_for_entry(self, entry):
