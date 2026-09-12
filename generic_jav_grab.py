@@ -9,6 +9,7 @@ import re
 import traceback
 from html import unescape
 from urllib.parse import urlparse, urljoin
+import base64
 
 try:
     import curl_cffi.requests as cfreq
@@ -87,6 +88,25 @@ def grab_all(url: str):
             
         html = r.text
         result['title'] = _extract_title(html)
+
+        def _unwrap_b64_host(u):
+            try:
+                parsed = urlparse(u)
+                host = (parsed.netloc or '').split('@')[-1]
+                blob = host
+                for suffix in ('.m3u8', '.m3u', '.mp4'):
+                    if blob.lower().endswith(suffix):
+                        blob = blob[: -len(suffix)]
+                        break
+                blob = blob.strip().rstrip('=')
+                if blob.startswith('aHR0c'):
+                    pad = blob + '=' * ((4 - len(blob) % 4) % 4)
+                    decoded = base64.b64decode(pad).decode('utf-8', errors='ignore').strip()
+                    if decoded.startswith(('http://', 'https://')):
+                        return decoded
+            except Exception:
+                pass
+            return u
         
         streams = set()
         
@@ -189,7 +209,7 @@ def grab_all(url: str):
         final_streams.discard(page_url_norm)
         final_streams.discard(page_url_norm + '/')
 
-        result['streams'] = list(final_streams)
+        result['streams'] = [_unwrap_b64_host(u) for u in final_streams]
         
     except Exception as e:
         result['error'] = f"Exception: {str(e)}"

@@ -22245,10 +22245,46 @@ try {
         _cache[_input_key] = result
         return result
 
+    def _unwrap_base64_hostname_media_url(self, value):
+        """eroticmv (and similar) store the real HTTPS m3u8 as
+        http://<base64(https://vidcdn.../file.m3u8)>.m3u8 — a hostname that
+        does not exist. Unwrap it so mpv fetches the CDN URL."""
+        raw = str(value or '').strip()
+        try:
+            parsed = urlparse(raw)
+        except Exception:
+            return raw
+        host = (parsed.netloc or '').split('@')[-1]
+        if not host:
+            return raw
+        blob = host
+        for suffix in ('.m3u8', '.m3u', '.mp4', '.mpd'):
+            if blob.lower().endswith(suffix):
+                blob = blob[: -len(suffix)]
+                break
+        blob = blob.strip().rstrip('=')
+        if not blob.startswith('aHR0c'):
+            return raw
+        pad = blob + '=' * ((4 - len(blob) % 4) % 4)
+        try:
+            decoded = base64.b64decode(pad).decode('utf-8', errors='ignore').strip()
+        except Exception:
+            return raw
+        decoded = re.sub(r'[\x00-\x1f\x7f]', '', decoded).strip()
+        if decoded.startswith(('http://', 'https://')) and '://' in decoded[4:]:
+            return decoded
+        return raw
+
     def _canonicalize_remote_source_url_uncached(self, value):
         raw = self._sanitize_url(str(value or ''))
         if not self._is_remote_url(raw):
             return raw.strip()
+        try:
+            unwrapped = self._unwrap_base64_hostname_media_url(raw)
+            if unwrapped and unwrapped != raw and self._is_remote_url(unwrapped):
+                raw = unwrapped
+        except Exception:
+            pass
 
         # Repeatedly unravel redirect wrappers (e.g. simpcity.cr/redirect/...)
         unravelled = True
@@ -27199,6 +27235,9 @@ try {
             media_host = (parsed_media.netloc or '').lower()
             origin = f"{parsed_page.scheme}://{parsed_page.netloc}" if parsed_page.scheme and parsed_page.netloc else ''
             same_origin = bool(page_host and media_host and page_host == media_host)
+            if 'eroticmv.com' in media_host:
+                headers.setdefault('Referer', 'https://eroticmv.com/')
+                headers.setdefault('Origin', 'https://eroticmv.com')
             if origin and media_host and not same_origin:
                 headers.setdefault('Origin', origin)
             media_path = (parsed_media.path or '').lower()
