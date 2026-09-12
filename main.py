@@ -3422,15 +3422,31 @@ class MpvMediaPlayerAdapter(QObject):
                 _target_path = _target_parsed.path.lower().rstrip('/')
                 _is_direct_stream = _target_path.endswith(('.m3u8', '.m3u', '.mpd'))
                 _target_host = _target_parsed.netloc.lower()
+                if 'eporner' in _target_host:
+                    # ffmpeg/mpv rejects Eporner's cert chain (tls 0A000086)
+                    # even though Python urllib fetched the same host fine.
+                    self._tls_verify = False
+                    self._apply_tls_verify_option()
                 _is_fileditch_page = 'fileditch' in _target_host and 'freakingfileditch' not in _target_host
                 _query_media_name = _query_media_name_hint(target)
                 _query_points_to_stream = _query_media_name.endswith(('.m3u8', '.m3u', '.mpd'))
                 _query_points_to_media = _query_media_name.endswith(VIDEO_EXTENSIONS + AUDIO_EXTENSIONS)
                 # Bunkr CDN and GoFile CDN URLs are direct media links — yt-dlp
                 # must NOT be invoked on them (it fails with 403 and blocks playback).
-                _is_bunkr_cdn = any(x in _target_host for x in ('cdn.cr', 'bunkr', 'bkr'))
+                # Do not treat bunkr.cr /f|/v|/a/ HTML share pages as CDN just
+                # because the host contains "bunkr" and the slug ends in .mp4.
+                _is_bunkr_share = (
+                    'bunkr' in _target_host
+                    and bool(re.match(r'^/(?:a|f|v)/', _target_parsed.path or '', re.IGNORECASE))
+                )
+                _is_bunkr_cdn = (
+                    (not _is_bunkr_share)
+                    and any(x in _target_host for x in ('cdn.cr', 'bunkr', 'bkr'))
+                )
                 _is_gofile_cdn = 'gofile' in _target_host or 'srv' in _target_host
                 _is_direct_mp4 = _target_path.endswith(('.mp4', '.mkv', '.webm', '.mov', '.avi'))
+                if _is_bunkr_share:
+                    _is_direct_mp4 = False
                 _is_streamtape_direct = (
                     '/get_video' in _target_path
                     and any(x in _target_host for x in ('streamtape', 'strtape', 'streamadblock', 'stape.'))
@@ -14050,7 +14066,10 @@ try {
         # ``[GoFile](https://gofile.io/d/abc123)``.  Extract its destination
         # before the generic URL scan below; otherwise the closing ``](``
         # becomes part of the URL and QUrl rejects it.
-        markdown_link = re.search(r'\[[^\]]*\]\((https?://[^\s)]+)\)', cleaned, re.IGNORECASE)
+        # Allow parentheses inside the destination URL (bunkr /f/ filenames
+        # often include dates like ``(13-02-2022)``). The previous ``[^\s)]+``
+        # capture stopped at the first ``)`` and truncated the slug.
+        markdown_link = re.search(r'\[[^\]]*\]\((https?://[^\s]+)\)', cleaned, re.IGNORECASE)
         if markdown_link:
             cleaned = markdown_link.group(1).strip()
         # If surrounding text still survived (chat copy/paste, labels, etc.),
@@ -21678,6 +21697,10 @@ try {
         host = str(host or '').lower()
         if not host:
             return ''
+        # vid-s2-…-cdn.eporner.com contains the dood token "d-s" (vi**d-s**2).
+        # Check Eporner first so those CDN rows keep the eporner icon.
+        if 'eporner' in host:
+            return 'eporner.com'
         for brand, tokens in self._FAVICON_BRAND_DOMAINS:
             for token in tokens:
                 if token in host:
@@ -21702,7 +21725,11 @@ try {
         host = str(host or '').lower()
         if not host:
             return False
-        return any(t in host for t in self._JAV_SITE_TOKENS)
+        if 'eporner' in host:
+            # Watch pages only — not vid-* / gvideo CDN hosts.
+            bare = host[4:] if host.startswith('www.') else host
+            return bare in ('eporner.com', 'eporner.eu')
+        return any(t in host for t in self._JAV_SITE_TOKENS if t != 'eporner')
 
     def _jav_identity_key(self, url):
         try:
@@ -29202,6 +29229,122 @@ try {
         except Exception:
             return None
 
+    def _bunkr_is_share_page(self, url):
+        """True for bunkr HTML file/album pages (/f /v /a), not CDN media hosts."""
+        try:
+            parsed = urlparse(str(url or '').strip())
+        except Exception:
+            return False
+        host = (parsed.netloc or '').lower()
+        if 'bunkr' not in host:
+            return False
+        return bool(re.match(r'^/(?:a|f|v)/[^/?#]+', parsed.path or '', re.IGNORECASE))
+
+    def _bunkr_page_origin(self, page_url):
+        try:
+            parsed = urlparse(str(page_url or '').strip())
+        except Exception:
+            parsed = None
+        if parsed is not None and parsed.scheme and parsed.netloc:
+            return f'{parsed.scheme}://{parsed.netloc}'
+        return 'https://bunkr.cr'
+
+    def _bunkr_quote_page_url(self, page_url):
+        """Percent-encode path characters that bunkr filenames often contain.
+
+        Parentheses, spaces and similar characters in ``/f/Name-(date)-id.mp4``
+        break urllib and some CDNs if left raw. Query strings (signed token)
+        are preserved as-is.
+        """
+        text = str(page_url or '').strip()
+        if not text:
+            return text
+        try:
+            parsed = urlparse(text)
+        except Exception:
+            return text
+        path = parsed.path or ''
+        if not path:
+            return text
+        encoded_path = quote(unquote(path), safe='/:@')
+        return urlunparse((
+            parsed.scheme,
+            parsed.netloc,
+            encoded_path,
+            parsed.params,
+            parsed.query,
+            parsed.fragment,
+        ))
+
+    def _bunkr_file_slugs(self, page_url, html=''):
+        """Candidate slugs for ``POST /api/vs``, most-specific first.
+
+        File pages look like ``/f/{pretty-name}-{id}.mp4``. The API wants the
+        short trailing id (e.g. ``jK4vfy6L``), not the full filename which may
+        include parentheses and a ``.mp4`` suffix.
+        """
+        slugs = []
+        html = html or ''
+        js_slug = re.search(
+            r'(?:var|let|const)\s+jsSlug\s*=\s*[\'"]([^\'"]+)[\'"]',
+            html,
+            re.IGNORECASE,
+        )
+        if js_slug:
+            slugs.append(js_slug.group(1).strip())
+        for match in re.finditer(r'["\']slug["\']\s*:\s*["\']([^"\']+)["\']', html):
+            slugs.append(match.group(1).strip())
+        try:
+            path = unquote(urlparse(str(page_url or '')).path or '')
+        except Exception:
+            path = ''
+        path_match = re.match(r'^/(?:f|v)/([^/?#]+)', path, re.IGNORECASE)
+        if path_match:
+            segment = path_match.group(1).strip()
+            short = re.search(
+                r'[-_]([A-Za-z0-9]{7,12})(?:\.[A-Za-z0-9]{2,5})?$',
+                segment,
+            )
+            if short:
+                slugs.append(short.group(1))
+            no_ext = re.sub(r'\.[A-Za-z0-9]{2,5}$', '', segment)
+            if no_ext and no_ext != segment:
+                slugs.append(no_ext)
+            slugs.append(segment)
+        seen = set()
+        ordered = []
+        for slug in slugs:
+            if slug and slug not in seen:
+                seen.add(slug)
+                ordered.append(slug)
+        return ordered
+
+    def _bunkr_direct_playback_result(self, cdn_url, page_url, title=None, size_bytes=None, size_text=None):
+        """Hand a bunkr CDN URL to libmpv without probing (CDN 403s Python)."""
+        cdn_url = self._normalize_extracted_media_url(cdn_url, page_url) or str(cdn_url or '').strip()
+        if cdn_url:
+            cdn_url = cdn_url.replace('\\/', '/')
+        if not cdn_url:
+            return None
+        cdn_url = self._bunkr_quote_page_url(cdn_url)
+        headers = self._media_playback_headers(page_url, cdn_url)
+        headers['Referer'] = page_url
+        resolved = {
+            'playback_url': cdn_url,
+            'headers': headers,
+            'title': self._clean_remote_title(title),
+            'resolver_provider': 'bunkr',
+            'resolved_at_ms': int(time.time() * 1000),
+        }
+        if size_bytes:
+            resolved['size_bytes'] = size_bytes
+        if size_text:
+            resolved['size_text'] = size_text
+        resolved['title'] = self._ensure_remote_title_extension(
+            resolved.get('title'), 'video/mp4', cdn_url, '.mp4',
+        )
+        return resolved
+
     def _resolve_bunkr_api_payload(self, api_url, payload, referer, title=None, size_bytes=None, size_text=None):
         try:
             import requests
@@ -29232,6 +29375,12 @@ try {
         print(f"[BUNKR][API] CDN candidate: {candidate[:80]}")
         resolved = self._probe_remote_media_candidate(candidate, referer=referer, title=title)
         print(f"[BUNKR][API] probe: {'OK' if resolved else 'FAILED'}")
+        if not resolved:
+            # Bunkr CDNs typically 403 Python user-agents; libmpv can still play.
+            print("[BUNKR][API] using CDN URL without probe for libmpv")
+            resolved = self._bunkr_direct_playback_result(
+                candidate, referer, title=title, size_bytes=size_bytes, size_text=size_text,
+            )
         if resolved:
             if size_bytes:
                 resolved['size_bytes'] = size_bytes
@@ -29264,19 +29413,35 @@ try {
         page_url = source_url
         html = ''
         title = None
+        page_origin = self._bunkr_page_origin(source_url)
         try:
             _bunkr_session = self._get_browser_cookies_session(domains=['bunkr'])
-            response = _bunkr_session.get(
-                source_url,
-                headers=self._stream_request_headers('https://bunkr.cr/'),
-                timeout=20,
-                allow_redirects=True,
-            )
-            print(f"[BUNKR] Page fetch: HTTP {response.status_code} -> {response.url}")
-            if response.ok:
+        except Exception:
+            _bunkr_session = requests.Session()
+        fetch_headers = self._stream_request_headers(page_origin + '/')
+        fetch_headers['Origin'] = page_origin
+        fetch_urls = []
+        quoted_url = self._bunkr_quote_page_url(source_url)
+        for candidate_url in (quoted_url, source_url):
+            if candidate_url and candidate_url not in fetch_urls:
+                fetch_urls.append(candidate_url)
+        try:
+            response = None
+            for fetch_url in fetch_urls:
+                response = _bunkr_session.get(
+                    fetch_url,
+                    headers=fetch_headers,
+                    timeout=20,
+                    allow_redirects=True,
+                )
+                print(f"[BUNKR] Page fetch: HTTP {response.status_code} -> {response.url}")
+                if response.ok:
+                    break
+            if response is not None and response.ok:
                 page_url = response.url or source_url
                 html = response.text or ''
-                print(f"[BUNKR] HTML len={len(html)} NUXT={'__NUXT_DATA__' in html} jsSlug={'jsSlug' in html}")
+                page_origin = self._bunkr_page_origin(page_url)
+                print(f"[BUNKR] HTML len={len(html)} NUXT={'__NUXT_DATA__' in html} jsSlug={'jsSlug' in html} jsCDN={'jsCDN' in html}")
                 title = self._clean_remote_title(self._html_page_title(html))
                 if not title or len(title) < 5:
                     title_patterns = (
@@ -29291,8 +29456,8 @@ try {
                             if candidate_title:
                                 title = candidate_title
                                 break
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[BUNKR] Page fetch exception: {e}")
 
         page_parsed = urlparse(page_url)
         size_bytes = None
@@ -29312,28 +29477,38 @@ try {
         # --- Strategy 0.5: Direct HTML regex search for CDN links (New 2025 Bunkr layout) ---
         # Since Bunkr removed NUXT, the video source is often embedded in the raw HTML
         # inside a JavaScript variable like `var jsCDN = "https:\/\/...";`
-        js_cdn_match = re.search(r'var\s+jsCDN\s*=\s*["\']([^"\']+)["\']', html)
+        js_cdn_match = re.search(
+            r'(?:var|let|const)\s+jsCDN\s*=\s*["\']([^"\']+)["\']',
+            html,
+            re.IGNORECASE,
+        )
         if js_cdn_match:
             cdn_url = self._normalize_extracted_media_url(js_cdn_match.group(1), page_url)
             if not cdn_url:
                 cdn_url = js_cdn_match.group(1).replace(r'\/', '/')
             print(f"[BUNKR] Strategy 0.5 (jsCDN): {cdn_url}")
-            
+
             # --- New 2025-05 Bunkr Signature Mechanism ---
             # Bunkr now requires URLs to be signed via glb-apisign.cdn.cr
-            sign_url_match = re.search(r'var\s+signUrl\s*=\s*["\']([^"\']+)["\']', html)
+            sign_url_match = re.search(
+                r'(?:var|let|const)\s+signUrl\s*=\s*["\']([^"\']+)["\']',
+                html,
+                re.IGNORECASE,
+            )
+            signed_ok = False
             if sign_url_match:
                 sign_url = self._normalize_extracted_media_url(sign_url_match.group(1), page_url)
                 if not sign_url:
                     sign_url = sign_url_match.group(1).replace(r'\/', '/')
                 cdn_parsed = urlparse(cdn_url)
                 try:
-                    from urllib.parse import quote
-                    # Bunkr requires Origin and Referer for the signing API
-                    sign_hdrs = self._stream_request_headers('https://bunkr.si/')
-                    sign_hdrs['Origin'] = 'https://bunkr.si'
-                    sign_req_url = f"{sign_url}?path={quote(cdn_parsed.path)}"
-                    print(f"[BUNKR] Fetching signature: {sign_req_url}")
+                    # Sign against the actual page origin (bunkr.cr, bunkr.si, …),
+                    # not a hardcoded mirror. Wrong Origin/Referer 403s the token
+                    # and mpv then fails even though the browser page works.
+                    sign_hdrs = self._stream_request_headers(page_origin + '/')
+                    sign_hdrs['Origin'] = page_origin
+                    sign_req_url = f"{sign_url}?path={quote(unquote(cdn_parsed.path or ''), safe='/')}"
+                    print(f"[BUNKR] Fetching signature: {sign_req_url} origin={page_origin}")
                     sign_resp = _bunkr_session.get(sign_req_url, headers=sign_hdrs, timeout=10)
                     if sign_resp.ok:
                         sign_data = sign_resp.json()
@@ -29341,32 +29516,24 @@ try {
                         ex = sign_data.get('ex')
                         if token and ex:
                             cdn_url = f"{cdn_url}?token={token}&ex={ex}"
-                            print(f"[BUNKR] Signed URL successfully.")
+                            signed_ok = True
+                            print("[BUNKR] Signed URL successfully.")
                     else:
                         print(f"[BUNKR] Signature request failed: {sign_resp.status_code}")
                 except Exception as e:
                     print(f"[BUNKR] Error signing URL: {e}")
+                if not signed_ok:
+                    print("[BUNKR] Signature required but failed; trying remaining strategies")
+                    cdn_url = None
 
-            # Skip probing for Bunkr because their CDNs block Python requests (HTTP 403)
-            # but allow libmpv. We trust the jsCDN variable directly.
-            resolved = {
-                'playback_url': cdn_url,
-                'headers': {
-                    'Referer': page_url,
-                    'User-Agent': (
-                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0 Safari/537.36'
-                    ),
-                },
-                'title': self._clean_remote_title(title)
-            }
-            if size_bytes:
-                resolved['size_bytes'] = size_bytes
-            if size_text:
-                resolved['size_text'] = size_text
-            resolved['title'] = self._ensure_remote_title_extension(
-                resolved['title'], 'video/mp4', cdn_url, '.mp4')
-            return resolved
+            if cdn_url:
+                # Skip probing for Bunkr because their CDNs block Python requests
+                # (HTTP 403) but allow libmpv. We trust the jsCDN variable directly.
+                resolved = self._bunkr_direct_playback_result(
+                    cdn_url, page_url, title=title, size_bytes=size_bytes, size_text=size_text,
+                )
+                if resolved:
+                    return resolved
         else:
             print("[BUNKR] Strategy 0.5: jsCDN variable not found in HTML")
 
@@ -29379,6 +29546,11 @@ try {
             cdn_referer = page_url  # use page as referer for CDN
             resolved = self._probe_remote_media_candidate(cdn_url, referer=cdn_referer, title=title)
             print(f"[BUNKR] CDN probe result: {'OK' if resolved else 'FAILED'}")
+            if not resolved:
+                print("[BUNKR] NUXT CDN probe failed; handing URL to libmpv")
+                resolved = self._bunkr_direct_playback_result(
+                    cdn_url, page_url, title=title, size_bytes=size_bytes, size_text=size_text,
+                )
             if resolved:
                 if size_bytes:
                     resolved['size_bytes'] = size_bytes
@@ -29390,25 +29562,21 @@ try {
                 return resolved
 
         # --- Strategy 2: /api/vs slug endpoint (may be rate-limited/blocked) ---
-        slug = None
-        slug_match = re.search(r'\bjsSlug\s*=\s*["\']([^"\']+)["\']', html, re.IGNORECASE)
-        if slug_match:
-            slug = slug_match.group(1)
-        if not slug:
-            path_match = re.match(r'^/(?:f|v)/([^/?#]+)', page_parsed.path or '', re.IGNORECASE)
-            if path_match:
-                slug = unquote(path_match.group(1))
-        print(f"[BUNKR] Strategy 2 (API/vs slug): {slug or 'no slug'}")
-        if slug:
+        slugs = self._bunkr_file_slugs(page_url, html)
+        print(f"[BUNKR] Strategy 2 (API/vs slugs): {slugs or 'no slug'}")
+        if slugs:
             api_urls = [urljoin(page_url, '/api/vs')]
             for fallback in ('https://bunkr.cr/api/vs', 'https://bunkr.fi/api/vs', 'https://bunkr.si/api/vs'):
                 if fallback not in api_urls:
                     api_urls.append(fallback)
-            for api_url in api_urls:
-                resolved = self._resolve_bunkr_api_payload(api_url, {'slug': slug}, page_url, title, size_bytes, size_text)
-                print(f"[BUNKR]   {api_url}: {'OK' if resolved else 'failed'}")
-                if resolved:
-                    return resolved
+            for slug in slugs:
+                for api_url in api_urls:
+                    resolved = self._resolve_bunkr_api_payload(
+                        api_url, {'slug': slug}, page_url, title, size_bytes, size_text,
+                    )
+                    print(f"[BUNKR]   {api_url} slug={slug}: {'OK' if resolved else 'failed'}")
+                    if resolved:
+                        return resolved
 
         # --- Strategy 3: apidl.bunkr.ru file-id endpoint ---
         file_ids = []
@@ -38660,12 +38828,23 @@ try {
                 resolved = self._resolve_streamtape_source(source_url)
                 if not resolved:
                     resolved = self._resolve_stream_with_ytdlp(source_url, allow_mpv_ytdl=not force_direct_ytdlp)
-            elif any(t in host for t in ('eporner.com', 'eporner.eu')) and not any(host.startswith(p) for p in ('vid-', 'cdn.', 's1.', 's2.', 's3.', 's4.', 's5.', 's6.')):
-                # Eporner page URLs are now handled at the playlist-add stage
-                # via _prepare_eporner_playlist_entry (Playwright subprocess).
-                # If they slip through to here (e.g. direct set_media call),
-                # fall through to yt-dlp as a best-effort fallback.
-                resolved = self._resolve_stream_with_ytdlp(source_url, allow_mpv_ytdl=True)
+            elif any(t in host for t in ('eporner.com', 'eporner.eu')) and not any(host.startswith(p) for p in ('vid-', 'cdn.', 'gvideo.', 's1.', 's2.', 's3.', 's4.', 's5.', 's6.')):
+                prepared = self._prepare_eporner_playlist_entry(source_url)
+                if prepared and prepared.get('source_url'):
+                    resolved = {
+                        'playback_url': prepared['source_url'],
+                        'headers': prepared.get('headers') or {},
+                        'title': prepared.get('title') or '',
+                        'tls_verify': False,
+                        'resolver_provider': 'eporner',
+                        'resolved_at_ms': int(time.time() * 1000),
+                    }
+                    if prepared.get('eporner_source_url'):
+                        resolved['eporner_source_url'] = prepared['eporner_source_url']
+                else:
+                    resolved = self._resolve_stream_with_ytdlp(source_url, allow_mpv_ytdl=True)
+                    if resolved:
+                        resolved['tls_verify'] = False
             elif self._is_ytdlp_preferred_host(host):
                 # Eporner/Beeg CDN URLs (vid-*.eporner.com / cdn.beeg.com) are
                 # pre-signed, IP-bound direct mp4 links.  yt-dlp cannot extract
@@ -38676,17 +38855,18 @@ try {
                 _is_eporner_cdn_host = (
                     lower_path.endswith(('.mp4', '.webm', '.mkv', '.mov'))
                     and ('eporner' in host or 'beeg' in host)
-                    and any(host.startswith(p) for p in ('vid-', 'cdn.', 's1.', 's2.', 's3.', 's4.', 's5.', 's6.'))
+                    and (
+                        any(host.startswith(p) for p in ('vid-', 'cdn.', 'gvideo.', 's1.', 's2.', 's3.', 's4.', 's5.', 's6.'))
+                        or '-cdn.eporner' in host
+                    )
                 )
                 if _is_eporner_cdn_host:
-                    referer_page = getattr(self, '_gofile_last_requested_url', None) or source_url
-                    extra_headers = {}
-                    cookie_header = self._gofile_cookie_header()
-                    if cookie_header:
-                        extra_headers['Cookie'] = cookie_header
+                    # Signed vid-* URLs 403 if extra headers are added. mpv
+                    # still needs tls-verify=no (ffmpeg 0A000086).
                     resolved = {
                         'playback_url': source_url,
-                        'headers': self._media_playback_headers(referer_page, source_url, extra_headers),
+                        'headers': {},
+                        'tls_verify': False,
                         'resolver_provider': 'eporner_cdn_direct',
                         'resolved_at_ms': int(time.time() * 1000),
                     }
@@ -38719,7 +38899,12 @@ try {
 
         # Generic fallback for direct media links (e.g. static CDN files)
         if resolved is None and lower_path.endswith(VIDEO_EXTENSIONS + AUDIO_EXTENSIONS) and not self._is_fileditch_host(host):
-            if 'gofile.io' in host or 'gofile.to' in host:
+            if self._bunkr_is_share_page(source_url):
+                # /f/ slugs commonly end in .mp4 but are HTML pages. Playing
+                # the page URL as a file is what made bunkr.cr/f/...mp4 fail
+                # in-app while the same link worked in a browser.
+                print(f"[BUNKR] Skipping direct-file fallback for HTML share page {source_url[:160]}")
+            elif 'gofile.io' in host or 'gofile.to' in host:
                 # This is a GoFile CDN download link reached via the in-app
                 # browser. mpv makes its own separate HTTP request for it,
                 # so it needs the same Referer (the actual share page, not
@@ -38740,7 +38925,10 @@ try {
                     'headers': self._media_playback_headers(source_url, source_url),
                 }
         if resolved is None:
-            resolved = self._probe_remote_media_candidate(source_url)
+            if self._bunkr_is_share_page(source_url):
+                print("[BUNKR] Skipping generic media probe for HTML share page")
+            else:
+                resolved = self._probe_remote_media_candidate(source_url)
 
         # VOE mirror auto-detection: handle any VOE white-label domain NOT in
         # _is_voe_host (e.g. javlesbians.com, or any undiscovered mirror).
@@ -39478,8 +39666,13 @@ try {
         roshy_title = self._clean_remote_title((entry or {}).get('roshy_title'))
         eporner_title = self._clean_remote_title((entry or {}).get('eporner_title'))
         cached = {}
-        for key in ('playback_url', 'headers', 'title', 'roshy_title', 'roshy_source_url', 'eporner_title', 'eporner_source_url', 'origin_page', 'duration_ms', 'content_type', 'gofile_file_id', 'size_bytes', 'size_text', 'pre_resolved_playback_url', 'resolver_provider', 'resolved_at_ms', 'use_mpv_ytdl', 'variants', 'subtitle_tracks'):
+        for key in ('playback_url', 'headers', 'title', 'roshy_title', 'roshy_source_url', 'eporner_title', 'eporner_source_url', 'origin_page', 'duration_ms', 'content_type', 'gofile_file_id', 'size_bytes', 'size_text', 'pre_resolved_playback_url', 'resolver_provider', 'resolved_at_ms', 'use_mpv_ytdl', 'variants', 'subtitle_tracks', 'tls_verify'):
+            if key not in (entry or {}):
+                continue
             value = entry.get(key)
+            if key == 'tls_verify':
+                cached[key] = bool(value)
+                continue
             if value:
                 cached[key] = self._clean_remote_title(value) if key == 'title' else value
         for key in ('playback_url', 'headers', 'title', 'content_type', 'size_bytes'):
@@ -39671,14 +39864,20 @@ try {
     def _is_eporner_page_url(self, url):
         """True for top-level Eporner watch/video page URLs (not CDN hosts)."""
         try:
-            host = (urlparse(str(url or '')).netloc or '').lower()
+            parsed = urlparse(str(url or ''))
+            host = (parsed.netloc or '').lower()
+            path = (parsed.path or '').lower()
         except Exception:
             return False
         if not any(t in host for t in ('eporner.com', 'eporner.eu')):
             return False
-        # Exclude CDN subdomains — those are direct media links, not page URLs.
-        cdn_prefixes = ('vid-', 'cdn.', 's1.', 's2.', 's3.', 's4.', 's5.', 's6.')
-        return not any(host.startswith(p) for p in cdn_prefixes)
+        if host.startswith(('vid-', 'cdn.', 'gvideo.', 's1.', 's2.', 's3.', 's4.', 's5.', 's6.')):
+            return False
+        if '-cdn.eporner' in host or '/dload/' in path:
+            return False
+        if path.endswith(('.mp4', '.m3u8', '.webm', '.mpd')):
+            return False
+        return True
 
     def _prepare_eporner_playlist_entry(self, source_url):
         """Run eporner_m3u8_extractor.py --json <url> in a subprocess and return
@@ -39697,7 +39896,7 @@ try {
                 [sys.executable, extractor_path, source_url, '--json'],
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=150,
             )
         except _subprocess.TimeoutExpired:
             print('[EPORNER][PREP] extractor timed out')
@@ -39706,9 +39905,14 @@ try {
             print(f'[EPORNER][PREP] extractor error: {exc}')
             return None
 
+        stderr = (result.stderr or '').strip()
+        if stderr:
+            for line in stderr.splitlines()[-60:]:
+                print(f'[EPORNER][EXTRACT] {line}')
+
         stdout = (result.stdout or '').strip()
         if not stdout:
-            print(f'[EPORNER][PREP] extractor produced no output (stderr: {result.stderr[:300]})')
+            print(f'[EPORNER][PREP] extractor produced no output (stderr: {stderr[:300]})')
             return None
 
         try:
@@ -39737,22 +39941,49 @@ try {
 
         master_links = [u for u in all_links if _m3u8_fname(u).startswith('master')]
         index_links  = [u for u in all_links if _m3u8_fname(u).startswith('index')]
+        other_m3u8 = [
+            u for u in all_links
+            if '.m3u8' in u.lower() and u not in master_links and u not in index_links
+        ]
+        mp4_links = [u for u in all_links if _m3u8_fname(u).endswith('.mp4')]
 
-        ordered = master_links + index_links
+        def _mp4_rank(u):
+            match = re.search(r'(\d{3,4})p', u, re.IGNORECASE)
+            quality = int(match.group(1)) if match else -1
+            not_av1 = 0 if '-av1' in u.lower() else 1
+            return (quality, not_av1)
+
+        mp4_links = sorted(mp4_links, key=_mp4_rank, reverse=True)
+        # Progressive mp4 from /dload/ or /xhr/video plays without ads or a browser.
+        ordered = mp4_links + master_links + index_links + other_m3u8
         if not ordered:
-            print(f'[EPORNER][PREP] no master/index links found; all_links={all_links}')
+            print(f'[EPORNER][PREP] no playable links found; all_links={all_links}')
             return None
         primary_url = ordered[0]
         mirror_urls = ordered[1:]
 
-        print(f'[EPORNER][PREP] title={title!r}  primary={primary_url}  mirrors={mirror_urls}')
-        return {
+        print(f'[EPORNER][PREP] title={title!r}  primary={primary_url}  mirrors={len(mirror_urls)}')
+        entry = {
             'source_url': primary_url,
             'title': title,
             'eporner_title': title,
             'eporner_source_url': source_url,
             'mirrors': mirror_urls,
+            'origin_page': source_url,
         }
+        primary_host = (urlparse(primary_url).netloc or '').lower()
+        cdn_prefixes = ('vid-', 'cdn.', 's1.', 's2.', 's3.', 's4.', 's5.', 's6.')
+        if not any(primary_host.startswith(p) for p in cdn_prefixes):
+            # /dload/ and same-origin HLS need the watch page as Referer.
+            # vid-*.eporner.com signed MP4s 403 if extra headers are added.
+            entry['headers'] = {
+                'User-Agent': (
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                    '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+                ),
+                'Referer': source_url,
+            }
+        return entry
 
     def _prepare_urls_for_playlist_add(self, text, play_first=True, existing_remote_keys=None):
         urls = self._extract_urls_from_text(text)
@@ -48407,6 +48638,14 @@ try {
         cache = getattr(self, '_stream_resolution_cache', {})
         cached = dict(cache.get(current, {}) or {})
         cached_url = str(cached.get('playback_url') or '').strip()
+        if not cached_url:
+            current_path = ''
+            try:
+                current_path = (urlparse(str(current or '')).path or '').lower()
+            except Exception:
+                current_path = str(current or '').lower()
+            if current_path.endswith(VIDEO_EXTENSIONS + AUDIO_EXTENSIONS) or '/dload/' in current_path:
+                cached_url = str(current or '').strip()
         failed_url = str(playback_url or cached_url or '').strip()
         try:
             failed_parsed = urlparse(failed_url)
