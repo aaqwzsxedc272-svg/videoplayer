@@ -292,6 +292,8 @@ class SearchStub:
         'VideoPlayer', '_google_search_query_for_name')
     _SEARCH_QUERY_STRIPPED_EXTENSIONS = lift_attr(
         'VideoPlayer', '_SEARCH_QUERY_STRIPPED_EXTENSIONS')
+    _SEARCH_QUERY_SERIES_COUNTER_RE = lift_attr(
+        'VideoPlayer', '_SEARCH_QUERY_SERIES_COUNTER_RE')
 
 
 q = SearchStub()
@@ -446,6 +448,21 @@ report(site == 'eroticmv.com',
 
 site, hoster = SiteDomainStub()._favicon_domains_for_entry('https://javgg.net/v/abc123')
 report(site == 'javgg.net', f'javgg row unchanged: {site!r}')
+
+# The exact reported case: a linked series/sequel row's widget text.
+for raw, want, label in [
+    ('PrimalFetish Jasmine Grey Confronting Part 2.mp4  ·  2/3',
+     'PrimalFetish Jasmine Grey Confronting Part 2', 'THE REPORTED BUG'),
+    ('Some Movie.mp4 · 1/3', 'Some Movie', 'counter after extension'),
+    ('Some Movie · 2/3', 'Some Movie', 'counter with no extension'),
+    ('- Some Movie.mp4 · 2/3', 'Some Movie', 'seen marker + counter + ext'),
+    ('Movie.1080p.mkv · 3/3', 'Movie.1080p', 'keeps the quality tag'),
+    ('Half • 1/2', 'Half', 'bullet separator variant'),
+    ('Some Movie 1/2', 'Some Movie 1/2', 'no separator = real title, left alone'),
+    ('Dressage (1986) · 2/2', 'Dressage (1986)', 'clean title + counter'),
+]:
+    got = q._google_search_query_for_name(raw)
+    report(got == want, f'series {raw!r} -> {got!r}  [{label}]', f'(want {want!r})')
 
 print()
 print('FAILURES:', FAILS)

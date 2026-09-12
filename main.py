@@ -14331,14 +14331,22 @@ try {
         VIDEO_EXTENSIONS + AUDIO_EXTENSIONS + IMAGE_EXTENSIONS + ARCHIVE_EXTENSIONS
     )
 
+    # Linked series/sequel rows are displayed as "<name>  ·  2/3" (see
+    # _refresh_playlist_row_appearance), and _get_playlist_name_for_path
+    # returns that decorated widget text. The counter must go before the
+    # extension is stripped, or the ".mp4" is no longer at the end of the
+    # string and survives into the query.
+    _SEARCH_QUERY_SERIES_COUNTER_RE = re.compile(
+        r'\s*[·•]\s*\d+\s*/\s*\d+\s*$')
+
     def _google_search_query_for_name(self, name):
         """Turn a playlist display name into a clean search query.
 
-        Drops the two pieces of display-only decoration that leak into the
-        Google query: the "- " seen marker prefix and a trailing media /
-        archive extension. Only ONE trailing known extension is removed, so
-        titles that legitimately end in a dot-word ("Mr. Robot",
-        "Dressage (1986)") are untouched.
+        Drops the display-only decoration that leaks into the Google query:
+        the "- " seen marker prefix, a linked-series " · 2/3" counter, and a
+        trailing media / archive extension. Only ONE trailing known
+        extension is removed, so titles that legitimately end in a
+        dot-word ("Mr. Robot", "Dressage (1986)") are untouched.
         """
         text = str(name or '')
         try:
@@ -14348,6 +14356,10 @@ try {
         text = re.sub(r'\s+', ' ', text).strip()
         if not text:
             return ''
+        try:
+            text = self._SEARCH_QUERY_SERIES_COUNTER_RE.sub('', text).strip()
+        except Exception:
+            pass
         try:
             pattern = (
                 r'\.(?:'
