@@ -1141,6 +1141,8 @@ class CaptureStub:
         lift('VideoPlayer', '_media_url_height_hint'))
     _PREVIEW_MEDIA_URL_TOKENS = lift_attr(
         'VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
+    _familypornhd_player_page = lift(
+        'VideoPlayer', '_familypornhd_player_page')
 
 
 cap = CaptureStub()
@@ -1240,6 +1242,40 @@ report(cap._capture_candidate_is_clearly_not_media(
 report(cap._capture_candidate_is_clearly_not_media(MASTER) is False
        and cap._capture_candidate_is_clearly_not_media(MP4_720) is False,
     'the real streams are not rejected either')
+
+# ── 14. Referer for the embedded player's CDN, not the article ───────────────
+ARTICLE = 'https://familypornhd.com/caught-red-handed/'
+PLAYER = 'https://watchstreamhd.com/video/b20bb95ab626d93fd976af958fbc61ba'
+report(cap._familypornhd_player_page(CAPTURE, ARTICLE) == PLAYER,
+       f'the watchstreamhd player page becomes the Referer: '
+       f'{cap._familypornhd_player_page(CAPTURE, ARTICLE)}')
+
+OWN_PLAYER = [
+    'https://dev.familypornhd.com/get_file/0/0JjZXisx.mp4/?v-acctoken=NTB8&embed=true',
+    'https://dev.familypornhd.com/embed/50',
+    'https://dev.familypornhd.com/player/kt_player.js?v=9.15.15',
+    'https://familypornhd.com/wp-includes/js/jquery/jquery.min.js?ver=3.7.1',
+]
+report(cap._familypornhd_player_page(OWN_PLAYER, ARTICLE) == '',
+       f"the site's own player on dev.familypornhd.com is left alone: "
+       f'{cap._familypornhd_player_page(OWN_PLAYER, ARTICLE)!r}')
+report(cap._familypornhd_player_page(OWN_PLAYER, 'https://familypornhd.com/x/') == ''
+       and cap._familypornhd_player_page([], ARTICLE) == ''
+       and cap._familypornhd_player_page(None, ARTICLE) == '',
+       'a subdomain of the article host, an empty list and None all give nothing')
+
+HLS_ONLY = [
+    'https://watchstreamhd.com/player/assets/scripts.php?v=6',
+    'https://watchstreamhd.com/cdn/hls/76603cb0d5efcec0eda71ebb2160ee77/master.txt',
+    'https://mediaboxnow.com/cdn/down/76603cb/files/x_eng_720p.mp4?md5=a&expires=1',
+]
+report(cap._familypornhd_player_page(HLS_ONLY, ARTICLE) == 'https://watchstreamhd.com',
+       f'with no /video/ page the player origin is used: '
+       f'{cap._familypornhd_player_page(HLS_ONLY, ARTICLE)}')
+report(cap._familypornhd_player_page(
+    ['https://mediaboxnow.com/cdn/down/x/files/y_eng_720p.mp4?md5=a&expires=1'],
+    ARTICLE) == '',
+    'the CDN alone does not identify a player')
 
 print()
 print('FAILURES:', FAILS)

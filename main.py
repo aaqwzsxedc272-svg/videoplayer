@@ -27744,6 +27744,48 @@ try {
                 or path.endswith('/js')
                 or path.endswith('/css'))
 
+    def _familypornhd_player_page(self, candidates, source_url=''):
+        """The embedded player's page, to use as Referer for its CDN files.
+
+        A FamilyPornHD article that is not on the site's own player loads a
+        third-party one (watchstreamhd.com in the field, whose files come
+        from a rotating CDN — mediaboxplayer.com, mediaboxnow.com,
+        bestvideostream.com). The browser asks that CDN with the PLAYER as
+        Referer, not the article; the token check behind /cdn/down/ answers
+        500 to anything else. Nothing here names a host: the player is
+        whichever capture served a /video/ page or /player/ and /cdn/hls/
+        assets off a host that is not the article's.
+        """
+        try:
+            article_host = (urlparse(source_url).hostname or '').lower()
+        except Exception:
+            article_host = ''
+        player_origin = ''
+        for url in candidates or []:
+            url = str(url or '')
+            try:
+                parsed = urlparse(url)
+            except Exception:
+                continue
+            host = (parsed.hostname or '').lower()
+            if not host:
+                continue
+            # dev.familypornhd.com/embed/50 is the site's OWN player, not a
+            # third-party hoster, and the get_file path already works with
+            # the article as Referer — so leave it alone.
+            if (host == article_host
+                    or (article_host and (
+                        host.endswith('.' + article_host)
+                        or article_host.endswith('.' + host)))):
+                continue
+            path = (parsed.path or '').lower()
+            scheme = parsed.scheme or 'https'
+            if path.startswith(('/video/', '/embed', '/e/', '/d/')):
+                return url
+            if '/player/' in path or '/cdn/hls/' in path:
+                player_origin = f'{scheme}://{host}'
+        return player_origin
+
     def _familypornhd_non_ad_media_candidates(self, candidates):
         """Drop the ad network's URLs, keep anything that can be the video.
 
@@ -38594,7 +38636,16 @@ try {
             def _is_family_direct_video(url):
                 return self._is_familypornhd_direct_video_url(url)
 
+            _family_referer = ''
             if _is_family_article:
+                # Resolve the embedded player's page BEFORE the filter below
+                # narrows the list, so its Referer is still available for the
+                # file the filter keeps.
+                _family_referer = self._familypornhd_player_page(
+                    normalized_candidates, source_url)
+                if _family_referer:
+                    print(f"[BROWSER_CLICK] FamilyPornHD embedded player: "
+                          f"{_family_referer[:140]}")
                 _family_direct_candidates = [
                     _candidate for _candidate in normalized_candidates
                     if _is_family_direct_video(_candidate)
@@ -38790,7 +38841,7 @@ try {
                     probe_headers.setdefault('Origin', _origin)
                 resolved = self._probe_remote_media_candidate(
                     candidate,
-                    referer=source_url,
+                    referer=(_family_referer or source_url),
                     headers=probe_headers,
                     title=clicked_title,
                 )
@@ -38799,7 +38850,7 @@ try {
                     # Referer — mpv replays them on every segment request.
                     # Without the Referer these CDNs 403 the exact same URL
                     # that plays fine on its own page (and nowhere else).
-                    playback_headers = _with_browser_ua(self._media_playback_headers(source_url, candidate))
+                    playback_headers = _with_browser_ua(self._media_playback_headers((_family_referer or source_url), candidate))
                     resolved['headers'] = dict(playback_headers or resolved.get('headers') or {})
                     resolved['title'] = clicked_title or resolved.get('title')
                     resolved['source_url'] = source_url
@@ -38836,7 +38887,7 @@ try {
                 result_dict = {
                     'playback_url': best,
                     'download_url': best,
-                    'headers': _with_browser_ua(self._media_playback_headers(source_url, best)),
+                    'headers': _with_browser_ua(self._media_playback_headers((_family_referer or source_url), best)),
                     'title': clicked_title,
                     'source_url': source_url,
                     'embed_url': source_url,
