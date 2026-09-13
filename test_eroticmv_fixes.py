@@ -565,20 +565,33 @@ report([c for _p, c in picked][0] == MP4,
 
 # ── 8. noodlemagazine: real sources live on the /download/ page ──────────────
 class NoodleStub:
-    _is_noodlemagazine_host = lift('VideoPlayer', '_is_noodlemagazine_host')
+    _NOODLE_FAMILY_DOMAINS = lift_attr('VideoPlayer', '_NOODLE_FAMILY_DOMAINS')
+    _is_noodle_family_host = lift('VideoPlayer', '_is_noodle_family_host')
     _parse_window_playlist_json = staticmethod(
         unwrap(lift('VideoPlayer', '_parse_window_playlist_json')))
-    _noodlemagazine_sources_from_playlist = staticmethod(
-        unwrap(lift('VideoPlayer', '_noodlemagazine_sources_from_playlist')))
+    _noodle_sources_from_playlist = staticmethod(
+        unwrap(lift('VideoPlayer', '_noodle_sources_from_playlist')))
 
 
 nd = NoodleStub()
-for host, want in [('noodlemagazine.com', True),
-                   ('www.noodlemagazine.com', True),
-                   ('cdn.example.com', False)]:
-    report(nd._is_noodlemagazine_host(host) is want,
-           f'noodlemagazine host? {host!r} -> {nd._is_noodlemagazine_host(host)}',
-           f'(want {want})')
+for host, want in [
+    ('noodlemagazine.com', True),
+    ('mat6tube.com', True),              # the site from the reported log
+    ('www.mat6tube.com', True),
+    ('adult.noodlemagazine.com', True),  # subdomain of a family domain
+    ('mat6tube.com:443', True),          # port stripped
+    ('ukdevilz.com', True),
+    ('exporntoons.net', True),
+    ('tyler-brown.com', True),
+    ('actionviewphotography.com', True),
+    ('noodlemagazine.best', False),      # phishing clone, not the family
+    ('mat6tube.plus', False),            # phishing clone, not the family
+    ('notmat6tube.com', False),          # substring must not match
+    ('cdn.example.com', False),
+    ('', False),
+]:
+    got_host = nd._is_noodle_family_host(host)
+    report(got_host is want, f'noodle family? {host!r} -> {got_host}', f'(want {want})')
 
 DOWNLOAD_PAGE = '''<html><head><script>
 window.playlist = {"sources":[{"file":"https://cdn.example.com/v/1080.m3u8","label":"1080p","height":1080},{"file":"https://cdn.example.com/v/480.m3u8","label":"480p","height":480}],"previews":[{"file":"https://cdn.example.com/preview/teaser.mp4","label":"preview"}],"title":"Some Video"};
@@ -597,7 +610,7 @@ report(nd._parse_window_playlist_json('<html>no playlist here</html>') is None,
 report(nd._parse_window_playlist_json('<script>window.playlist = {"sources":[;</script>') is None,
        'truncated JSON -> None')
 
-sources = nd._noodlemagazine_sources_from_playlist(parsed)
+sources = nd._noodle_sources_from_playlist(parsed)
 report(len(sources) == 2, f'preview key skipped, 2 real sources kept: {len(sources)}')
 report(not any('preview' in u.lower() for u, _l, _h in sources),
        f'no preview URL among the sources: {[u for u, _l, _h in sources]}')
@@ -605,15 +618,15 @@ best = sorted(sources, key=lambda item: item[2] or 0, reverse=True)[0]
 report(best[0].endswith('/1080.m3u8') and best[2] == 1080,
        f'highest source wins after sort: {best[0]} ({best[2]}p)')
 
-label_only = nd._noodlemagazine_sources_from_playlist(
+label_only = nd._noodle_sources_from_playlist(
     {'sources': [{'file': 'https://x/720.m3u8', 'label': '720p'}]})
 report(label_only and label_only[0][2] == 720,
        f'height recovered from label: {label_only}')
 
-report(nd._noodlemagazine_sources_from_playlist(
+report(nd._noodle_sources_from_playlist(
     {'sources': [{'file': 'https://x/preview/a.m3u8'}]}) == [],
     'a source URL that is itself a preview is dropped')
-report(nd._noodlemagazine_sources_from_playlist(None) == [],
+report(nd._noodle_sources_from_playlist(None) == [],
    'None playlist -> no sources')
 
 # ── 9. VOE/pvvstream must not resolve to the tr_ teaser ──────────────────────

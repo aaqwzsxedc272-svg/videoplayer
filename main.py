@@ -38760,8 +38760,34 @@ try {
         except Exception:
             return score
 
-    def _is_noodlemagazine_host(self, host):
-        return 'noodlemagazine' in str(host or '').lower()
+    # noodlemagazine and its sister/mirror sites are one codebase: the same
+    # /watch/{vk_id} pages, the same og:video -> /player/ -> /download/
+    # chain and the same window.playlist JSON. Field-confirmed mirror set
+    # (mat6tube is an exact mirror — identical library, identical player).
+    #
+    # Matched as registrable domains, NOT substrings, on purpose:
+    # noodlemagazine.best and mat6tube.plus are unrelated phishing clones
+    # that copy the branding, and must not inherit this resolver.
+    _NOODLE_FAMILY_DOMAINS = (
+        'noodlemagazine.com',
+        'mat6tube.com',
+        'ukdevilz.com',
+        'exporntoons.net',
+        'tyler-brown.com',
+        'actionviewphotography.com',
+    )
+
+    def _is_noodle_family_host(self, host):
+        try:
+            bare = str(host or '').lower().strip('.').split(':')[0]
+        except Exception:
+            return False
+        if not bare:
+            return False
+        if bare.startswith('www.'):
+            bare = bare[4:]
+        return any(bare == domain or bare.endswith('.' + domain)
+                   for domain in self._NOODLE_FAMILY_DOMAINS)
 
     @staticmethod
     def _parse_window_playlist_json(html):
@@ -38805,7 +38831,7 @@ try {
         return None
 
     @staticmethod
-    def _noodlemagazine_sources_from_playlist(playlist):
+    def _noodle_sources_from_playlist(playlist):
         """(url, label, height) from a noodlemagazine playlist's real sources.
 
         The object carries the short preview alongside the film, so any key
@@ -38845,14 +38871,17 @@ try {
                 results.append((url, label or (f'{height}p' if height else ''), height))
         return results
 
-    def _resolve_noodlemagazine_source(self, source_url):
-        """Resolve the REAL noodlemagazine stream.
+    def _resolve_noodle_family_source(self, source_url):
+        """Resolve the REAL stream on a noodlemagazine-family site.
 
-        The watch page advertises a short preview, and the actual sources
-        live in a ``window.playlist`` JSON on a separate /download/ page
-        that is gated by an age_verification cookie. Scraping the watch
-        page for media URLs therefore yields the preview — which is what
-        happened before this resolver existed.
+        noodlemagazine.com, mat6tube.com, ukdevilz.com, exporntoons.net,
+        tyler-brown.com and actionviewphotography.com are one codebase. The
+        watch page advertises a short preview, and the actual sources live
+        in a ``window.playlist`` JSON on a separate /download/ page that is
+        gated by an age_verification cookie. Scraping the watch page for
+        media URLs therefore yields the preview — which is what happened
+        before this resolver existed (field: mat6tube resolved to
+        tr_240p.mp4, 6 seconds at 320x180, out of 29 candidates).
         """
         try:
             import requests
@@ -38867,12 +38896,12 @@ try {
             response = requests.get(source_url, headers=headers, cookies=cookies,
                                     timeout=15, allow_redirects=True)
             if not response.ok:
-                print(f"[NOODLEMAGAZINE] watch page HTTP {response.status_code}")
+                print(f"[NOODLE] watch page HTTP {response.status_code}")
                 return None
             html = response.text or ''
             page_url = response.url or source_url
         except Exception as exc:
-            print(f"[NOODLEMAGAZINE] watch page failed: {exc}")
+            print(f"[NOODLE] watch page failed: {exc}")
             return None
         title_match = re.search(
             r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
@@ -38883,7 +38912,7 @@ try {
             r'<meta[^>]+property=["\']og:video["\'][^>]+content=["\']([^"\']+)',
             html, re.IGNORECASE)
         if not video_match:
-            print("[NOODLEMAGAZINE] watch page has no og:video")
+            print("[NOODLE] watch page has no og:video")
             return None
         player_url = urljoin(page_url, html_unescape(video_match.group(1)).strip())
         download_url = player_url.replace('/player/', '/download/')
@@ -38894,21 +38923,21 @@ try {
                                              cookies=cookies, timeout=15,
                                              allow_redirects=True)
             if not download_response.ok:
-                print(f"[NOODLEMAGAZINE] download page HTTP "
+                print(f"[NOODLE] download page HTTP "
                       f"{download_response.status_code} for {download_url[:120]}")
                 return None
             playlist = self._parse_window_playlist_json(download_response.text or '')
         except Exception as exc:
-            print(f"[NOODLEMAGAZINE] download page failed: {exc}")
+            print(f"[NOODLE] download page failed: {exc}")
             return None
-        sources = self._noodlemagazine_sources_from_playlist(playlist)
+        sources = self._noodle_sources_from_playlist(playlist)
         if not sources:
-            print(f"[NOODLEMAGAZINE] no non-preview sources in {download_url[:120]}")
+            print(f"[NOODLE] no non-preview sources in {download_url[:120]}")
             return None
         sources.sort(key=lambda item: (item[2] or 0), reverse=True)
         best_url, best_label, best_height = sources[0]
         best_url = urljoin(download_url, best_url)
-        print(f"[NOODLEMAGAZINE] {len(sources)} real source(s) from "
+        print(f"[NOODLE] {len(sources)} real source(s) from "
               f"{download_url[:100]}; chose {best_url[:130]} ({best_label or 'best'})")
         return {
             'playback_url': best_url,
@@ -39507,10 +39536,14 @@ try {
                 resolved = self._resolve_cyberfile_source(source_url)
             elif self._is_mega_host(host):
                 resolved = self._resolve_mega_source(source_url)
-            elif self._is_noodlemagazine_host(host):
-                # Must run before the generic HTML scan: that scan reads the
-                # watch page, whose only inline media is the preview clip.
-                resolved = self._resolve_noodlemagazine_source(source_url)
+            elif self._is_noodle_family_host(host):
+                # Must run before the VOE auto-detect at the end of this
+                # ladder: these pages ARE VOE-format, so _detect_voe_and_resolve
+                # happily decodes them and returns the tr_ teaser. The real
+                # sources only exist in the window.playlist JSON on the
+                # /download/ page, which the generic HTML and VOE scans never
+                # look at.
+                resolved = self._resolve_noodle_family_source(source_url)
             elif self._is_lulustream_host(host):
                 resolved = self._resolve_lulustream_source(source_url)
             elif self._is_voe_host(host):
