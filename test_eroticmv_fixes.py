@@ -1071,8 +1071,23 @@ report(len(no_split.playlist) == no_split.playlist_widget.rowCount(),
 class FamilyStub:
     _familypornhd_non_ad_media_candidates = lift(
         'VideoPlayer', '_familypornhd_non_ad_media_candidates')
+    _capture_candidate_is_media = lift(
+        'VideoPlayer', '_capture_candidate_is_media')
     _FAMILYPORNHD_AD_HOST_TOKENS = lift_attr(
         'VideoPlayer', '_FAMILYPORNHD_AD_HOST_TOKENS')
+    _PLAYABLE_MEDIA_SUFFIXES = lift_attr(
+        'VideoPlayer', '_PLAYABLE_MEDIA_SUFFIXES')
+    _rank_real_media_candidates = lift(
+        'VideoPlayer', '_rank_real_media_candidates')
+    _media_url_is_trailer = staticmethod(
+        lift('VideoPlayer', '_media_url_is_trailer'))
+    # instance method in main.py, so it binds normally (no staticmethod wrap)
+    _media_url_looks_like_preview = lift(
+        'VideoPlayer', '_media_url_looks_like_preview')
+    _media_url_height_hint = staticmethod(
+        lift('VideoPlayer', '_media_url_height_hint'))
+    _PREVIEW_MEDIA_URL_TOKENS = lift_attr(
+        'VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
 
 
 fam = FamilyStub()
@@ -1092,6 +1107,139 @@ report(fam._familypornhd_non_ad_media_candidates(
 report(fam._familypornhd_non_ad_media_candidates(
     ['https://cdn.example.org/r/a-ads.com/spot.mp4']) == [],
     'an ad token in the path is dropped too')
+report(fam._familypornhd_non_ad_media_candidates(
+    ['https://cdn.example.org/v/360p.mp4', 'https://cdn.example.org/v/1080p.mp4',
+     'https://cdn.example.org/v/720p.mp4'])
+    == ['https://cdn.example.org/v/1080p.mp4',
+        'https://cdn.example.org/v/720p.mp4',
+        'https://cdn.example.org/v/360p.mp4'],
+    'the tallest rendition is probed first')
+
+# ── 13. The real watchstreamhd capture: gtag/js must never be the video ──────
+class CaptureStub:
+    _capture_candidate_is_media = lift(
+        'VideoPlayer', '_capture_candidate_is_media')
+    _capture_candidate_is_clearly_not_media = lift(
+        'VideoPlayer', '_capture_candidate_is_clearly_not_media')
+    _familypornhd_non_ad_media_candidates = lift(
+        'VideoPlayer', '_familypornhd_non_ad_media_candidates')
+    _PLAYABLE_MEDIA_SUFFIXES = lift_attr(
+        'VideoPlayer', '_PLAYABLE_MEDIA_SUFFIXES')
+    _NON_MEDIA_URL_SUFFIXES = lift_attr(
+        'VideoPlayer', '_NON_MEDIA_URL_SUFFIXES')
+    _NON_MEDIA_HOST_TOKENS = lift_attr(
+        'VideoPlayer', '_NON_MEDIA_HOST_TOKENS')
+    _FAMILYPORNHD_AD_HOST_TOKENS = lift_attr(
+        'VideoPlayer', '_FAMILYPORNHD_AD_HOST_TOKENS')
+    _rank_real_media_candidates = lift(
+        'VideoPlayer', '_rank_real_media_candidates')
+    _media_url_is_trailer = staticmethod(
+        lift('VideoPlayer', '_media_url_is_trailer'))
+    _media_url_looks_like_preview = lift(
+        'VideoPlayer', '_media_url_looks_like_preview')
+    _media_url_height_hint = staticmethod(
+        lift('VideoPlayer', '_media_url_height_hint'))
+    _PREVIEW_MEDIA_URL_TOKENS = lift_attr(
+        'VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
+
+
+cap = CaptureStub()
+
+# MEDIA_URL lines, in the order the field log recorded them.
+CAPTURE = [
+    'https://playhubconnect.com/bn/alternative/709/557/01d/70955701d2cb9942742e85402b1cc08a9aba7c9b-alt.mp4',
+    'https://www.google-analytics.com/analytics.js',
+    'https://www.googletagmanager.com/gtag/js?id=G-C8V6DNVNQK&cx=c&gtm=4e6992',
+    'https://familypornhd.com/wp-content/plugins/wordpress-popular-posts/assets/js/wpp.min.js?ver=7.4.2',
+    'https://familypornhd.com/wp-includes/js/jquery/jquery.min.js?ver=3.7.1',
+    'https://familypornhd.com/wp-includes/js/jquery/jquery-migrate.min.js?ver=3.4.1',
+    'https://familypornhd.com/wp-content/themes/bimber/js/modernizr/modernizr-custom.min.js?ver=3.3.0',
+    'https://www.googletagmanager.com/gtag/js?id=UA-111541081-1',
+    'https://39d40f50ae.0b00553438.com/bcdb62f5b5b2c30a9c3bbfc8ee20abf3.js',
+    'https://js.capndr.com/advertising.js',
+    'https://39d40f50ae.0b00553438.com/c83f59e5c147ebcaaaaf9577fb5e80a9.js',
+    'https://39d40f50ae.0b00553438.com/72bd3653831c516f6cb321b195ed824a.js',
+    'https://familypornhd.com/wp-includes/js/wp-emoji-release.min.js?ver=e1578e0491d256a9d0bd12bdc3f7d822',
+    'https://secure.gravatar.com/avatar/7d5bc0da74f3aae75a18708660ce5075f6d99228cbb56a2cbbe5f36ced39e5b5?s=40&d=mm&r=x',
+    'https://watchstreamhd.com/video/b20bb95ab626d93fd976af958fbc61ba',
+    'https://familypornhd.com/wp-includes/js/comment-reply.min.js?ver=e1578e0491d256a9d0bd12bdc3f7d822',
+    'https://familypornhd.com/wp-content/themes/bimber/js/stickyfill/stickyfill.min.js?ver=2.0.3',
+    'https://familypornhd.com/wp-content/themes/bimber/js/jquery.placeholder/placeholders.jquery.min.js?ver=4.0.1',
+    'https://familypornhd.com/wp-content/themes/bimber/js/jquery.timeago/jquery.timeago.js?ver=1.5.2',
+    'https://familypornhd.com/wp-content/themes/bimber/js/jquery.timeago/locales/jquery.timeago.en.js',
+    'https://familypornhd.com/wp-content/themes/bimber/js/matchmedia/matchmedia.js',
+    'https://familypornhd.com/wp-content/themes/bimber/js/matchmedia/matchmedia.addlistener.js',
+    'https://familypornhd.com/wp-content/themes/bimber/js/picturefill/picturefill.min.js?ver=2.3.1',
+    'https://familypornhd.com/wp-content/themes/bimber/js/jquery.waypoints/jquery.waypoints.min.js?ver=4.0.0',
+    'https://familypornhd.com/wp-content/themes/bimber/js/enquire/enquire.min.js?ver=2.1.2',
+    'https://familypornhd.com/wp-content/themes/bimber/js/global.js?ver=9.2.5',
+    'https://familypornhd.com/wp-content/themes/bimber/js/libgif/libgif.js',
+    'https://familypornhd.com/wp-content/themes/bimber/js/players.js?ver=9.2.5',
+    'https://familypornhd.com/wp-includes/js/jquery/ui/core.min.js?ver=1.14.2',
+    'https://familypornhd.com/wp-includes/js/jquery/ui/menu.min.js?ver=1.14.2',
+    'https://familypornhd.com/wp-includes/js/dist/dom-ready.min.js?ver=3fe927cab37bf38d6a23',
+    'https://familypornhd.com/wp-includes/js/dist/hooks.min.js?ver=f0f188028580e8dc1255',
+    'https://familypornhd.com/wp-includes/js/dist/i18n.min.js?ver=1dfe7db3940c23ea9216',
+    'https://familypornhd.com/wp-includes/js/dist/a11y.min.js?ver=31c6cec5a4ff7aff483d',
+    'https://familypornhd.com/wp-includes/js/jquery/ui/autocomplete.min.js?ver=1.14.2',
+    'https://familypornhd.com/wp-content/themes/bimber/js/ajax-search.js?ver=9.2.5',
+    'https://familypornhd.com/wp-content/themes/bimber/js/single.js?ver=9.2.5',
+    'https://familypornhd.com/wp-content/themes/bimber/js/skin-mode.js?ver=9.2.5',
+    'https://familypornhd.com/wp-content/themes/bimber/js/back-to-top.js?ver=9.2.5',
+    'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1',
+    'https://watchstreamhd.com/player/assets/scripts.php?v=6',
+    'https://watchstreamhd.com/player/assets/remodal/remodal.min.js',
+    'https://ssl.p.jwpcdn.com/player/v/8.34.3/jwplayer.js',
+    'https://watchstreamhd.com/player/assets/js/cryptojs-aes.min.js',
+    'https://watchstreamhd.com/player/assets/js/cryptojs-aes-format.js',
+    'https://watchstreamhd.com/cdn/hls/76603cb0d5efcec0eda71ebb2160ee77/master.txt',
+    'https://mediaboxplayer.com/cdn/down/76603cb0d5efcec0eda71ebb2160ee77/files/caught-red-handed_eng_360p.mp4?md5=ZS0deTcKybv2DvkSvx1Q1A&expires=1789424661',
+    'https://mediaboxplayer.com/cdn/down/76603cb0d5efcec0eda71ebb2160ee77/files/caught-red-handed_eng_720p.mp4?md5=DxDniXVsldpT5PoFc98DGA&expires=1789424661',
+]
+MP4_720 = CAPTURE[-1]
+MP4_360 = CAPTURE[-2]
+MASTER = CAPTURE[-3]
+
+report(cap._capture_candidate_is_media(MP4_720) is True,
+       'the mediaboxplayer MP4 is media')
+report(cap._capture_candidate_is_media(MASTER) is True,
+       'watchstreamhd serves its HLS master as .txt and that still counts')
+report(cap._capture_candidate_is_media(
+    'https://www.googletagmanager.com/gtag/js?id=G-C8V6DNVNQK&cx=c') is False,
+    'the Google tag endpoint that got played as a video is not media')
+report(all(not cap._capture_candidate_is_media(u) for u in CAPTURE
+           if u.endswith(('.js', '.php')) or '/wp-' in u or 'gravatar' in u),
+    'no script, theme asset or avatar in the capture passes as media')
+
+ordered = sorted(CAPTURE, key=lambda u: 0 if cap._capture_candidate_is_media(u) else 1)
+window = ordered[:12]
+report(MP4_720 in window and MP4_360 in window and MASTER in window,
+       f'all three real streams fit the 12-candidate window after sorting: '
+       f'{[u.rsplit("/", 1)[-1][:34] for u in window if cap._capture_candidate_is_media(u)]}')
+report(MP4_720 not in CAPTURE[:12],
+       'and before sorting they were outside it, which is why nothing played')
+
+kept = cap._familypornhd_non_ad_media_candidates(CAPTURE)
+report(MP4_720 in kept and MP4_360 in kept and MASTER in kept,
+       f'the FamilyPornHD fallback keeps the real streams: {len(kept)} candidate(s)')
+report(not any('googletagmanager' in u or u.endswith('.js') or u.endswith('.php')
+               for u in kept),
+       f'and no script among them: {[u.rsplit("/", 1)[-1][:30] for u in kept]}')
+report(not any('playhubconnect' in u for u in kept),
+       'the playhubconnect pre-roll is still dropped as an advert')
+
+report(cap._capture_candidate_is_clearly_not_media(
+    'https://www.googletagmanager.com/gtag/js?id=G-C8V6DNVNQK&cx=c') is True,
+    'the unverified-promotion fallback now rejects the tag endpoint')
+report(cap._capture_candidate_is_clearly_not_media(
+    'https://familypornhd.com/wp-includes/js/jquery/jquery.min.js?ver=3.7.1') is True,
+    'and a jQuery file')
+report(cap._capture_candidate_is_clearly_not_media(
+    'https://cdn.example.org/get_video?id=12345') is False,
+    'but an extension-less stream still survives, so the fallback keeps working')
+report(cap._capture_candidate_is_clearly_not_media(MASTER) is False
+       and cap._capture_candidate_is_clearly_not_media(MP4_720) is False,
+    'the real streams are not rejected either')
 
 print()
 print('FAILURES:', FAILS)

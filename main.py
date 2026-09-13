@@ -27682,6 +27682,68 @@ try {
         'theporndude.com',
     )
 
+    # A browser capture records EVERY URL the page touched: theme scripts,
+    # analytics, ad beacons, fonts. Two tests keep that list honest.
+    _PLAYABLE_MEDIA_SUFFIXES = (
+        '.m3u8', '.m3u', '.mpd', '.mp4', '.m4v', '.webm', '.mkv', '.ts',
+        '.flv', '.mov', '.avi',
+    )
+    _NON_MEDIA_URL_SUFFIXES = (
+        '.js', '.mjs', '.css', '.json', '.php', '.html', '.htm', '.xml',
+        '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp',
+        '.woff', '.woff2', '.ttf', '.eot', '.map',
+    )
+    _NON_MEDIA_HOST_TOKENS = (
+        'googletagmanager', 'google-analytics', 'gstatic', 'gravatar',
+        'cloudflareinsights', 'doubleclick', 'googlesyndication',
+        'googleadservices', 'connect.facebook.net', 'hotjar', 'clarity.ms',
+    )
+
+    def _capture_candidate_is_media(self, url):
+        """True when a captured URL can plausibly BE the video.
+
+        Deliberately strict: it decides which candidates earn a slot and
+        which may be promoted when every probe failed. A script or an
+        analytics beacon must never pass (field: googletagmanager's gtag/js
+        was handed to mpv as the FamilyPornHD stream and the load-failed
+        ladder looped on "unrecognized file format").
+        """
+        url = str(url or '').strip()
+        if not url.lower().startswith(('http://', 'https://', '//')):
+            return False
+        try:
+            path = (urlparse(url).path or '').lower()
+        except Exception:
+            return False
+        if any(path.endswith(suffix)
+               for suffix in self._PLAYABLE_MEDIA_SUFFIXES):
+            return True
+        # watchstreamhd.com serves its HLS master as .txt to slip past
+        # adblockers: https://watchstreamhd.com/cdn/hls/<id>/master.txt
+        return path.endswith('.txt') and '/cdn/hls/' in path
+
+    def _capture_candidate_is_clearly_not_media(self, url):
+        """True only for captures that cannot possibly be a video.
+
+        The loose counterpart of _capture_candidate_is_media, for the
+        promote-an-unverified-capture fallbacks, where refusing an
+        extension-less stream would be worse than the disease: a real
+        stream can have no file extension, but a .js file, a stylesheet or
+        a Google tag endpoint never is one.
+        """
+        url = str(url or '').strip()
+        low = url.lower()
+        if any(token in low for token in self._NON_MEDIA_HOST_TOKENS):
+            return True
+        try:
+            path = (urlparse(url).path or '').lower()
+        except Exception:
+            return False
+        return (any(path.endswith(suffix)
+                    for suffix in self._NON_MEDIA_URL_SUFFIXES)
+                or path.endswith('/js')
+                or path.endswith('/css'))
+
     def _familypornhd_non_ad_media_candidates(self, candidates):
         """Drop the ad network's URLs, keep anything that can be the video.
 
@@ -27703,8 +27765,13 @@ try {
             if any(token in host or token in low
                    for token in self._FAMILYPORNHD_AD_HOST_TOKENS):
                 continue
+            if not self._capture_candidate_is_media(url):
+                continue
             kept.append(url)
-        return kept
+        # Best quality first: watchstreamhd exposes the same film at several
+        # heights and the capture order is whatever the player asked for
+        # first, which was 360p.
+        return self._rank_real_media_candidates(kept, 'FAMILYPORNHD')
 
     def _familypornhd_capture_needs_refresh(self, source_url, stream_info, max_age_ms=45000):
         """Say whether a captured signed FamilyPornHD URL is old enough to refresh.
@@ -37307,6 +37374,13 @@ try {
                 c for c in normalized_candidates
                 if not (0.1 <= _measured_duration(c) < 20 and c not in verified_normalized)
             ]
+            # ...and neither is a script: this branch promotes an
+            # UNVERIFIED capture, the one place a Google tag endpoint
+            # can be mistaken for a stream.
+            _non_ad = [
+                c for c in _non_ad
+                if not self._capture_candidate_is_clearly_not_media(c)
+            ]
             if _non_ad:
                 print(f"[MIXDROP_CLICK] probe rejected all {len(_non_ad)} candidate(s) for {page_url}; using best-scoring non-ad capture anyway")
                 result_dict = _mixdrop_browser_result(_non_ad[0])
@@ -38475,6 +38549,17 @@ try {
             clicked_title = self._jav_code_from_text(clicked_title) or ''
 
         if media_candidates:
+            # Only the first 12 captures are considered below, and a capture
+            # is every URL the page touched. A page that loads 50 scripts
+            # before its player pushes the real stream out of that window —
+            # on a FamilyPornHD article served by watchstreamhd.com the
+            # mediaboxplayer MP4s sat at position ~50 and never became
+            # candidates at all. Stable sort, so nothing is dropped: the
+            # order only decides who fits.
+            media_candidates = sorted(
+                media_candidates,
+                key=lambda u: 0 if self._capture_candidate_is_media(u) else 1,
+            )
             normalized_candidates = []
             seen_candidates = set()
             for raw_candidate in media_candidates[:12]:
@@ -38736,6 +38821,14 @@ try {
             _non_ad = [
                 c for c in normalized_candidates
                 if not (0.1 <= _measured_duration(c) < 20 and c not in verified_normalized)
+            ]
+            # ...and neither is a script: this branch promotes an
+            # UNVERIFIED capture, which is how gtag/js reached mpv and
+            # looped the whole load-failed ladder on an unrecognized
+            # file format.
+            _non_ad = [
+                c for c in _non_ad
+                if not self._capture_candidate_is_clearly_not_media(c)
             ]
             if _non_ad:
                 best = _non_ad[0]
