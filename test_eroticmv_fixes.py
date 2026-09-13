@@ -616,6 +616,51 @@ report(nd._noodlemagazine_sources_from_playlist(
 report(nd._noodlemagazine_sources_from_playlist(None) == [],
    'None playlist -> no sources')
 
+# ── 9. VOE/pvvstream must not resolve to the tr_ teaser ──────────────────────
+class VoeStub:
+    _PREVIEW_MEDIA_URL_TOKENS = lift_attr('VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
+    _media_url_looks_like_preview = lift('VideoPlayer', '_media_url_looks_like_preview')
+    _media_url_is_trailer = staticmethod(
+        unwrap(lift('VideoPlayer', '_media_url_is_trailer')))
+    _media_url_height_hint = staticmethod(
+        unwrap(lift('VideoPlayer', '_media_url_height_hint')))
+    _rank_real_media_candidates = lift('VideoPlayer', '_rank_real_media_candidates')
+
+
+v = VoeStub()
+CDN = 'https://cdn2.pvvstream.pro/videos/-128731116/456242439/'
+for url, want in [
+    (CDN + 'tr_240p.mp4', True),      # the exact URL from the reported log
+    (CDN + 'tr_1080p.mp4', True),
+    (CDN + '240p.mp4', False),
+    (CDN + 'movie.mp4', False),
+    (CDN + 'trailer.mp4', False),     # caught by the preview tokens instead
+    (CDN + 'track.mp4', False),       # 'tr' + letters must not match
+]:
+    got_tr = v._media_url_is_trailer(url)
+    report(got_tr is want, f'trailer? …/{url.rsplit("/", 1)[-1]} -> {got_tr}', f'(want {want})')
+
+for url, want in [(CDN + 'tr_240p.mp4', 240), (CDN + '1080p.mp4', 1080),
+                  (CDN + '480p_v2.mp4', 480), (CDN + 'movie.mp4', 0),
+                  (CDN + '1080pixels.mp4', 0)]:
+    got_h = v._media_url_height_hint(url)
+    report(got_h == want, f'height …/{url.rsplit("/", 1)[-1]} -> {got_h}', f'(want {want})')
+
+ranked = v._rank_real_media_candidates([
+    CDN + 'tr_240p.mp4', CDN + '240p.mp4', CDN + 'tr_1080p.mp4',
+    CDN + '1080p.mp4', CDN + '720p.mp4',
+], 'VOE-mirror')
+report([u.rsplit('/', 1)[-1] for u in ranked] == ['1080p.mp4', '720p.mp4', '240p.mp4'],
+       f'teasers dropped, best quality first: {[u.rsplit("/", 1)[-1] for u in ranked]}')
+
+only_trailers = v._rank_real_media_candidates(
+    [CDN + 'tr_240p.mp4', CDN + 'tr_720p.mp4'], '')
+report([u.rsplit('/', 1)[-1] for u in only_trailers] == ['tr_720p.mp4', 'tr_240p.mp4'],
+       f'a page with only teasers still plays one: '
+       f'{[u.rsplit("/", 1)[-1] for u in only_trailers]}')
+
+report(v._rank_real_media_candidates([], '') == [], 'no candidates -> no candidates')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

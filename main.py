@@ -34801,6 +34801,11 @@ try {
 
         if hls_urls or mp4_urls:
             print(f'[VOE-mirror] Decoded {len(hls_urls)} HLS + {len(mp4_urls)} MP4 candidate(s) for {page_url[:60]}')
+            # Field: mat6tube resolved to tr_240p.mp4 — a 6s, 320x180 teaser
+            # — because the first probe-able candidate won. Drop the teaser
+            # renditions and try the rest best-quality first.
+            hls_urls = self._rank_real_media_candidates(hls_urls, 'VOE-mirror')
+            mp4_urls = self._rank_real_media_candidates(mp4_urls, 'VOE-mirror')
             referer_hdrs = self._hls_request_headers(page_url)
             for hls_url in hls_urls:
                 probe = self._probe_remote_media_candidate(
@@ -38913,6 +38918,44 @@ try {
             'resolver_provider': 'noodlemagazine',
             'resolved_at_ms': int(time.time() * 1000),
         }
+
+    # VOE / pvvstream publish a short teaser as tr_<height>p.mp4 alongside
+    # the real <height>p.mp4 renditions, and the teaser sorts first.
+    @staticmethod
+    def _media_url_is_trailer(url):
+        try:
+            name = os.path.basename(urlparse(str(url or '')).path or '')
+        except Exception:
+            return False
+        return bool(re.match(r'^tr[_-]?\d{2,4}p?\.', name, re.IGNORECASE))
+
+    @staticmethod
+    def _media_url_height_hint(url):
+        """Resolution parsed out of a media filename, 0 when absent."""
+        try:
+            name = os.path.basename(urlparse(str(url or '')).path or '')
+        except Exception:
+            return 0
+        # Not \b: '_' is a word character, so 480p_v2.mp4 would not match.
+        match = re.search(r'(\d{3,4})p(?![0-9a-z])', name, re.IGNORECASE)
+        try:
+            return int(match.group(1)) if match else 0
+        except Exception:
+            return 0
+
+    def _rank_real_media_candidates(self, urls, label=''):
+        """Drop trailer/preview renditions and sort the rest best-quality
+        first. Falls back to the untouched list when every candidate looks
+        like a trailer, so a page offering only a teaser still plays."""
+        urls = [u for u in (urls or []) if u]
+        real = [u for u in urls
+                if not self._media_url_is_trailer(u)
+                and not self._media_url_looks_like_preview(u)]
+        dropped = len(urls) - len(real)
+        if dropped and label:
+            print(f'[{label}] dropped {dropped} trailer/preview candidate(s) '
+                  f'of {len(urls)}', flush=True)
+        return sorted(real or urls, key=self._media_url_height_hint, reverse=True)
 
     def _resolve_stream_from_html(self, source_url):
         try:
