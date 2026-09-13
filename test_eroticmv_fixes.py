@@ -464,6 +464,105 @@ for raw, want, label in [
     got = q._google_search_query_for_name(raw)
     report(got == want, f'series {raw!r} -> {got!r}  [{label}]', f'(want {want!r})')
 
+# ── 7. HTML resolve must not pick the preview over the film ──────────────────
+def unwrap(fn):
+    return fn.__func__ if isinstance(fn, (staticmethod, classmethod)) else fn
+
+
+class HtmlResolveStub:
+    _PREVIEW_MEDIA_URL_TOKENS = lift_attr(
+        'VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
+    _media_url_looks_like_preview = lift(
+        'VideoPlayer', '_media_url_looks_like_preview')
+    _hls_playlist_total_seconds = staticmethod(unwrap(
+        lift('VideoPlayer', '_hls_playlist_total_seconds')))
+    _hls_best_variant_url = staticmethod(
+        unwrap(lift('VideoPlayer', '_hls_best_variant_url')))
+    _html_candidate_rank_score = staticmethod(unwrap(
+        lift('VideoPlayer', '_html_candidate_rank_score')))
+
+
+r = HtmlResolveStub()
+
+for url, want in [
+    ('https://cdn.example.com/preview/abc.m3u8', True),
+    ('https://cdn.example.com/previewclip/abc.m3u8', True),
+    ('https://trailerhg.xyz/e/abc.m3u8', True),
+    ('https://cdn.example.com/v/trailer.m3u8', True),
+    ('https://cdn.example.com/teaser/1.m3u8', True),
+    ('https://cdn.example.com/x/sample.m3u8', True),
+    ('https://cdn.example.com/x/sample/1.ts', True),
+    ('https://vidcdn2.eroticmv.com/dat1/dressage/dressage.m3u8', False),
+    ('https://cdn.example.com/movie.m3u8', False),
+]:
+    got_prev = r._media_url_looks_like_preview(url)
+    report(got_prev is want, f'preview? {url!r} -> {got_prev}', f'(want {want})')
+
+MEDIA_PLAYLIST = """#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:6
+#EXTINF:6.006,
+seg-0.ts
+#EXTINF:6.006,
+seg-1.ts
+#EXTINF: 4.5 ,
+seg-2.ts
+#EXT-X-ENDLIST
+"""
+total = r._hls_playlist_total_seconds(MEDIA_PLAYLIST)
+report(abs(total - 16.512) < 0.01, f'media playlist EXTINF sum -> {total}', '(want 16.512)')
+report(r._hls_playlist_total_seconds('#EXTM3U\n#EXT-X-ENDLIST\n') == 0.0,
+       'playlist with no segments measures 0')
+report(r._hls_playlist_total_seconds('') == 0.0, 'empty playlist measures 0')
+
+MASTER = """#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+low/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080
+high/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720
+mid/index.m3u8
+"""
+got_var = r._hls_best_variant_url(MASTER, 'https://cdn.example.com/master.m3u8')
+report(got_var == 'https://cdn.example.com/high/index.m3u8',
+       f'highest-bandwidth variant chosen: {got_var}')
+report(r._hls_best_variant_url('#EXTM3U\n', 'https://x/y.m3u8') == '',
+       'a media playlist has no variant to follow')
+abs_master = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nhttps://other.example/a.m3u8\n'
+report(r._hls_best_variant_url(abs_master, 'https://cdn.example.com/m.m3u8')
+       == 'https://other.example/a.m3u8', 'absolute variant URI left intact')
+
+# The reported failure: the preview appears FIRST in the page.
+PREVIEW = 'https://cdn.example.com/preview/teaser.m3u8'
+FILM = 'https://cdn.example.com/v/movie.m3u8'
+ordered = [(0, PREVIEW), (8, FILM)]
+kept = [i for i in ordered if not r._media_url_looks_like_preview(i[1])] or ordered
+report([c for _p, c in kept] == [FILM],
+       f'preview-token URL dropped before ranking: {[c for _p, c in kept]}')
+
+# Ranking when the preview URL gives no token hint, only its short duration.
+A = 'https://cdn.example.com/a.m3u8'
+B = 'https://cdn.example.com/b.m3u8'
+MP4 = 'https://cdn.example.com/c.mp4'
+durations = {A: 45.0, B: 3600.0}
+picked = sorted([(0, A), (5, B), (9, MP4)],
+                key=lambda i: r._html_candidate_rank_score(i[0], i[1], durations),
+                reverse=True)
+report([c for _p, c in picked][0] == B,
+       f'45s teaser loses to the 3600s film: {[c for _p, c in picked]}')
+
+picked = sorted([(0, MP4), (3, A)],
+                key=lambda i: r._html_candidate_rank_score(i[0], i[1], {A: 45.0}),
+                reverse=True)
+report([c for _p, c in picked][0] == MP4,
+       f'unmeasured mp4 beats a measured 45s teaser: {[c for _p, c in picked]}')
+
+picked = sorted([(0, MP4), (4, A)],
+                key=lambda i: r._html_candidate_rank_score(i[0], i[1], {}),
+                reverse=True)
+report([c for _p, c in picked][0] == MP4,
+       f'nothing measured -> earlier pattern wins: {[c for _p, c in picked]}')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

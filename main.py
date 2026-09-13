@@ -38659,6 +38659,102 @@ try {
                 return resolved
         return None
 
+    # Page scans pick up a teaser/preview stream alongside the real video.
+    # Same token family _candidate_score penalises for browser captures.
+    _PREVIEW_MEDIA_URL_TOKENS = (
+        'preview', 'previewclip', '/trailer', 'trailerhg', 'teaser',
+        'sample.m3u8', '/sample/',
+    )
+
+    def _media_url_looks_like_preview(self, url):
+        low = str(url or '').lower()
+        return any(token in low for token in self._PREVIEW_MEDIA_URL_TOKENS)
+
+    @staticmethod
+    def _hls_playlist_total_seconds(playlist_text):
+        """Sum of every #EXTINF in a media playlist; 0.0 when unmeasurable."""
+        total = 0.0
+        for match in re.finditer(r'#EXTINF:\s*([0-9]*\.?[0-9]+)',
+                                 str(playlist_text or '')):
+            try:
+                total += float(match.group(1))
+            except Exception:
+                continue
+        return total
+
+    @staticmethod
+    def _hls_best_variant_url(master_text, base_url=''):
+        """Highest-BANDWIDTH variant URI from a master playlist, absolute."""
+        best_url = ''
+        best_bandwidth = -1
+        lines = str(master_text or '').splitlines()
+        for index, line in enumerate(lines):
+            if not line.strip().startswith('#EXT-X-STREAM-INF'):
+                continue
+            match = re.search(r'BANDWIDTH\s*=\s*(\d+)', line, re.IGNORECASE)
+            bandwidth = int(match.group(1)) if match else 0
+            for follow in lines[index + 1:]:
+                follow = follow.strip()
+                if not follow:
+                    continue
+                if follow.startswith('#'):
+                    break
+                if bandwidth > best_bandwidth:
+                    best_bandwidth = bandwidth
+                    best_url = follow
+                break
+        if not best_url:
+            return ''
+        try:
+            return urljoin(str(base_url or ''), best_url) or best_url
+        except Exception:
+            return best_url
+
+    def _hls_playlist_duration_seconds(self, url, headers=None, referer=None,
+                                       _depth=0):
+        """Total seconds of an HLS stream, following a master to its best
+        variant. Returns 0.0 when the duration cannot be determined."""
+        if _depth > 2 or not url:
+            return 0.0
+        try:
+            import requests
+            request_headers = self._stream_request_headers(referer, headers)
+            response = requests.get(str(url), headers=request_headers,
+                                    timeout=10, allow_redirects=True)
+            if not response.ok:
+                return 0.0
+            text = response.text or ''
+        except Exception:
+            return 0.0
+        if '#EXT-X-STREAM-INF' in text:
+            variant = self._hls_best_variant_url(text, response.url or str(url))
+            if not variant:
+                return 0.0
+            return self._hls_playlist_duration_seconds(
+                variant, headers, referer, _depth + 1)
+        return self._hls_playlist_total_seconds(text)
+
+    @staticmethod
+    def _html_candidate_rank_score(pattern_index, candidate, durations):
+        """Rank one HTML-extracted media candidate, highest wins.
+
+        A measured teaser loses to anything unmeasured; a measured
+        full-length stream wins. Unmeasured candidates keep their pattern
+        order instead of being treated as zero-length, so a plain .mp4 the
+        page exposes is never demoted below a short HLS preview.
+        """
+        score = 0.0
+        measured = (durations or {}).get(candidate)
+        if measured is not None:
+            if measured < 120.0:
+                score -= 10.0
+            elif measured >= 300.0:
+                score += 10.0
+        try:
+            return score - 0.01 * int(pattern_index or 0)
+        except Exception:
+            return score
+
     def _resolve_stream_from_html(self, source_url):
         try:
             import requests
@@ -38897,30 +38993,69 @@ try {
             r'<a[^>]+href=["\']([^"\']+\.(?:mp4|m3u8|webm|mkv|mov|avi|m4v)[^"\']*)["\']',
             r'<a[^>]+href=["\']([^"\']+(?:download|/file/)[^"\']*)["\']',
         ]
-        for pattern in patterns:
+        # Collect every candidate first, then rank. Returning the first
+        # pattern match that probes OK meant a page listing a teaser before
+        # the film resolved to the teaser (field: noodlemagazine played the
+        # preview). Order within a pattern still breaks ties.
+        candidates = []
+        seen_candidates = set()
+        for pattern_index, pattern in enumerate(patterns):
             for match in re.finditer(pattern, html, re.IGNORECASE):
-                candidate = self._normalize_extracted_media_url(match.group(1) or '', page_url)
+                candidate = self._normalize_extracted_media_url(
+                    match.group(1) or '', page_url)
                 if not self._is_usable_extracted_media_url(candidate, page_url):
                     continue
-                resolved_url = candidate
-                playback_headers = self._media_playback_headers(page_url, resolved_url)
-                probe_headers = {'Accept': playback_headers.get('Accept') or '*/*'}
-                if playback_headers.get('Origin'):
-                    probe_headers['Origin'] = playback_headers.get('Origin')
-                direct = self._probe_remote_media_candidate(
-                    resolved_url,
-                    referer=page_url,
-                    headers=probe_headers,
-                    title=page_title,
+                key = str(candidate or '').lower()
+                if not key or key in seen_candidates:
+                    continue
+                seen_candidates.add(key)
+                candidates.append((pattern_index, candidate))
+        if not candidates:
+            return None
+        # Prefer anything that is not obviously a preview; only fall back to
+        # preview URLs when the page offered nothing else.
+        ordered = [item for item in candidates
+                   if not self._media_url_looks_like_preview(item[1])] or candidates
+        durations = {}
+        if len(ordered) > 1:
+            for _pattern_index, candidate in ordered[:6]:
+                if not self._is_hls_stream_url(candidate):
+                    continue
+                measured = self._hls_playlist_duration_seconds(
+                    candidate,
+                    self._media_playback_headers(page_url, candidate),
+                    page_url,
                 )
-                if direct:
-                    direct['headers'] = playback_headers
-                    direct['title'] = page_title
-                    direct['resolver_provider'] = 'html'
-                    direct['resolved_at_ms'] = int(time.time() * 1000)
-                    if subtitle_tracks:
-                        direct['subtitle_tracks'] = subtitle_tracks
-                    return direct
+                if measured > 0.0:
+                    durations[candidate] = measured
+
+        def _rank(item):
+            return self._html_candidate_rank_score(
+                item[0], item[1], durations)
+
+        for _pattern_index, resolved_url in sorted(ordered, key=_rank, reverse=True):
+            playback_headers = self._media_playback_headers(page_url, resolved_url)
+            probe_headers = {'Accept': playback_headers.get('Accept') or '*/*'}
+            if playback_headers.get('Origin'):
+                probe_headers['Origin'] = playback_headers.get('Origin')
+            direct = self._probe_remote_media_candidate(
+                resolved_url,
+                referer=page_url,
+                headers=probe_headers,
+                title=page_title,
+            )
+            if direct:
+                direct['headers'] = playback_headers
+                direct['title'] = page_title
+                direct['resolver_provider'] = 'html'
+                direct['resolved_at_ms'] = int(time.time() * 1000)
+                if subtitle_tracks:
+                    direct['subtitle_tracks'] = subtitle_tracks
+                if len(ordered) > 1:
+                    print(f"[HTML_RESOLVE] chose {resolved_url[:130]} "
+                          f"({durations.get(resolved_url, 0.0):.0f}s) from "
+                          f"{len(ordered)} candidate(s)", flush=True)
+                return direct
         return None
 
     def _resolve_stream_source(self, source_url):
