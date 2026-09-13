@@ -39025,6 +39025,284 @@ try {
             'resolved_at_ms': int(time.time() * 1000),
         }
 
+    # ── sxyprn ──────────────────────────────────────────────────────────────
+    # A sxyprn post page holds TWO things worth taking: the native stream, and
+    # (when the uploader added them) links to the same video on other hosters,
+    # written straight into the h1 title. yt-dlp dropped this site to
+    # unsupported.py, so the decode below follows the site's own player logic:
+    #   data-vnfo = {"720p": "/sd/1/…/<ts>/<hex>/<hex>/0.mp4", …}
+    #   parts[1] += "8/" + b64("<digitsum(parts[6])>-<host>-<digitsum(parts[7])>")
+    #   parts[5]  =  str(int(parts[5]) - (digitsum(parts[6]) + digitsum(parts[7])))
+    #   GET https://<host><path>  ->  302 Location: the real CDN file
+    #
+    # sxyprn rotates TLDs (sxyprn.com/.net/.io/.pro/…), so the host matcher
+    # compares the registrable second-level label exactly — the same rule the
+    # noodle family uses — and look-alikes (notsxyprn.com, sxyprn-clone.com)
+    # can never match.
+    _SXYPRN_TITLE_LINK_DENYLIST = (
+        # The site's own non-video properties + its ad network. These appear
+        # as links on the page but are never mirrors of the video.
+        'sxypix.com', 'myporn.club', 'yps.link', 'theporndude.com',
+        'zline0.com', 'trafficdeposit.com',
+    )
+
+    def _is_sxyprn_host(self, host):
+        host = str(host or '').lower().strip().strip('.')
+        if not host:
+            return False
+        if ':' in host and not host.startswith('['):
+            host = host.split(':', 1)[0]
+        if host.startswith('www.'):
+            host = host[4:]
+        labels = host.split('.')
+        return len(labels) >= 2 and labels[-2] == 'sxyprn'
+
+    @staticmethod
+    def _sxyprn_digit_sum(segment):
+        """Sum of the digits in a path segment (the site's ``ssut51``)."""
+        return sum(int(ch) for ch in str(segment or '') if ch.isdigit())
+
+    @staticmethod
+    def _sxyprn_cdn_token(ss, host, es, urlsafe=True):
+        """base64("<ss>-<host>-<es>") (the site's ``boo``).
+
+        The player then makes the token path-safe: '+'->'-', '/'->'_' and
+        '='->'.'. Plain base64 is kept as a fallback because a '/' in the
+        token would otherwise add a path segment.
+        """
+        raw = f'{ss}-{host}-{es}'
+        token = base64.b64encode(raw.encode('utf-8')).decode('ascii')
+        if urlsafe:
+            token = token.replace('+', '-').replace('/', '_').replace('=', '.')
+        return token
+
+    def _sxyprn_cdn_path(self, raw_path, host, urlsafe=True):
+        """Rewrite a data-vnfo relative path into the signed CDN path."""
+        parts = str(raw_path or '').split('/')
+        if len(parts) < 8:
+            return ''
+        ss = self._sxyprn_digit_sum(parts[6])
+        es = self._sxyprn_digit_sum(parts[7])
+        parts[1] = parts[1] + '8/' + self._sxyprn_cdn_token(ss, host, es, urlsafe)
+        # parts[5] is normally the expiry timestamp and is wound back by the
+        # same digit sums. When the layout puts something else there the
+        # signed path is still worth asking for, so only the rewind is
+        # skipped rather than the whole candidate.
+        if str(parts[5]).strip().lstrip('-').isdigit():
+            parts[5] = str(int(parts[5]) - (ss + es))
+        return '/'.join(parts)
+
+    @staticmethod
+    def _sxyprn_clean_title(text):
+        """Drop the hashtags / {markers} / hoster URLs out of a post title."""
+        text = str(text or '')
+        text = re.sub(r'https?://\S+', ' ', text)
+        text = re.sub(r'\{[^{}]*\}', ' ', text)
+        text = re.sub(r'#\w+', ' ', text)
+        text = text.replace('|', ' ')
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text.strip(' -|')
+
+    def _sxyprn_title_and_mirrors(self, html, page_url=''):
+        """(title, mirror_urls) taken from the h1 of a sxyprn post page.
+
+        The uploader writes extra hosters into the title itself, e.g.
+
+            NEW Model Scene 2026 #Anal #POV
+              doodstream.com -> https://doodstream.com/e/qlb9nbe23jda
+              lulustream.com -> https://lulustream.com/e/iqxjl8h8yted
+
+        so every external link inside the h1 is a mirror. The hashtags, the
+        {NEW}-style markers and those URLs are all noise in the row name —
+        and so is the anchor TEXT of a mirror link, which is why a mirror
+        anchor is dropped whole instead of being flattened to "doodstream.com".
+        """
+        html = html or ''
+        match = re.search(r'<h1\b[^>]*>(.*?)</h1>', html,
+                          re.IGNORECASE | re.DOTALL)
+        h1 = match.group(1) if match else ''
+        try:
+            page_host = (urlparse(page_url).netloc or '').lower()
+        except Exception:
+            page_host = ''
+        mirrors = []
+        seen = set()
+
+        def _scan(anchor):
+            tag = anchor.group(0)
+            href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']',
+                                   tag, re.IGNORECASE)
+            if not href_match:
+                return tag
+            url = html_unescape(str(href_match.group(1) or '').strip())
+            if not url.lower().startswith(('http://', 'https://')):
+                return tag
+            try:
+                link_host = (urlparse(url).netloc or '').lower()
+            except Exception:
+                return tag
+            internal = (not link_host or link_host == page_host
+                        or self._is_sxyprn_host(link_host)
+                        or any(link_host == deny
+                               or link_host.endswith('.' + deny)
+                               for deny in self._SXYPRN_TITLE_LINK_DENYLIST))
+            if internal:
+                return tag          # model / hashtag link: keep its text
+            key = url.strip().lower()
+            if key not in seen:
+                seen.add(key)
+                mirrors.append(url)
+            return ' '              # a mirror is not part of the title
+
+        text = re.sub(r'<a\b.*?</a>', _scan, h1,
+                      flags=re.IGNORECASE | re.DOTALL)
+        title = self._sxyprn_clean_title(re.sub(r'<[^>]+>', ' ', text))
+        return title, mirrors
+
+
+    @staticmethod
+    def _sxyprn_vnfo_sources(html):
+        """[(label, relative_path)] from the player's data-vnfo attribute,
+        best quality first."""
+        match = re.search(r'data-vnfo\s*=\s*(["\'])(.*?)\1',
+                          str(html or ''), re.IGNORECASE | re.DOTALL)
+        if not match:
+            return []
+        try:
+            data = json.loads(html_unescape(match.group(2)))
+        except Exception:
+            return []
+        if not isinstance(data, dict):
+            return []
+        out = []
+        for label, path in data.items():
+            path = str(path or '').strip()
+            if not path or not str(path).startswith('/'):
+                continue
+            out.append((str(label or '').strip(), path))
+        return out
+
+    def _sxyprn_warm_up(self, session, html, page_url):
+        """Fire the player's cjs.php handshake before asking the CDN.
+
+        The site's own player POSTs pid/ut/cipid there first. Failure is not
+        fatal — the CDN answer below is what decides.
+        """
+        try:
+            pid = re.search(r"\bpid\s*:\s*'([^']+)'", html)
+            ut = re.search(r"\but\s*:\s*'([^']+)'", html)
+            cipid = re.search(r"\bcipid\s*:\s*'([^']+)'", html)
+            if not (pid and ut and cipid):
+                return
+            parsed = urlparse(page_url)
+            origin = (f'{parsed.scheme}://{parsed.netloc}'
+                      if parsed.scheme and parsed.netloc else '')
+            session.post(
+                urljoin(page_url, '/php/cjs.php'),
+                data={'pid': pid.group(1), 'ut': ut.group(1),
+                      'cipid': cipid.group(1)},
+                headers={'X-Requested-With': 'XMLHttpRequest',
+                         'Referer': page_url, 'Origin': origin},
+                timeout=8,
+            )
+        except Exception:
+            pass
+
+    def _resolve_sxyprn_source(self, source_url):
+        try:
+            import requests
+        except Exception:
+            return None
+        headers = self._stream_request_headers(source_url, {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        })
+        try:
+            session = requests.Session()
+        except Exception:
+            session = requests
+        try:
+            response = session.get(source_url, headers=headers, timeout=15,
+                                   allow_redirects=True)
+        except Exception as exc:
+            print(f"[SXYPRN] page failed: {exc}")
+            return None
+        if not getattr(response, 'ok', False):
+            print(f"[SXYPRN] page HTTP {getattr(response, 'status_code', '?')}")
+            return None
+        html = response.text or ''
+        page_url = response.url or source_url
+        host = (urlparse(page_url).netloc or '').lower() or 'sxyprn.com'
+        title, mirrors = self._sxyprn_title_and_mirrors(html, page_url)
+        sources = self._sxyprn_vnfo_sources(html)
+        if not sources:
+            print(f"[SXYPRN] no data-vnfo on {page_url[:120]}"
+                  f" ({len(mirrors)} mirror(s) in title)")
+            return None
+        sources.sort(key=lambda item: self._media_url_height_hint(item[0]),
+                     reverse=True)
+        self._sxyprn_warm_up(session, html, page_url)
+        for label, raw_path in sources[:4]:
+            height = self._media_url_height_hint(label)
+            for urlsafe in (True, False):
+                path = self._sxyprn_cdn_path(raw_path, host, urlsafe)
+                if not path:
+                    break
+                cdn_url = f'https://{host}{path}'
+                media_headers = self._media_playback_headers(page_url, cdn_url)
+                try:
+                    probe = session.get(cdn_url, headers=media_headers,
+                                        timeout=15, allow_redirects=False,
+                                        stream=True)
+                except Exception as exc:
+                    print(f"[SXYPRN] cdn probe failed: {exc}")
+                    continue
+                try:
+                    location = str(
+                        probe.headers.get('Location')
+                        or probe.headers.get('location') or '').strip()
+                    status = probe.status_code
+                    content_type = str(
+                        probe.headers.get('Content-Type') or '').lower()
+                finally:
+                    try:
+                        probe.close()
+                    except Exception:
+                        pass
+                if location:
+                    final = urljoin(cdn_url, html_unescape(location))
+                    print(f"[SXYPRN] {len(sources)} source(s) in data-vnfo; "
+                          f"chose {label or 'best'} -> {final[:140]}"
+                          f" ({len(mirrors)} title mirror(s))")
+                    return {
+                        'playback_url': final,
+                        'headers': self._media_playback_headers(page_url, final),
+                        'title': title,
+                        'height': height,
+                        'mirrors': mirrors,
+                        'resolver_provider': 'sxyprn',
+                        'resolved_at_ms': int(time.time() * 1000),
+                    }
+                if status == 200 and (
+                    content_type.startswith('video/')
+                    or path.lower().endswith(('.mp4', '.m4v', '.webm'))
+                ):
+                    print(f"[SXYPRN] {len(sources)} source(s) in data-vnfo; "
+                          f"chose {label or 'best'} direct -> {cdn_url[:140]}"
+                          f" ({len(mirrors)} title mirror(s))")
+                    return {
+                        'playback_url': cdn_url,
+                        'headers': media_headers,
+                        'title': title,
+                        'height': height,
+                        'mirrors': mirrors,
+                        'resolver_provider': 'sxyprn',
+                        'resolved_at_ms': int(time.time() * 1000),
+                    }
+        print(f"[SXYPRN] data-vnfo present but no CDN file answered for "
+              f"{page_url[:120]}")
+        return None
+
     # VOE / pvvstream publish a short teaser as tr_<height>p.mp4 alongside
     # the real <height>p.mp4 renditions, and the teaser sorts first.
     @staticmethod
@@ -39613,6 +39891,13 @@ try {
                 resolved = self._resolve_cyberfile_source(source_url)
             elif self._is_mega_host(host):
                 resolved = self._resolve_mega_source(source_url)
+            elif self._is_sxyprn_host(host):
+                # The stream is not on the page: data-vnfo carries a relative
+                # path that has to be signed (digit sums + base64 token) and
+                # then followed through a 302 to the CDN file. The uploader
+                # also writes other hosters into the h1 title, which become
+                # this row's mirrors.
+                resolved = self._resolve_sxyprn_source(source_url)
             elif self._is_noodle_family_host(host):
                 # Must run before the VOE auto-detect at the end of this
                 # ladder: these pages ARE VOE-format, so _detect_voe_and_resolve

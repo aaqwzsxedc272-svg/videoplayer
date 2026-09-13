@@ -9,6 +9,8 @@ Covers: eroticmv playlist titles, exact 3s arrow seeks, the VOD-proxy routing
 that makes backward seeking work, and the Google search query cleanup.
 """
 import ast
+import base64
+import json
 import os
 import re
 from html import unescape as html_unescape
@@ -30,7 +32,7 @@ class _FakeQTimer:
 G = {
     're': re, 'os': os, 'urlparse': urlparse, 'unquote': unquote,
     'urljoin': urljoin, 'html_unescape': html_unescape, 'print': print,
-    'QTimer': _FakeQTimer,
+    'QTimer': _FakeQTimer, 'base64': base64, 'json': json,
 }
 
 
@@ -882,6 +884,132 @@ cs2 = CollapseStub([PAGE, 'https://example.org/only-one'],
 report(cs2._collapse_duplicate_url_mirrors() is False
        and cs2.notes == [] and cs2.playlist == [PAGE, 'https://example.org/only-one'],
        f'rows that are not mirrors are left alone: {cs2.playlist}')
+
+# ── 11. sxyprn: signed CDN path, and the mirrors written into the h1 ──────────
+class SxyprnStub:
+    _is_sxyprn_host = lift('VideoPlayer', '_is_sxyprn_host')
+    _sxyprn_digit_sum = staticmethod(lift('VideoPlayer', '_sxyprn_digit_sum'))
+    _sxyprn_cdn_token = staticmethod(lift('VideoPlayer', '_sxyprn_cdn_token'))
+    _sxyprn_cdn_path = lift('VideoPlayer', '_sxyprn_cdn_path')
+    _sxyprn_clean_title = staticmethod(lift('VideoPlayer', '_sxyprn_clean_title'))
+    _sxyprn_title_and_mirrors = lift('VideoPlayer', '_sxyprn_title_and_mirrors')
+    _sxyprn_vnfo_sources = staticmethod(lift('VideoPlayer', '_sxyprn_vnfo_sources'))
+    _media_url_height_hint = staticmethod(
+        lift('VideoPlayer', '_media_url_height_hint'))
+    _SXYPRN_TITLE_LINK_DENYLIST = lift_attr(
+        'VideoPlayer', '_SXYPRN_TITLE_LINK_DENYLIST')
+
+
+sx = SxyprnStub()
+for host, want in [('sxyprn.com', True), ('www.sxyprn.com', True),
+                   ('sxyprn.net', True), ('sub.sxyprn.io', True),
+                   ('sxyprn.com:8443', True), ('SXYPRN.COM', True),
+                   ('notsxyprn.com', False), ('sxyprn-clone.com', False),
+                   ('sxyprn.com.evil.net', False), ('sxyprn', False),
+                   ('', False)]:
+    got = sx._is_sxyprn_host(host)
+    report(got == want, f'sxyprn host? {host!r} -> {got}', f'(want {want})')
+
+report(sx._sxyprn_digit_sum('64d19fdf6970d') == 42,
+       f'digit sum of a hex segment: {sx._sxyprn_digit_sum("64d19fdf6970d")}')
+report(sx._sxyprn_digit_sum('1789333200') == 36
+       and sx._sxyprn_digit_sum('abc') == 0 and sx._sxyprn_digit_sum('') == 0,
+       'digit sum of a timestamp / of a segment with no digits')
+
+report(sx._sxyprn_cdn_token(42, 'sxyprn.com', 40) == 'NDItc3h5cHJuLmNvbS00MA..',
+       f'token is base64 with = -> . : {sx._sxyprn_cdn_token(42, "sxyprn.com", 40)}')
+report(sx._sxyprn_cdn_token(42, 'sxyprn.com', 40, urlsafe=False)
+       == 'NDItc3h5cHJuLmNvbS00MA==',
+       'the plain-base64 fallback keeps the padding')
+
+RAW_VNFO = '/sd/1/9/vid/1789333200/64d19fdf6970d/6aa5e08ed8733/0.mp4'
+got_path = sx._sxyprn_cdn_path(RAW_VNFO, 'sxyprn.com')
+report(got_path == ('/sd8/NDItc3h5cHJuLmNvbS00MA../1/9/vid/1789333118/'
+                    '64d19fdf6970d/6aa5e08ed8733/0.mp4'),
+       f'segment 1 gets the 8/<token>, the timestamp is wound back by 82: '
+       f'{got_path}')
+report(sx._sxyprn_cdn_path(RAW_VNFO, 'sxyprn.com', urlsafe=False) == (
+    '/sd8/NDItc3h5cHJuLmNvbS00MA==/1/9/vid/1789333118/'
+    '64d19fdf6970d/6aa5e08ed8733/0.mp4'),
+    'the plain-alphabet variant differs only in the token')
+report(sx._sxyprn_cdn_path(
+    '/sd/1/9/vid/9_MnhCBZC0X9suB3k8e0ww/64d19fdf6970d/6aa5e08ed8733/0.mp4',
+    'sxyprn.com') == ('/sd8/NDItc3h5cHJuLmNvbS00MA../1/9/vid/'
+                      '9_MnhCBZC0X9suB3k8e0ww/64d19fdf6970d/6aa5e08ed8733/0.mp4'),
+    'a non-numeric segment 5 still signs the path, it just is not rewound')
+report(sx._sxyprn_cdn_path('/sd/1/9.mp4', 'sxyprn.com') == ''
+       and sx._sxyprn_cdn_path('', 'sxyprn.com') == '',
+       'a path too short to sign is rejected')
+
+srcs = sx._sxyprn_vnfo_sources(
+    """<div class="vidsnfo" data-vnfo='{"480p":"/a/b/c/d/e/1/2/3.mp4",
+       "720p":"/a/b/c/d/e/1/2/4.mp4"}'></div>""")
+report(sorted(srcs) == [('480p', '/a/b/c/d/e/1/2/3.mp4'),
+                        ('720p', '/a/b/c/d/e/1/2/4.mp4')],
+       f'data-vnfo parsed: {sorted(srcs)}')
+ordered = sorted(srcs, key=lambda it: sx._media_url_height_hint(it[0]),
+                 reverse=True)
+report(ordered[0][0] == '720p', f'best quality probed first: {ordered[0][0]}')
+
+escaped = sx._sxyprn_vnfo_sources(
+    '<span data-vnfo="{&quot;1080p&quot;:&quot;/x/1/2/3/4/5/6/7.mp4&quot;}">')
+report(escaped == [('1080p', '/x/1/2/3/4/5/6/7.mp4')],
+       f'HTML-escaped data-vnfo also parses: {escaped}')
+report(sx._sxyprn_vnfo_sources('<span data-vnfo="{not json">') == []
+       and sx._sxyprn_vnfo_sources('<span data-vnfo="[1,2]">') == []
+       and sx._sxyprn_vnfo_sources('<p>nothing here</p>') == [],
+       'broken JSON, a non-object and a missing attribute all give nothing')
+
+H1 = ('<h1 class="post_el_title"><span class="title_part"><b>NEW</b> '
+      '<a href="https://sxyprn.com/Martina-Smeraldi.html">Martina Smeraldi</a> '
+      '<a href="https://sxyprn.com/LeoLulu.html">LeoLulu</a> New Anal Scene '
+      'With The Hottest French Couple In The World 2026 '
+      '<a class="hash_link" href="https://sxyprn.com/Anal.html?sm=trending">#Anal</a> '
+      '<a class="hash_link" href="https://sxyprn.com/POV.html?sm=trending">#POV</a> '
+      '<a href="https://doodstream.com/e/qlb9nbe23jda" title="&gt;External Link!&lt;">doodstream.com</a> '
+      '<a href="https://lulustream.com/e/iqxjl8h8yted" title="&gt;External Link!&lt;">lulustream.com</a>'
+      '</span></h1>')
+title, found = sx._sxyprn_title_and_mirrors(
+    '<html><body>' + H1 + '<div>rest of page</div></body></html>',
+    'https://sxyprn.com/post/6aa5e08ed8733.html')
+report(found == ['https://doodstream.com/e/qlb9nbe23jda',
+                 'https://lulustream.com/e/iqxjl8h8yted'],
+       f'the hosters in the h1 are the mirrors: {found}')
+report(title == ('NEW Martina Smeraldi LeoLulu New Anal Scene With The '
+                 'Hottest French Couple In The World 2026'),
+       f'row name keeps the models, drops hashtags and hoster text: {title!r}')
+
+bare_title, bare_mirrors = sx._sxyprn_title_and_mirrors(
+    '<h1><a href="https://sxyprn.com/Model.html">Model</a> Solo Scene '
+    '<a href="https://sxyprn.com/Solo.html?sm=trending">#Solo</a></h1>',
+    'https://sxyprn.net/post/x.html')
+report(bare_mirrors == [] and bare_title == 'Model Solo Scene',
+       f'a post with no hosters has no mirrors: {bare_title!r} {bare_mirrors}')
+
+junk_title, junk_mirrors = sx._sxyprn_title_and_mirrors(
+    '<h1>Scene 2026 '
+    '<a href="https://myporn.club/t/ffa6WDgH">TORRENT</a> '
+    '<a href="https://sxypix.com/x">PIX</a> '
+    '<a href="https://sub.sxyprn.com/y">sxyprn</a> '
+    '<a href="https://vidara.to/e/rexdaO4iYPQu">vidara.to</a></h1>',
+    'https://sxyprn.com/post/y.html')
+report(junk_mirrors == ['https://vidara.to/e/rexdaO4iYPQu'],
+       f'torrent/pix/sxyprn links are not mirrors, vidara is: {junk_mirrors}')
+report(junk_title == 'Scene 2026 TORRENT PIX sxyprn',
+       f'and their text stays in the title: {junk_title!r}')
+
+dupe_title, dupe_mirrors = sx._sxyprn_title_and_mirrors(
+    '<h1>Twice <a href="https://doodstream.com/e/aaa">a</a> '
+    '<a href="https://doodstream.com/e/aaa">a again</a></h1>',
+    'https://sxyprn.com/post/z.html')
+report(dupe_mirrors == ['https://doodstream.com/e/aaa'],
+       f'the same hoster listed twice is one mirror: {dupe_mirrors}')
+
+no_h1, no_h1_mirrors = sx._sxyprn_title_and_mirrors(
+    '<html><body><div>no heading</div></body></html>',
+    'https://sxyprn.com/post/w.html')
+report(no_h1 == '' and no_h1_mirrors == [],
+       'a page without an h1 yields nothing rather than garbage')
 
 print()
 print('FAILURES:', FAILS)
