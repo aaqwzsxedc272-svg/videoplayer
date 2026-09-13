@@ -898,6 +898,9 @@ class SxyprnStub:
         lift('VideoPlayer', '_media_url_height_hint'))
     _SXYPRN_TITLE_LINK_DENYLIST = lift_attr(
         'VideoPlayer', '_SXYPRN_TITLE_LINK_DENYLIST')
+    _SXYPRN_MIRROR_STOP_MARKERS = lift_attr(
+        'VideoPlayer', '_SXYPRN_MIRROR_STOP_MARKERS')
+    _sxyprn_scan_anchor = lift('VideoPlayer', '_sxyprn_scan_anchor')
 
 
 sx = SxyprnStub()
@@ -997,6 +1000,22 @@ report(junk_mirrors == ['https://vidara.to/e/rexdaO4iYPQu'],
        f'torrent/pix/sxyprn links are not mirrors, vidara is: {junk_mirrors}')
 report(junk_title == 'Scene 2026 TORRENT PIX sxyprn',
        f'and their text stays in the title: {junk_title!r}')
+
+# the real shape seen on a post that also links other scenes by the model
+other_title, other_mirrors = sx._sxyprn_title_and_mirrors(
+    '<h1>I Take Max Hangover Away With My Tight Pussy After A Long Night '
+    '<a class="hash_link" href="https://sxyprn.com/anal.html?sm=trending">#anal</a> '
+    'FULL HD -> <a href="https://vidara.so/v/OzStT6iJG0R8v">vidara.so</a> '
+    '{More scenes of this model} SCENE 1 -> '
+    '<a href="https://vidara.so/v/6xm99e2D6kzUy">vidara.so</a> SCENE 2 -> '
+    '<a href="https://vidara.so/v/JwJFVVuR4gM9W">vidara.so</a></h1>',
+    'https://sxyprn.com/post/6aa63889680a3.html')
+report(other_mirrors == ['https://vidara.so/v/OzStT6iJG0R8v'],
+       f'only the FULL HD link is a mirror; the SCENE links are other videos: '
+       f'{other_mirrors}')
+report(other_title == ('I Take Max Hangover Away With My Tight Pussy After A '
+                       'Long Night'),
+       f'and the title stops at the {{More scenes}} marker: {other_title!r}')
 
 dupe_title, dupe_mirrors = sx._sxyprn_title_and_mirrors(
     '<h1>Twice <a href="https://doodstream.com/e/aaa">a</a> '

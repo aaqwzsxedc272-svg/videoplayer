@@ -39045,6 +39045,15 @@ try {
         'sxypix.com', 'myporn.club', 'yps.link', 'theporndude.com',
         'zline0.com', 'trafficdeposit.com',
     )
+    # A {marker} like this one starts a section of links to OTHER videos, so
+    # everything after it in the title is neither part of the name nor a
+    # mirror of this one. Observed on a real post:
+    #   ... After A Long Night FULL HD -> vidara.so/v/OzStT6iJG0R8v
+    #   {More scenes of this model} SCENE 1 -> vidara.so/v/6xm99e2D6kzUy ...
+    _SXYPRN_MIRROR_STOP_MARKERS = (
+        'more scene', 'scenes of', 'scene 1', 'scene1', 'other video',
+        'other scene', 'related', 'full video', 'complete video', 'part 2',
+    )
 
     def _is_sxyprn_host(self, host):
         host = str(host or '').lower().strip().strip('.')
@@ -39101,7 +39110,38 @@ try {
         text = re.sub(r'#\w+', ' ', text)
         text = text.replace('|', ' ')
         text = re.sub(r'\s+', ' ', text).strip()
-        return text.strip(' -|')
+        # A trailing quality marker the uploader typed ("FULL HD ->") is not
+        # part of the name. The arrow has to go first or the marker is not at
+        # the end of the string any more.
+        text = text.strip(' -|>:').strip()
+        text = re.sub(r'\s*\b(?:FULL\s*HD|FHD|UHD|4K|\d{3,4}p|HD)\s*$',
+                      '', text, flags=re.IGNORECASE).strip()
+        return text.strip(' -|>:')
+
+    def _sxyprn_scan_anchor(self, tag, page_host, mirrors, seen):
+        """Classify one <a> from the h1. Returns '' for a mirror (drop it, and
+        record it) or the original tag when the link is part of the title."""
+        href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']',
+                               tag, re.IGNORECASE)
+        if not href_match:
+            return tag
+        url = html_unescape(str(href_match.group(1) or '').strip())
+        if not url.lower().startswith(('http://', 'https://')):
+            return tag
+        try:
+            link_host = (urlparse(url).netloc or '').lower()
+        except Exception:
+            return tag
+        if (not link_host or link_host == page_host
+                or self._is_sxyprn_host(link_host)
+                or any(link_host == deny or link_host.endswith('.' + deny)
+                       for deny in self._SXYPRN_TITLE_LINK_DENYLIST)):
+            return tag          # model / hashtag link: keep its text
+        key = url.strip().lower()
+        if key not in seen:
+            seen.add(key)
+            mirrors.append(url)
+        return ''               # a mirror is not part of the title
 
     def _sxyprn_title_and_mirrors(self, html, page_url=''):
         """(title, mirror_urls) taken from the h1 of a sxyprn post page.
@@ -39116,6 +39156,9 @@ try {
         {NEW}-style markers and those URLs are all noise in the row name —
         and so is the anchor TEXT of a mirror link, which is why a mirror
         anchor is dropped whole instead of being flattened to "doodstream.com".
+
+        A {marker} that opens a section of OTHER videos ends the title: those
+        links are different scenes, not mirrors of this one.
         """
         html = html or ''
         match = re.search(r'<h1\b[^>]*>(.*?)</h1>', html,
@@ -39127,35 +39170,30 @@ try {
             page_host = ''
         mirrors = []
         seen = set()
-
-        def _scan(anchor):
-            tag = anchor.group(0)
-            href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']',
-                                   tag, re.IGNORECASE)
-            if not href_match:
-                return tag
-            url = html_unescape(str(href_match.group(1) or '').strip())
-            if not url.lower().startswith(('http://', 'https://')):
-                return tag
-            try:
-                link_host = (urlparse(url).netloc or '').lower()
-            except Exception:
-                return tag
-            internal = (not link_host or link_host == page_host
-                        or self._is_sxyprn_host(link_host)
-                        or any(link_host == deny
-                               or link_host.endswith('.' + deny)
-                               for deny in self._SXYPRN_TITLE_LINK_DENYLIST))
-            if internal:
-                return tag          # model / hashtag link: keep its text
-            key = url.strip().lower()
-            if key not in seen:
-                seen.add(key)
-                mirrors.append(url)
-            return ' '              # a mirror is not part of the title
-
-        text = re.sub(r'<a\b.*?</a>', _scan, h1,
-                      flags=re.IGNORECASE | re.DOTALL)
+        # Walk the h1 in document order: plain text is kept, an internal
+        # anchor (model / hashtag) keeps its text, a mirror anchor is dropped
+        # whole, and a {marker} that opens an "other videos" section ends the
+        # title outright — everything after it belongs to a different video.
+        chunks = []
+        pos = 0
+        for token_match in re.finditer(r'\{[^{}]*\}|<a\b.*?</a>', h1,
+                                       re.IGNORECASE | re.DOTALL):
+            chunks.append(h1[pos:token_match.start()])
+            token = token_match.group(0)
+            pos = token_match.end()
+            if token.startswith('{'):
+                low = token.lower()
+                if any(marker in low
+                       for marker in self._SXYPRN_MIRROR_STOP_MARKERS):
+                    # Everything after this marker describes other videos.
+                    pos = len(h1)
+                    break
+                chunks.append(' ')
+                continue
+            chunks.append(self._sxyprn_scan_anchor(
+                token, page_host, mirrors, seen) or ' ')
+        chunks.append(h1[pos:])
+        text = ''.join(chunks)
         title = self._sxyprn_clean_title(re.sub(r'<[^>]+>', ' ', text))
         return title, mirrors
 
