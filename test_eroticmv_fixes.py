@@ -701,6 +701,12 @@ class _FakePlaylistWidget:
     def __init__(self, labels):
         self._labels = list(labels)
 
+    def rowCount(self):
+        return len(self._labels)
+
+    def insertRow(self, idx):
+        self._labels.insert(idx, '')
+
     def item(self, idx):
         if 0 <= idx < len(self._labels):
             return _FakeTreeItem([self._labels[idx]])
@@ -815,9 +821,11 @@ class CollapseStub(AbsorbStub):
     def _mirror_path_key(self, file_path):
         return str(file_path or '').strip().rstrip('/').lower()
 
-    def __init__(self, playlist, labels, panel_urls=()):
+    def __init__(self, playlist, labels, panel_urls=(), split_urls=()):
         AbsorbStub.__init__(self, {}, panel_urls=panel_urls)
         self.playlist = list(playlist)
+        self._split_urls = list(split_urls)
+        self.rebuilds = 0
         self.playlist_widget = _FakePlaylistWidget(labels)
         self._playlist_url_mirrors = {}
         self.current_file = ''
@@ -854,10 +862,19 @@ class CollapseStub(AbsorbStub):
         pass
 
     def _split_conflicting_fileditch_mirrors(self):
-        pass
+        # Mirrors the real helper exactly: it inserts into self.playlist and
+        # never touches playlist_widget.
+        for url in self._split_urls:
+            self.playlist.insert(1, url)
+        return bool(self._split_urls)
 
     def _split_conflicting_pornhub_mirrors(self):
-        pass
+        return False
+
+    def rebuild_playlist_table(self):
+        self.rebuilds += 1
+        self.playlist_widget._labels = ['row'] * len(self.playlist)
+        return True
 
     def apply_playlist_filtering(self):
         self.filtered_out += 1
@@ -1029,6 +1046,26 @@ no_h1, no_h1_mirrors = sx._sxyprn_title_and_mirrors(
     'https://sxyprn.com/post/w.html')
 report(no_h1 == '' and no_h1_mirrors == [],
        'a page without an h1 yields nothing rather than garbage')
+
+# ── 10c. A mirror split must not desync the model from the widget ─────────────
+SPLIT_URL = 'https://fileditchfiles.me/other/SomeOtherFile.mp4'
+sp = CollapseStub([PAGE, MIRROR], [LABEL, 'javstreamhq mirror'],
+                  split_urls=[SPLIT_URL])
+sp._collapse_duplicate_url_mirrors()
+report(sp.rebuilds == 1,
+       f'a split that added a row rebuilds the table: {sp.rebuilds} rebuild(s)')
+report(len(sp.playlist) == sp.playlist_widget.rowCount(),
+       f'model and widget agree: {len(sp.playlist)} playlist entries vs '
+       f'{sp.playlist_widget.rowCount()} widget rows')
+report(SPLIT_URL in sp.playlist, f'the detached file is its own row: {SPLIT_URL}')
+
+no_split = CollapseStub([PAGE, MIRROR], [LABEL, 'javstreamhq mirror'])
+no_split._collapse_duplicate_url_mirrors()
+report(no_split.rebuilds == 0,
+       f'no split -> no needless rebuild: {no_split.rebuilds} rebuild(s)')
+report(len(no_split.playlist) == no_split.playlist_widget.rowCount(),
+       f'an ordinary collapse stays in sync: {len(no_split.playlist)} vs '
+       f'{no_split.playlist_widget.rowCount()}')
 
 print()
 print('FAILURES:', FAILS)

@@ -24110,14 +24110,34 @@ try {
             print(f'[LINK_PANEL] mirror relabel failed: {exc}')
 
         if changed:
+            # The split helpers detach mirrors that are not really mirrors
+            # (a fileditch/pornhub row whose mirror list holds a DIFFERENT
+            # file) by inserting them into self.playlist — and they do not
+            # touch playlist_widget. That leaves the model longer than the
+            # view, so every later row index is off by the number of rows
+            # inserted: apply_playlist_filtering() below reads
+            # self.playlist[i] for widget row i and hides the wrong rows,
+            # and the inserted links stay invisible until something rebuilds
+            # the table (field: pasted links did not appear until the
+            # playlist was saved and reopened; a loaded playlist showed
+            # links that were never saved). Rebuild first, exactly like the
+            # user-triggered _split_mirrors_into_playlist does.
+            split_changed = False
             try:
-                self._split_conflicting_fileditch_mirrors()
+                split_changed = bool(
+                    self._split_conflicting_fileditch_mirrors()) or split_changed
             except Exception:
                 pass
             try:
-                self._split_conflicting_pornhub_mirrors()
+                split_changed = bool(
+                    self._split_conflicting_pornhub_mirrors()) or split_changed
             except Exception:
                 pass
+            if split_changed:
+                try:
+                    self.rebuild_playlist_table()
+                except Exception as exc:
+                    print(f'[PLAYLIST] rebuild after mirror split failed: {exc}')
             try:
                 self.apply_playlist_filtering()
                 self.playlist_widget.viewport().update()
