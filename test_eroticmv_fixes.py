@@ -674,14 +674,61 @@ report([u.rsplit('/', 1)[-1] for u in only_trailers] == ['tr_720p.mp4', 'tr_240p
 
 report(v._rank_real_media_candidates([], '') == [], 'no candidates -> no candidates')
 
-# ── 10. Captured-links panel must not claim a row the collapse deleted ───────
+# ── 10. Captured-links panel: mirrors share one row, and say so ───────────────
+class _FakeTreeItem:
+    """Stand-in for the QTreeWidgetItem rows in the Captured-links panel."""
+
+    def __init__(self, cols):
+        self._cols = list(cols)
+
+    def text(self, col):
+        return self._cols[col] if col < len(self._cols) else ''
+
+    def setText(self, col, value):
+        while len(self._cols) <= col:
+            self._cols.append('')
+        self._cols[col] = value
+
+
+class _FakeViewport:
+    def update(self):
+        pass
+
+
+class _FakePlaylistWidget:
+    def __init__(self, labels):
+        self._labels = list(labels)
+
+    def item(self, idx):
+        if 0 <= idx < len(self._labels):
+            return _FakeTreeItem([self._labels[idx]])
+        return None
+
+    def removeRow(self, idx):
+        if 0 <= idx < len(self._labels):
+            del self._labels[idx]
+
+    def viewport(self):
+        return _FakeViewport()
+
+
 class AbsorbStub:
+    """Real _relabel_absorbed_links; the rest of the panel is faked."""
+
     _relabel_absorbed_links = lift('VideoPlayer', '_relabel_absorbed_links')
 
-    def __init__(self, absorbed, key_raises=False):
+    def __init__(self, absorbed, panel_urls=(), key_raises=False):
         self._last_mirror_absorptions = absorbed
         self._key_raises = key_raises
         self.notes = []
+        self._link_flow_rows = {}
+        for u in panel_urls:
+            # key_raises stubs cannot build the dict through _link_flow_key;
+            # they fall back to the same lowercase form main.py uses.
+            k = (str(u or '').strip().lower() if key_raises
+                 else self._link_flow_key(u))
+            self._link_flow_rows[k] = _FakeTreeItem(
+                ['STREAM  ' + u, 'done', 'added to playlist'])
 
     def _link_flow_key(self, url):
         if self._key_raises:
@@ -690,33 +737,151 @@ class AbsorbStub:
 
     def _note_link(self, url, status='', detail=''):
         self.notes.append((url, status, detail))
+        try:
+            key = self._link_flow_key(url)
+        except Exception:
+            key = str(url or '').strip().lower()
+        item = self._link_flow_rows.get(key)
+        if item is not None:
+            item.setText(1, status)
+            item.setText(2, detail)
 
 
 PAGE = 'https://javgg.net/v/abc'          # the row that survives
 MIRROR = 'https://javstreamhq.to/e/abc'   # folded in, row deleted
-a = AbsorbStub({MIRROR: PAGE})
-a._relabel_absorbed_links([MIRROR, PAGE])
-report(a.notes == [(MIRROR, 'mirror',
-                    'merged into an existing row — use its mirror menu')],
-       f'absorbed link relabelled, surviving row left alone: {a.notes}')
+LABEL = 'Dressage (1986)'
+MERGED = ('merged into \u201c' + LABEL + '\u201d \u2014 use its mirror menu')
 
-b = AbsorbStub({})
-b._relabel_absorbed_links([MIRROR])
-report(b.notes == [], f'nothing absorbed -> nothing relabelled: {b.notes}')
+a = AbsorbStub({MIRROR: (PAGE, LABEL)}, panel_urls=[MIRROR, PAGE])
+a._relabel_absorbed_links()
+report(a.notes == [(MIRROR, 'mirror', MERGED)],
+       f'absorbed link relabelled and names the row that kept it: {a.notes}')
 
-c = AbsorbStub({MIRROR: PAGE}, key_raises=True)
-c._relabel_absorbed_links([MIRROR])
-report(c.notes == [(MIRROR, 'mirror',
-                    'merged into an existing row — use its mirror menu')],
-       f'a raising key function falls back and still matches: {c.notes}')
+b = AbsorbStub({MIRROR: (PAGE, LABEL)}, panel_urls=[])
+b._relabel_absorbed_links()
+report(b.notes == [] and b._link_flow_rows == {},
+       f'a link that was never captured gets no panel row of its own: {b.notes}')
 
-d = AbsorbStub({MIRROR: PAGE})
-d._relabel_absorbed_links([])
-report(d.notes == [], f'no added urls -> no notes: {d.notes}')
+c = AbsorbStub({}, panel_urls=[MIRROR])
+c._relabel_absorbed_links()
+report(c.notes == [], f'nothing absorbed -> nothing relabelled: {c.notes}')
 
-e = AbsorbStub({MIRROR: PAGE})
-e._relabel_absorbed_links(['https://unrelated.example/x'])
-report(e.notes == [], f'an unrelated link is untouched: {e.notes}')
+d = AbsorbStub({MIRROR: (PAGE, LABEL)}, panel_urls=[MIRROR], key_raises=True)
+d._relabel_absorbed_links()
+report(d.notes == [(MIRROR, 'mirror', MERGED)],
+       f'a raising key function falls back and still matches: {d.notes}')
+
+e = AbsorbStub({MIRROR: (PAGE, LABEL)}, panel_urls=[MIRROR])
+e._relabel_absorbed_links()
+e._relabel_absorbed_links()
+report(len(e.notes) == 1,
+       f're-running the collapse does not re-note the same row: {len(e.notes)} note(s)')
+
+f = AbsorbStub({MIRROR: PAGE}, panel_urls=[MIRROR])
+f._relabel_absorbed_links()
+report(f.notes == [(MIRROR, 'mirror',
+                    'merged into an existing row \u2014 use its mirror menu')],
+       f'an absorption recorded without a label still relabels: {f.notes}')
+
+g = AbsorbStub({MIRROR: (PAGE, 'X' * 80)}, panel_urls=[MIRROR])
+g._relabel_absorbed_links()
+report(len(g.notes) == 1 and g.notes[0][2].count('X') == 57
+       and '\u2026' in g.notes[0][2],
+       f'an over-long row label is truncated to 57 chars + ellipsis: '
+       f'{g.notes[0][2].count("X")} X(s) kept')
+
+h = AbsorbStub({MIRROR: (PAGE, LABEL)},
+               panel_urls=[MIRROR, 'https://unrelated.example/x'])
+h._relabel_absorbed_links()
+report(h.notes == [(MIRROR, 'mirror', MERGED)],
+       f'an unrelated captured link is untouched: {h.notes}')
+
+
+# ── 10b. The collapse itself: one row, mirrors stored, panel corrected ────────
+class CollapseStub(AbsorbStub):
+    """Runs the REAL _collapse_duplicate_url_mirrors over two mirror rows."""
+
+    _collapse_duplicate_url_mirrors = lift(
+        'VideoPlayer', '_collapse_duplicate_url_mirrors')
+
+    # The grouping keys are unchanged by this fix and depend on the metadata
+    # layer; stub them so the collapse's own row/mirror/panel behaviour is
+    # what runs here.
+    def _mirror_display_group_key(self, file_path):
+        return str(file_path or '').rsplit('/', 1)[-1].lower()
+
+    def _mirror_path_key(self, file_path):
+        return str(file_path or '').strip().rstrip('/').lower()
+
+    def __init__(self, playlist, labels, panel_urls=()):
+        AbsorbStub.__init__(self, {}, panel_urls=panel_urls)
+        self.playlist = list(playlist)
+        self.playlist_widget = _FakePlaylistWidget(labels)
+        self._playlist_url_mirrors = {}
+        self.current_file = ''
+        self._mirror_exact_name_cache = {}
+        self._mirror_group_cache = {}
+        self._mirror_path_cache = {}
+        self.filtered_out = 0
+
+    def _is_remote_url(self, p):
+        return str(p or '').lower().startswith('http')
+
+    def _canonicalize_remote_source_url(self, p):
+        return p
+
+    def _is_jav_site_host(self, host):
+        return False
+
+    def _mirrors_for_visible_url(self, p):
+        return list(self._playlist_url_mirrors.get(p) or [])
+
+    def _set_mirrors_for_primary(self, primary, mirrors):
+        self._playlist_url_mirrors[primary] = list(mirrors)
+
+    def _unique_paths(self, paths):
+        out, seen = [], set()
+        for p in paths:
+            k = str(p or '').strip().lower()
+            if k and k not in seen:
+                seen.add(k)
+                out.append(p)
+        return out
+
+    def _remember_active_mirror(self, a, b):
+        pass
+
+    def _split_conflicting_fileditch_mirrors(self):
+        pass
+
+    def _split_conflicting_pornhub_mirrors(self):
+        pass
+
+    def apply_playlist_filtering(self):
+        self.filtered_out += 1
+
+
+cs = CollapseStub([PAGE, MIRROR], ['  ' + LABEL, 'javstreamhq mirror'],
+                  panel_urls=[MIRROR, PAGE])
+changed = cs._collapse_duplicate_url_mirrors()
+report(changed is True and cs.playlist == [PAGE],
+       f'mirrors share one row: playlist={cs.playlist}')
+report(cs._mirrors_for_visible_url(PAGE) == [MIRROR],
+       f'the folded link is stored on the surviving row, so its mirror menu '
+       f'can still play it: {cs._mirrors_for_visible_url(PAGE)}')
+report(cs._playlist_url_mirrors and MIRROR not in cs.playlist,
+       'the absorbed row is gone from the playlist')
+report(cs.notes == [(MIRROR, 'mirror', MERGED)],
+       f'and the panel says where it went, naming that row: {cs.notes}')
+report(cs.playlist_widget.item(0) is not None
+       and cs.playlist_widget.item(1) is None,
+       'the widget lost exactly the absorbed row')
+
+cs2 = CollapseStub([PAGE, 'https://example.org/only-one'],
+                   [LABEL, 'something else'], panel_urls=[PAGE])
+report(cs2._collapse_duplicate_url_mirrors() is False
+       and cs2.notes == [] and cs2.playlist == [PAGE, 'https://example.org/only-one'],
+       f'rows that are not mirrors are left alone: {cs2.playlist}')
 
 print()
 print('FAILURES:', FAILS)
