@@ -3570,10 +3570,58 @@ class MpvMediaPlayerAdapter(QObject):
         except Exception as exc:
             print(f"[mpv] seek failed: {exc}")
 
+    def _mpv_time_pos_ms(self):
+        """Live ``time-pos`` from mpv in milliseconds, or None if unreadable."""
+        try:
+            value = self._mpv.get_property('time-pos')
+            if value is None:
+                return None
+            return int(float(value) * 1000)
+        except Exception:
+            return None
+
+    def _issue_absolute_seek(self, target_ms, exact=True):
+        """Seek to an absolute millisecond target. Returns True on success."""
+        flags = ('absolute', 'exact') if exact else ('absolute',)
+        try:
+            self._mpv.seek(target_ms / 1000.0, *flags)
+            self._pending_seek_ms = None
+            return True
+        except Exception as exc:
+            print(f"[mpv] {'exact ' if exact else 'keyframe '}seek to {target_ms}ms failed: {exc}")
+            return False
+
+    def _verify_seek_landed(self, target_ms, token):
+        """mpv swallows an 'exact' seek it cannot honour instead of raising,
+        so confirm time-pos actually moved and retry keyframe absolute if it
+        did not. Still an ABSOLUTE seek at the 3s target — never 'relative',
+        which is what produced the long GOP-sized skip."""
+        if getattr(self, '_seek_verify_token', None) is not token:
+            return  # a newer seek superseded this one
+        self._seek_verify_token = None
+        if self._mpv is None:
+            return
+        actual = self._mpv_time_pos_ms()
+        if actual is None:
+            return
+        if abs(actual - target_ms) <= 1500:
+            return
+        print(f"[mpv] exact seek to {target_ms}ms did not land (time-pos {actual}ms); "
+              f"retrying keyframe absolute")
+        self._issue_absolute_seek(target_ms, exact=False)
+
     def seekRelative(self, delta_ms):
-        """Arrow-key seek. HLS VOD-as-live often reports a stuck time-pos,
-        so absolute position()+N does nothing while the slider (absolute
-        fraction of duration) still works. Relative keyframe seek jumps."""
+        """Arrow-key seek: move by exactly *delta_ms* around the current
+        position, on HLS as well as local files.
+
+        A keyframe-relative seek (``seek(3, 'relative')``) lands on the
+        neighbouring GOP, which for HLS is routinely 8-10s — far more than
+        the 3s the arrow keys promise. Instead read mpv's own ``time-pos``,
+        add the delta, clamp to the media duration and seek to that absolute
+        target with 'exact'. Absolute is also what makes Left work after
+        clicking ahead on the time bar: the target is a timestamp, not an
+        offset into whatever happens to be buffered.
+        """
         try:
             delta_ms = int(delta_ms or 0)
         except Exception:
@@ -3583,15 +3631,28 @@ class MpvMediaPlayerAdapter(QObject):
         if self._mpv is None or not self._file_loaded:
             self.setPosition(max(0, self.position() + delta_ms))
             return
+        # mpv's live time-pos is authoritative; the cached observer value is
+        # the fallback when the property read fails.
+        base_ms = self._mpv_time_pos_ms()
+        if base_ms is None:
+            base_ms = self.position()
         try:
-            if self._is_hls_source():
-                self._mpv.seek(delta_ms / 1000.0, 'relative')
-                self._pending_seek_ms = None
-            else:
-                self.setPosition(max(0, self.position() + delta_ms))
-        except Exception as exc:
-            print(f"[mpv] relative seek failed: {exc}")
-            self.setPosition(max(0, self.position() + delta_ms))
+            target_ms = max(0, int(base_ms) + delta_ms)
+        except Exception:
+            target_ms = max(0, delta_ms)
+        total_ms = self.duration()
+        if total_ms > 0:
+            target_ms = min(target_ms, total_ms)
+        if self._issue_absolute_seek(target_ms, exact=True):
+            token = object()
+            self._seek_verify_token = token
+            try:
+                QTimer.singleShot(
+                    700, lambda: self._verify_seek_landed(target_ms, token))
+            except Exception:
+                self._seek_verify_token = None
+        elif not self._issue_absolute_seek(target_ms, exact=False):
+            self.setPosition(target_ms)
 
     def stepForward(self):
         if not self._mpv:
@@ -10667,6 +10728,7 @@ class VideoPlayer(QMainWindow):
         'waiting for browser': '#7fb3d5', 'in app browser': '#5aa8e8',
         'resolving (browser)': '#5aa8e8', 'expanding': '#e0b33c',
         'done': '#5ec26a', 'failed': '#e05a5a', 'duplicate': '#9aa0a6',
+        'mirror': '#9aa0a6',
     }
 
     def _on_link_flow_note(self, url, status, detail):
@@ -14261,6 +14323,56 @@ try {
             except Exception:
                 return False
 
+    # Extensions removed from a playlist name before it is used as a web
+    # search query. A row's display name is a FILENAME, so local videos
+    # arrive here as "Some Movie.mp4" and Google was searched for the
+    # extension too, which biases results toward file hosts instead of the
+    # title. Same four lists the URL-stem fallback below already used.
+    _SEARCH_QUERY_STRIPPED_EXTENSIONS = (
+        VIDEO_EXTENSIONS + AUDIO_EXTENSIONS + IMAGE_EXTENSIONS + ARCHIVE_EXTENSIONS
+    )
+
+    # Linked series/sequel rows are displayed as "<name>  ·  2/3" (see
+    # _refresh_playlist_row_appearance), and _get_playlist_name_for_path
+    # returns that decorated widget text. The counter must go before the
+    # extension is stripped, or the ".mp4" is no longer at the end of the
+    # string and survives into the query.
+    _SEARCH_QUERY_SERIES_COUNTER_RE = re.compile(
+        r'\s*[·•]\s*\d+\s*/\s*\d+\s*$')
+
+    def _google_search_query_for_name(self, name):
+        """Turn a playlist display name into a clean search query.
+
+        Drops the display-only decoration that leaks into the Google query:
+        the "- " seen marker prefix, a linked-series " · 2/3" counter, and a
+        trailing media / archive extension. Only ONE trailing known
+        extension is removed, so titles that legitimately end in a
+        dot-word ("Mr. Robot", "Dressage (1986)") are untouched.
+        """
+        text = str(name or '')
+        try:
+            text = self._strip_seen_display_prefix(text)
+        except Exception:
+            text = re.sub(r'^\s*-\s+', '', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        if not text:
+            return ''
+        try:
+            text = self._SEARCH_QUERY_SERIES_COUNTER_RE.sub('', text).strip()
+        except Exception:
+            pass
+        try:
+            pattern = (
+                r'\.(?:'
+                + '|'.join(re.escape(ext.lstrip('.'))
+                           for ext in self._SEARCH_QUERY_STRIPPED_EXTENSIONS)
+                + r')$'
+            )
+            text = re.sub(pattern, '', text, flags=re.IGNORECASE).strip()
+        except Exception:
+            pass
+        return text
+
     def search_playlist_items_in_google(self, rows=None):
         """Open one Google search per selected playlist item, all as tabs in
         ONE Brave window — the user's real/main profile, exactly like the
@@ -14295,15 +14407,15 @@ try {
         seen_names = set()
         for row in rows:
             path = playlist[row]
-            name = self._get_playlist_name_for_path(path)
-            name = str(name or '').strip()
+            # The stored/display name is cleaned the same way as the
+            # filename fallback, so an extension never reaches the query
+            # whichever branch supplied the name.
+            name = self._google_search_query_for_name(
+                self._get_playlist_name_for_path(path))
             if not name:
                 # Fall back to the filename/URL stem for items with no stored name.
                 base = str(path).rstrip('/').split('/')[-1].split('\\')[-1]
-                name = re.sub(r'\.(?:' + '|'.join(ext.lstrip('.') for ext in
-                                                  VIDEO_EXTENSIONS + AUDIO_EXTENSIONS + IMAGE_EXTENSIONS + ARCHIVE_EXTENSIONS)
-                              + r')$', '', base, flags=re.IGNORECASE).strip()
-            name = re.sub(r'\s+', ' ', name).strip()
+                name = self._google_search_query_for_name(base)
             if not name:
                 continue
             key = name.lower()
@@ -21763,6 +21875,37 @@ try {
             return bare in ('eporner.com', 'eporner.eu')
         return any(t in host for t in self._JAV_SITE_TOKENS if t != 'eporner')
 
+    def _jav_site_domain_for_host(self, host):
+        """Registrable jav-site domain for *host*, or '' when it isn't one.
+
+        eroticmv rows point at the CDN (vidcdn2.eroticmv.com) once the
+        base64 hostname is unwrapped, and _is_jav_site_host matches that on
+        a substring test — but a bare CDN host serves no website and no
+        favicon. The icon belongs to the site (eroticmv.com), so collapse
+        the host to the domain the site token names.
+        """
+        host = str(host or '').lower().strip('.')
+        if not host:
+            return ''
+        bare = host[4:] if host.startswith('www.') else host
+        if not self._is_jav_site_host(bare):
+            return ''
+        if 'eporner' in bare:
+            return bare if bare in ('eporner.com', 'eporner.eu') else ''
+        labels = bare.split('.')
+        for token in self._JAV_SITE_TOKENS:
+            if token == 'eporner' or token not in bare:
+                continue
+            if '.' in token:
+                # The token already names a registrable domain (roshy.tv,
+                # jav.guru, sextb.net, javhd.today) — accept it only when
+                # the host really is that domain or a subdomain of it.
+                if bare == token or bare.endswith('.' + token):
+                    return token
+                continue
+            return '.'.join(labels[-2:]) if len(labels) >= 2 else bare
+        return ''
+
     def _jav_identity_key(self, url):
         try:
             return self._canonicalize_remote_source_url(
@@ -21965,14 +22108,25 @@ try {
                 hoster = self._favicon_hoster_brand_from_context(entry)
             if not hoster:
                 hoster = self._favicon_brand_domain_for_host(entry_host)
-            return entry_host, (hoster or '')
+            # The row URL is not always the site: an eroticmv row points at
+            # vidcdn2.eroticmv.com once the base64 hostname is unwrapped,
+            # and a CDN host has no favicon to fetch. Prefer the harvested
+            # page's host, then the registrable site domain the host names.
+            site_domain = ''
+            if site_host:
+                site_domain = self._jav_site_domain_for_host(site_host) or site_host
+            if not site_domain:
+                site_domain = (self._jav_site_domain_for_host(entry_host)
+                               or entry_host)
+            return site_domain, (hoster or '')
         if site_host:
             # R57: after a mirror switch the row URL is the hoster
             # (emturbovid / vidara / dood / …). Keep the jav-site icon
             # and pair it with THIS hoster's icon.
             hoster = self._favicon_brand_domain_for_host(entry_host) \
                 or self._favicon_hoster_brand_from_context(entry)
-            return site_host, (hoster or '')
+            return (self._jav_site_domain_for_host(site_host) or site_host), \
+                (hoster or '')
         return '', self._favicon_host_domain_for_entry(entry)
 
     def _favicon_host_domain_for_entry(self, entry):
@@ -22114,6 +22268,92 @@ try {
             print(f"[FAVICON] placeholder probe failed: {e}")
         return placeholder
 
+    # Icon rel values in preference order. A WordPress site (javgg)
+    # typically serves the WordPress default mark at /favicon.ico while its
+    # HTML declares the real site icon under /wp-content/uploads/, so
+    # declared links must be tried BEFORE the bare well-known paths.
+    _FAVICON_HTML_REL_PREFERENCE = ('icon', 'shortcut icon', 'apple-touch-icon')
+
+    @staticmethod
+    def _favicon_tag_attr(tag, attr):
+        """Value of an HTML attribute inside a tag, quoted or bare."""
+        match = re.search(
+            attr + r'\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))',
+            tag, flags=re.IGNORECASE)
+        if not match:
+            return ''
+        raw = next((g for g in match.groups() if g is not None), '')
+        return html_unescape(raw).strip()
+
+    def _favicon_http_get(self, url, headers, timeout=6, want_text=False):
+        """GET with a browser TLS fingerprint first, then plain requests.
+
+        javgg/eroticmv sit behind anti-bot CDNs that answer a plain
+        ``requests`` call with 403 or a challenge page — the same reason the
+        grabbers fetch those pages through curl_cffi. Returns
+        ``(body, content_type)``; body is None when nothing answered 200.
+        """
+        try:
+            import curl_cffi.requests as cfreq
+            response = cfreq.get(url, impersonate='chrome131', headers=headers,
+                                 timeout=timeout, allow_redirects=True)
+            if getattr(response, 'status_code', 0) == 200:
+                ctype = str((getattr(response, 'headers', None) or {})
+                            .get('Content-Type') or '')
+                body = (response.text or '') if want_text else (response.content or b'')
+                return body, ctype
+        except Exception:
+            pass
+        try:
+            import requests
+            response = requests.get(url, headers=headers, timeout=timeout,
+                                    allow_redirects=True)
+            if response.ok:
+                ctype = str(response.headers.get('Content-Type') or '')
+                return (response.text if want_text else response.content), ctype
+        except Exception:
+            pass
+        return None, ''
+
+    def _favicon_urls_declared_in_html(self, domain, headers):
+        """Absolute icon URLs the site declares in its own HTML, best first.
+
+        Browsers do this before falling back to /favicon.ico, and it is the
+        only way to get a WordPress site's real icon: its /favicon.ico is
+        the generic WP mark, while <link rel="icon"> points at the uploaded
+        site icon.
+        """
+        urls = []
+        page = f'https://{domain}/'
+        try:
+            html_text, _ctype = self._favicon_http_get(page, headers, want_text=True)
+        except Exception as exc:
+            print(f"[FAVICON] {domain}: homepage read failed: {exc}")
+            return urls
+        if not html_text or '<link' not in str(html_text).lower():
+            return urls
+        ranked = []
+        for match in re.finditer(r'<link\b[^>]*>', str(html_text), flags=re.IGNORECASE):
+            tag = match.group(0)
+            rel = self._favicon_tag_attr(tag, 'rel').lower()
+            if rel not in self._FAVICON_HTML_REL_PREFERENCE:
+                continue
+            href = self._favicon_tag_attr(tag, 'href')
+            if not href:
+                continue
+            try:
+                absolute = urljoin(page, href)
+            except Exception:
+                continue
+            if absolute.startswith(('http://', 'https://')):
+                ranked.append((self._FAVICON_HTML_REL_PREFERENCE.index(rel), absolute))
+        for _rank, absolute in sorted(ranked, key=lambda pair: pair[0]):
+            if absolute not in urls:
+                urls.append(absolute)
+        if urls:
+            print(f"[FAVICON] {domain}: {len(urls)} declared icon(s) — {urls[0]}")
+        return urls
+
     def _fetch_favicon_worker(self, domain):
         """Background-thread worker: download a small favicon image for domain."""
         data = None
@@ -22137,19 +22377,20 @@ try {
                 if _alias and _alias not in _candidates:
                     _candidates.append(_alias)
             for _c in _candidates:
-                _own = [f'https://{_c}/favicon.ico']
+                _own = []
+                try:
+                    _own.extend(self._favicon_urls_declared_in_html(_c, headers))
+                except Exception as exc:
+                    print(f"[FAVICON] {_c}: declared-icon lookup failed: {exc}")
+                _own.append(f'https://{_c}/favicon.ico')
                 if not _c.startswith('www.'):
                     _own.append(f'https://www.{_c}/favicon.ico')
                 _own.append(f'https://{_c}/apple-touch-icon.png')
                 for _u in _own:
-                    try:
-                        r = requests.get(_u, headers=headers, timeout=6, allow_redirects=True)
-                    except Exception:
-                        continue
-                    body = r.content if r.ok else b''
+                    body, ctype = self._favicon_http_get(_u, headers)
                     if not body or len(body) < 32:
                         continue
-                    ctype = str(r.headers.get('Content-Type') or '').lower()
+                    ctype = str(ctype or '').lower()
                     if 'text/html' in ctype or 'application/json' in ctype:
                         continue
                     magic = body[:12]
@@ -23762,6 +24003,13 @@ try {
             grouped.setdefault(key, []).append((idx, path))
 
         remove_indexes = set()
+        # absorbed playlist path -> (the surviving row it was folded into,
+        # that row's playlist label). Keyed by PATH, not by the display-group
+        # key: every row in a group shares that key, including the primary, so
+        # it cannot tell an absorbed row from the survivor. The Captured-links
+        # panel needs this because it reports "added to playlist" per URL
+        # before this pass deletes the absorbed rows.
+        absorbed_by_path = {}
         for key, items in grouped.items():
             unique_items = []
             seen_paths = set()
@@ -23810,8 +24058,19 @@ try {
                 changed = True
 
             absorbed_current = ''
+            # Name the surviving row in the Captured-links panel. primary_idx
+            # still points at a live widget row here: nothing is deleted until
+            # the remove_indexes pass below.
+            _primary_label = ''
+            try:
+                _p_item = self.playlist_widget.item(primary_idx)
+                if _p_item is not None:
+                    _primary_label = str(_p_item.text(0) or '').strip()
+            except Exception:
+                _primary_label = ''
             for idx, path in unique_items[1:]:
                 remove_indexes.add(idx)
+                absorbed_by_path[path] = (primary, _primary_label)
                 if current_key and self._mirror_path_key(path) == current_key:
                     absorbed_current = path
             if absorbed_current and self._mirror_path_key(primary) != current_key:
@@ -23839,6 +24098,17 @@ try {
                     pass
                 changed = True
 
+        self._last_mirror_absorptions = absorbed_by_path
+        # The panel reported these URLs as 'added to playlist' before this
+        # pass deleted their rows. Corrected here, inside the collapse, so
+        # every caller is covered — the add path is not the only one that
+        # captures links (missav capture, voe capture, stream albums,
+        # playlist load all reach this).
+        try:
+            self._relabel_absorbed_links()
+        except Exception as exc:
+            print(f'[LINK_PANEL] mirror relabel failed: {exc}')
+
         if changed:
             try:
                 self._split_conflicting_fileditch_mirrors()
@@ -23854,6 +24124,53 @@ try {
             except Exception:
                 pass
         return changed
+
+    def _relabel_absorbed_links(self):
+        """Correct the Captured-links panel after a mirror collapse.
+
+        Mirrors deliberately share one playlist row: the collapse deletes the
+        extra rows and stores their URLs on the surviving row
+        (_playlist_url_mirrors), reachable from its mirror menu. The panel had
+        already reported those URLs as 'added to playlist', which reads as a
+        lost link -- that is the reported symptom: links that appear in the
+        popup but never show up in the playlist. Name the row the link landed
+        in instead.
+
+        Only panel rows that already exist are touched. _note_link() creates a
+        row for any URL it has not seen, and this runs from inside the collapse
+        (which also fires on playlist load), so without that guard a saved
+        playlist full of mirrors would fill the panel with links that were
+        never captured this session.
+        """
+        absorbed = getattr(self, '_last_mirror_absorptions', None) or {}
+        rows = getattr(self, '_link_flow_rows', None) or {}
+        if not absorbed or not rows:
+            return
+        for path, info in absorbed.items():
+            if isinstance(info, (tuple, list)):
+                _primary, label = (list(info) + [''])[:2]
+            else:
+                _primary, label = info, ''
+            try:
+                key = self._link_flow_key(path)
+            except Exception:
+                key = str(path or '').strip().lower()
+            if key not in rows:
+                continue                    # never invent a panel row
+            label = str(label or '').strip()
+            if len(label) > 60:
+                label = label[:57] + '\u2026'
+            detail = ('merged into \u201c' + label + '\u201d \u2014 use its mirror menu'
+                      if label else
+                      'merged into an existing row \u2014 use its mirror menu')
+            try:
+                _item = rows[key]
+                if (str(_item.text(1) or '') == 'mirror'
+                        and str(_item.text(2) or '') == detail):
+                    continue                # already says exactly this
+            except Exception:
+                pass
+            self._note_link(path, 'mirror', detail)
 
     def _mirror_label(self, file_path, current=False):
         parts = []
@@ -27625,6 +27942,16 @@ try {
         # duplicates the count already shown by _remote_folder_count_text.
         title = re.sub(
             r'\s*[-|–—]\s*\d+\s*(?:files?|items?|videos?|images?|photos?|media)\s*$',
+            '',
+            title,
+            flags=re.IGNORECASE,
+        ).strip()
+        # EroticMV (and mirrors) title their watch pages
+        # "Watch <Title> - Erotic Movies"; the playlist row should read
+        # "<Title>" alone, e.g. "Dressage (1986)".
+        title = re.sub(r'^\s*Watch\s+', '', title, flags=re.IGNORECASE).strip()
+        title = re.sub(
+            r'\s*[-|–—]\s*(?:Erotic\s*Movies?|Erotic\s*MV|EroticMV(?:\.(?:com|net))?)\s*$',
             '',
             title,
             flags=re.IGNORECASE,
@@ -34551,6 +34878,11 @@ try {
 
         if hls_urls or mp4_urls:
             print(f'[VOE-mirror] Decoded {len(hls_urls)} HLS + {len(mp4_urls)} MP4 candidate(s) for {page_url[:60]}')
+            # Field: mat6tube resolved to tr_240p.mp4 — a 6s, 320x180 teaser
+            # — because the first probe-able candidate won. Drop the teaser
+            # renditions and try the rest best-quality first.
+            hls_urls = self._rank_real_media_candidates(hls_urls, 'VOE-mirror')
+            mp4_urls = self._rank_real_media_candidates(mp4_urls, 'VOE-mirror')
             referer_hdrs = self._hls_request_headers(page_url)
             for hls_url in hls_urls:
                 probe = self._probe_remote_media_candidate(
@@ -36985,6 +37317,41 @@ try {
             'javclan',
         ))
 
+    # Hosts whose HLS is delivered as a live-style media playlist (no
+    # #EXT-X-ENDLIST) even though the content is a finished VOD. Played
+    # direct, ffmpeg/mpv treat the stream as LIVE and the demuxer only
+    # exposes the sliding window: seeking FORWARD streams new segments fine,
+    # but seeking BACKWARD — Left after clicking ahead on the time bar — is
+    # refused, and mpv raises nothing, so no seek fallback ever fires.
+    # Routing these through the local /hls/ proxy lets
+    # _ensure_hls_vod_playlist() stamp #EXT-X-PLAYLIST-TYPE:VOD +
+    # #EXT-X-ENDLIST, which makes the whole timeline seekable (same R59 fix
+    # that already covers turtleviplay).
+    _HLS_VOD_PROXY_HOST_TOKENS = (
+        'eroticmv',   # vidcdn2.eroticmv.com — field: backward seek dead
+        'vidcdn',
+    )
+
+    def _hls_needs_vod_playlist_proxy(self, playback_url='', source_url=''):
+        """True when this HLS must go through the local proxy to be seekable
+        backwards. Matches the playback CDN host and the originating page."""
+        try:
+            if not self._is_hls_stream_url(playback_url):
+                return False
+        except Exception:
+            return False
+        hosts = []
+        for value in (playback_url, source_url):
+            try:
+                hosts.append((urlparse(str(value or '')).netloc or '').lower())
+            except Exception:
+                pass
+        return any(
+            token in host
+            for host in hosts if host
+            for token in self._HLS_VOD_PROXY_HOST_TOKENS
+        )
+
     def _embed_hls_needs_adstrip_proxy(self, embed_host='', playback_url=''):
         """R57: HLS from turbovid family gets stitched post-roll ad
         (turbovidhls froze at 2h25m; emturbovid.com/t/… stuck at 02:42:45).
@@ -38374,6 +38741,328 @@ try {
                 return resolved
         return None
 
+    # Page scans pick up a teaser/preview stream alongside the real video.
+    # Same token family _candidate_score penalises for browser captures.
+    _PREVIEW_MEDIA_URL_TOKENS = (
+        'preview', 'previewclip', '/trailer', 'trailerhg', 'teaser',
+        'sample.m3u8', '/sample/',
+    )
+
+    def _media_url_looks_like_preview(self, url):
+        low = str(url or '').lower()
+        return any(token in low for token in self._PREVIEW_MEDIA_URL_TOKENS)
+
+    @staticmethod
+    def _hls_playlist_total_seconds(playlist_text):
+        """Sum of every #EXTINF in a media playlist; 0.0 when unmeasurable."""
+        total = 0.0
+        for match in re.finditer(r'#EXTINF:\s*([0-9]*\.?[0-9]+)',
+                                 str(playlist_text or '')):
+            try:
+                total += float(match.group(1))
+            except Exception:
+                continue
+        return total
+
+    @staticmethod
+    def _hls_best_variant_url(master_text, base_url=''):
+        """Highest-BANDWIDTH variant URI from a master playlist, absolute."""
+        best_url = ''
+        best_bandwidth = -1
+        lines = str(master_text or '').splitlines()
+        for index, line in enumerate(lines):
+            if not line.strip().startswith('#EXT-X-STREAM-INF'):
+                continue
+            match = re.search(r'BANDWIDTH\s*=\s*(\d+)', line, re.IGNORECASE)
+            bandwidth = int(match.group(1)) if match else 0
+            for follow in lines[index + 1:]:
+                follow = follow.strip()
+                if not follow:
+                    continue
+                if follow.startswith('#'):
+                    break
+                if bandwidth > best_bandwidth:
+                    best_bandwidth = bandwidth
+                    best_url = follow
+                break
+        if not best_url:
+            return ''
+        try:
+            return urljoin(str(base_url or ''), best_url) or best_url
+        except Exception:
+            return best_url
+
+    def _hls_playlist_duration_seconds(self, url, headers=None, referer=None,
+                                       _depth=0):
+        """Total seconds of an HLS stream, following a master to its best
+        variant. Returns 0.0 when the duration cannot be determined."""
+        if _depth > 2 or not url:
+            return 0.0
+        try:
+            import requests
+            request_headers = self._stream_request_headers(referer, headers)
+            response = requests.get(str(url), headers=request_headers,
+                                    timeout=10, allow_redirects=True)
+            if not response.ok:
+                return 0.0
+            text = response.text or ''
+        except Exception:
+            return 0.0
+        if '#EXT-X-STREAM-INF' in text:
+            variant = self._hls_best_variant_url(text, response.url or str(url))
+            if not variant:
+                return 0.0
+            return self._hls_playlist_duration_seconds(
+                variant, headers, referer, _depth + 1)
+        return self._hls_playlist_total_seconds(text)
+
+    @staticmethod
+    def _html_candidate_rank_score(pattern_index, candidate, durations):
+        """Rank one HTML-extracted media candidate, highest wins.
+
+        A measured teaser loses to anything unmeasured; a measured
+        full-length stream wins. Unmeasured candidates keep their pattern
+        order instead of being treated as zero-length, so a plain .mp4 the
+        page exposes is never demoted below a short HLS preview.
+        """
+        score = 0.0
+        measured = (durations or {}).get(candidate)
+        if measured is not None:
+            if measured < 120.0:
+                score -= 10.0
+            elif measured >= 300.0:
+                score += 10.0
+        try:
+            return score - 0.01 * int(pattern_index or 0)
+        except Exception:
+            return score
+
+    # noodlemagazine and its sister/mirror sites are one codebase: the same
+    # /watch/{vk_id} pages, the same og:video -> /player/ -> /download/
+    # chain and the same window.playlist JSON. Field-confirmed mirror set
+    # (mat6tube is an exact mirror — identical library, identical player).
+    #
+    # Matched as registrable domains, NOT substrings, on purpose:
+    # noodlemagazine.best and mat6tube.plus are unrelated phishing clones
+    # that copy the branding, and must not inherit this resolver.
+    _NOODLE_FAMILY_DOMAINS = (
+        'noodlemagazine.com',
+        'mat6tube.com',
+        'ukdevilz.com',
+        'exporntoons.net',
+        'tyler-brown.com',
+        'actionviewphotography.com',
+    )
+
+    def _is_noodle_family_host(self, host):
+        try:
+            bare = str(host or '').lower().strip('.').split(':')[0]
+        except Exception:
+            return False
+        if not bare:
+            return False
+        if bare.startswith('www.'):
+            bare = bare[4:]
+        return any(bare == domain or bare.endswith('.' + domain)
+                   for domain in self._NOODLE_FAMILY_DOMAINS)
+
+    @staticmethod
+    def _parse_window_playlist_json(html):
+        """Extract the ``window.playlist = {...};`` object from a page.
+
+        Brace-matched rather than "up to the first semicolon", because a
+        semicolon inside a string value would truncate the JSON.
+        """
+        text = str(html or '')
+        index = text.find('window.playlist')
+        if index < 0:
+            return None
+        start = text.find('{', index)
+        if start < 0:
+            return None
+        depth = 0
+        in_string = False
+        escaped = False
+        for offset in range(start, len(text)):
+            char = text[offset]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == '\\':
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == '{':
+                depth += 1
+            elif char == '}':
+                depth -= 1
+                if depth == 0:
+                    try:
+                        import json
+                        return json.loads(text[start:offset + 1])
+                    except Exception:
+                        return None
+        return None
+
+    @staticmethod
+    def _noodle_sources_from_playlist(playlist):
+        """(url, label, height) from a noodlemagazine playlist's real sources.
+
+        The object carries the short preview alongside the film, so any key
+        whose name mentions a preview is skipped outright, and so is any
+        source URL that looks like one.
+        """
+        results = []
+        if not isinstance(playlist, dict):
+            return results
+        for key, value in playlist.items():
+            if 'preview' in str(key).lower():
+                continue
+            if not isinstance(value, list):
+                continue
+            for item in value:
+                url = ''
+                label = ''
+                height = 0
+                if isinstance(item, str):
+                    url = item
+                elif isinstance(item, dict):
+                    url = str(item.get('file') or item.get('src')
+                              or item.get('url') or '').strip()
+                    label = str(item.get('label') or item.get('title') or '').strip()
+                    try:
+                        height = int(item.get('height') or 0)
+                    except Exception:
+                        height = 0
+                    if not height and label:
+                        digits = re.search(r'(\d{3,4})', label)
+                        height = int(digits.group(1)) if digits else 0
+                url = str(url or '').strip()
+                if not url or url.startswith('blob:'):
+                    continue
+                if 'preview' in url.lower():
+                    continue
+                results.append((url, label or (f'{height}p' if height else ''), height))
+        return results
+
+    def _resolve_noodle_family_source(self, source_url):
+        """Resolve the REAL stream on a noodlemagazine-family site.
+
+        noodlemagazine.com, mat6tube.com, ukdevilz.com, exporntoons.net,
+        tyler-brown.com and actionviewphotography.com are one codebase. The
+        watch page advertises a short preview, and the actual sources live
+        in a ``window.playlist`` JSON on a separate /download/ page that is
+        gated by an age_verification cookie. Scraping the watch page for
+        media URLs therefore yields the preview — which is what happened
+        before this resolver existed (field: mat6tube resolved to
+        tr_240p.mp4, 6 seconds at 320x180, out of 29 candidates).
+        """
+        try:
+            import requests
+        except Exception:
+            return None
+        headers = self._stream_request_headers(source_url, {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        })
+        cookies = {'age_verification': '1'}
+        try:
+            response = requests.get(source_url, headers=headers, cookies=cookies,
+                                    timeout=15, allow_redirects=True)
+            if not response.ok:
+                print(f"[NOODLE] watch page HTTP {response.status_code}")
+                return None
+            html = response.text or ''
+            page_url = response.url or source_url
+        except Exception as exc:
+            print(f"[NOODLE] watch page failed: {exc}")
+            return None
+        title_match = re.search(
+            r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
+            html, re.IGNORECASE)
+        title = self._clean_remote_title(
+            title_match.group(1) if title_match else self._html_page_title(html))
+        video_match = re.search(
+            r'<meta[^>]+property=["\']og:video["\'][^>]+content=["\']([^"\']+)',
+            html, re.IGNORECASE)
+        if not video_match:
+            print("[NOODLE] watch page has no og:video")
+            return None
+        player_url = urljoin(page_url, html_unescape(video_match.group(1)).strip())
+        download_url = player_url.replace('/player/', '/download/')
+        if download_url == player_url:
+            download_url = player_url.replace('player', 'download')
+        try:
+            download_response = requests.get(download_url, headers=headers,
+                                             cookies=cookies, timeout=15,
+                                             allow_redirects=True)
+            if not download_response.ok:
+                print(f"[NOODLE] download page HTTP "
+                      f"{download_response.status_code} for {download_url[:120]}")
+                return None
+            playlist = self._parse_window_playlist_json(download_response.text or '')
+        except Exception as exc:
+            print(f"[NOODLE] download page failed: {exc}")
+            return None
+        sources = self._noodle_sources_from_playlist(playlist)
+        if not sources:
+            print(f"[NOODLE] no non-preview sources in {download_url[:120]}")
+            return None
+        sources.sort(key=lambda item: (item[2] or 0), reverse=True)
+        best_url, best_label, best_height = sources[0]
+        best_url = urljoin(download_url, best_url)
+        print(f"[NOODLE] {len(sources)} real source(s) from "
+              f"{download_url[:100]}; chose {best_url[:130]} ({best_label or 'best'})")
+        return {
+            'playback_url': best_url,
+            'headers': self._media_playback_headers(page_url, best_url),
+            'title': title,
+            'height': best_height,
+            'resolver_provider': 'noodlemagazine',
+            'resolved_at_ms': int(time.time() * 1000),
+        }
+
+    # VOE / pvvstream publish a short teaser as tr_<height>p.mp4 alongside
+    # the real <height>p.mp4 renditions, and the teaser sorts first.
+    @staticmethod
+    def _media_url_is_trailer(url):
+        try:
+            name = os.path.basename(urlparse(str(url or '')).path or '')
+        except Exception:
+            return False
+        return bool(re.match(r'^tr[_-]?\d{2,4}p?\.', name, re.IGNORECASE))
+
+    @staticmethod
+    def _media_url_height_hint(url):
+        """Resolution parsed out of a media filename, 0 when absent."""
+        try:
+            name = os.path.basename(urlparse(str(url or '')).path or '')
+        except Exception:
+            return 0
+        # Not \b: '_' is a word character, so 480p_v2.mp4 would not match.
+        match = re.search(r'(\d{3,4})p(?![0-9a-z])', name, re.IGNORECASE)
+        try:
+            return int(match.group(1)) if match else 0
+        except Exception:
+            return 0
+
+    def _rank_real_media_candidates(self, urls, label=''):
+        """Drop trailer/preview renditions and sort the rest best-quality
+        first. Falls back to the untouched list when every candidate looks
+        like a trailer, so a page offering only a teaser still plays."""
+        urls = [u for u in (urls or []) if u]
+        real = [u for u in urls
+                if not self._media_url_is_trailer(u)
+                and not self._media_url_looks_like_preview(u)]
+        dropped = len(urls) - len(real)
+        if dropped and label:
+            print(f'[{label}] dropped {dropped} trailer/preview candidate(s) '
+                  f'of {len(urls)}', flush=True)
+        return sorted(real or urls, key=self._media_url_height_hint, reverse=True)
+
     def _resolve_stream_from_html(self, source_url):
         try:
             import requests
@@ -38612,30 +39301,69 @@ try {
             r'<a[^>]+href=["\']([^"\']+\.(?:mp4|m3u8|webm|mkv|mov|avi|m4v)[^"\']*)["\']',
             r'<a[^>]+href=["\']([^"\']+(?:download|/file/)[^"\']*)["\']',
         ]
-        for pattern in patterns:
+        # Collect every candidate first, then rank. Returning the first
+        # pattern match that probes OK meant a page listing a teaser before
+        # the film resolved to the teaser (field: noodlemagazine played the
+        # preview). Order within a pattern still breaks ties.
+        candidates = []
+        seen_candidates = set()
+        for pattern_index, pattern in enumerate(patterns):
             for match in re.finditer(pattern, html, re.IGNORECASE):
-                candidate = self._normalize_extracted_media_url(match.group(1) or '', page_url)
+                candidate = self._normalize_extracted_media_url(
+                    match.group(1) or '', page_url)
                 if not self._is_usable_extracted_media_url(candidate, page_url):
                     continue
-                resolved_url = candidate
-                playback_headers = self._media_playback_headers(page_url, resolved_url)
-                probe_headers = {'Accept': playback_headers.get('Accept') or '*/*'}
-                if playback_headers.get('Origin'):
-                    probe_headers['Origin'] = playback_headers.get('Origin')
-                direct = self._probe_remote_media_candidate(
-                    resolved_url,
-                    referer=page_url,
-                    headers=probe_headers,
-                    title=page_title,
+                key = str(candidate or '').lower()
+                if not key or key in seen_candidates:
+                    continue
+                seen_candidates.add(key)
+                candidates.append((pattern_index, candidate))
+        if not candidates:
+            return None
+        # Prefer anything that is not obviously a preview; only fall back to
+        # preview URLs when the page offered nothing else.
+        ordered = [item for item in candidates
+                   if not self._media_url_looks_like_preview(item[1])] or candidates
+        durations = {}
+        if len(ordered) > 1:
+            for _pattern_index, candidate in ordered[:6]:
+                if not self._is_hls_stream_url(candidate):
+                    continue
+                measured = self._hls_playlist_duration_seconds(
+                    candidate,
+                    self._media_playback_headers(page_url, candidate),
+                    page_url,
                 )
-                if direct:
-                    direct['headers'] = playback_headers
-                    direct['title'] = page_title
-                    direct['resolver_provider'] = 'html'
-                    direct['resolved_at_ms'] = int(time.time() * 1000)
-                    if subtitle_tracks:
-                        direct['subtitle_tracks'] = subtitle_tracks
-                    return direct
+                if measured > 0.0:
+                    durations[candidate] = measured
+
+        def _rank(item):
+            return self._html_candidate_rank_score(
+                item[0], item[1], durations)
+
+        for _pattern_index, resolved_url in sorted(ordered, key=_rank, reverse=True):
+            playback_headers = self._media_playback_headers(page_url, resolved_url)
+            probe_headers = {'Accept': playback_headers.get('Accept') or '*/*'}
+            if playback_headers.get('Origin'):
+                probe_headers['Origin'] = playback_headers.get('Origin')
+            direct = self._probe_remote_media_candidate(
+                resolved_url,
+                referer=page_url,
+                headers=probe_headers,
+                title=page_title,
+            )
+            if direct:
+                direct['headers'] = playback_headers
+                direct['title'] = page_title
+                direct['resolver_provider'] = 'html'
+                direct['resolved_at_ms'] = int(time.time() * 1000)
+                if subtitle_tracks:
+                    direct['subtitle_tracks'] = subtitle_tracks
+                if len(ordered) > 1:
+                    print(f"[HTML_RESOLVE] chose {resolved_url[:130]} "
+                          f"({durations.get(resolved_url, 0.0):.0f}s) from "
+                          f"{len(ordered)} candidate(s)", flush=True)
+                return direct
         return None
 
     def _resolve_stream_source(self, source_url):
@@ -38885,6 +39613,14 @@ try {
                 resolved = self._resolve_cyberfile_source(source_url)
             elif self._is_mega_host(host):
                 resolved = self._resolve_mega_source(source_url)
+            elif self._is_noodle_family_host(host):
+                # Must run before the VOE auto-detect at the end of this
+                # ladder: these pages ARE VOE-format, so _detect_voe_and_resolve
+                # happily decodes them and returns the tr_ teaser. The real
+                # sources only exist in the window.playlist JSON on the
+                # /download/ page, which the generic HTML and VOE scans never
+                # look at.
+                resolved = self._resolve_noodle_family_source(source_url)
             elif self._is_lulustream_host(host):
                 resolved = self._resolve_lulustream_source(source_url)
             elif self._is_voe_host(host):
@@ -39485,9 +40221,16 @@ try {
                 or self._embed_hls_needs_adstrip_proxy(
                     (urlparse(str(file_path or '')).netloc or ''),
                     playback_target)
+                # eroticmv / vidcdn: live-style playlist, so mpv can seek
+                # forward but never back behind the window (Left after
+                # clicking ahead on the bar does nothing). The proxy's
+                # playlist rewrite marks it VOD so any timestamp is reachable.
+                or self._hls_needs_vod_playlist_proxy(playback_target, file_path)
             ):
                 _proxy_label = (
-                    'EMBEDHLS_PROXY'
+                    'HLSVOD_PROXY'
+                    if self._hls_needs_vod_playlist_proxy(playback_target, file_path)
+                    else 'EMBEDHLS_PROXY'
                     if (provider == 'embed_hls_unpack'
                         and stream_info.get('route_local_proxy'))
                     or self._embed_hls_needs_adstrip_proxy(
@@ -39498,6 +40241,12 @@ try {
                         or provider in ('javdock_capture', 'fetchv_capture'))
                     else 'MISSAV_PROXY'
                 )
+                if self._hls_needs_vod_playlist_proxy(playback_target, file_path):
+                    # The proxy fetches the manifest itself, so it needs the
+                    # site Referer/Origin the direct mpv request was getting
+                    # from _media_playback_headers — vidcdn 403s without it.
+                    request_headers = self._media_playback_headers(
+                        file_path, playback_target, request_headers)
                 proxied_target = self._remote_playback_proxy_url(
                     playback_target,
                     request_headers,
@@ -40284,6 +41033,8 @@ try {
         self.playlist_widget.setUpdatesEnabled(True)
         if added_count > 0:
             self._rebuild_playlist_folder_badges()
+            # _collapse_duplicate_url_mirrors() folds mirrors into one row and
+            # relabels the links it absorbed in the Captured-links panel.
             if not self._collapse_duplicate_url_mirrors():
                 self.apply_playlist_filtering()
         self._schedule_remote_duration_probes(remote_duration_candidates)
