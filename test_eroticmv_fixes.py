@@ -1067,6 +1067,32 @@ report(len(no_split.playlist) == no_split.playlist_widget.rowCount(),
        f'an ordinary collapse stays in sync: {len(no_split.playlist)} vs '
        f'{no_split.playlist_widget.rowCount()}')
 
+# ── 12. FamilyPornHD with no get_file stream: keep the other hoster ──────────
+class FamilyStub:
+    _familypornhd_non_ad_media_candidates = lift(
+        'VideoPlayer', '_familypornhd_non_ad_media_candidates')
+    _FAMILYPORNHD_AD_HOST_TOKENS = lift_attr(
+        'VideoPlayer', '_FAMILYPORNHD_AD_HOST_TOKENS')
+
+
+fam = FamilyStub()
+AD = 'https://playhubconnect.com/media/12345/video.mp4'
+HOSTER = 'https://doodstream.example/d/abc/master.m3u8'
+kept = fam._familypornhd_non_ad_media_candidates([AD, HOSTER, AD])
+report(kept == [HOSTER],
+       f'the advert is dropped, the other hoster survives: {kept}')
+report(fam._familypornhd_non_ad_media_candidates([AD, AD]) == [],
+       'a page with only the ad network still yields nothing')
+report(fam._familypornhd_non_ad_media_candidates([]) == []
+       and fam._familypornhd_non_ad_media_candidates(None) == [],
+       'no candidates in, no candidates out')
+report(fam._familypornhd_non_ad_media_candidates(
+    ['https://cdn.example.org/v/720.mp4']) == ['https://cdn.example.org/v/720.mp4'],
+    'an unknown host is treated as a possible hoster, not an advert')
+report(fam._familypornhd_non_ad_media_candidates(
+    ['https://cdn.example.org/r/a-ads.com/spot.mp4']) == [],
+    'an ad token in the path is dropped too')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

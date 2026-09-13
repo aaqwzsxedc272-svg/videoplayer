@@ -27669,6 +27669,43 @@ try {
         except Exception:
             return False
 
+    # Hosts an article page loads for ads and analytics. These must still be
+    # thrown away when the page has no get_file stream of its own: the
+    # repeated playhubconnect MP4 is an advert, not the video. Everything
+    # else that looks like media is kept, because some FamilyPornHD articles
+    # are served by a different hoster entirely and that hoster's stream is
+    # the only real candidate on the page.
+    _FAMILYPORNHD_AD_HOST_TOKENS = (
+        'playhubconnect', 'playhub', 'a-ads.com', 'doubleclick',
+        'google-analytics', 'googlesyndication', 'popcash', 'popads',
+        'exoclick', 'juicyads', 'trafficjunky', 'adsterra', 'hilltopads',
+        'theporndude.com',
+    )
+
+    def _familypornhd_non_ad_media_candidates(self, candidates):
+        """Drop the ad network's URLs, keep anything that can be the video.
+
+        Used when a FamilyPornHD article has no get_file/...mp4 candidate.
+        The previous behaviour discarded EVERY candidate in that case, which
+        also discarded a different hoster's stream and left those articles
+        unplayable — the current method failing meant nothing was tried.
+        """
+        kept = []
+        for url in candidates or []:
+            url = str(url or '')
+            if not url:
+                continue
+            try:
+                host = (urlparse(url).hostname or '').lower()
+            except Exception:
+                host = ''
+            low = url.lower()
+            if any(token in host or token in low
+                   for token in self._FAMILYPORNHD_AD_HOST_TOKENS):
+                continue
+            kept.append(url)
+        return kept
+
     def _familypornhd_capture_needs_refresh(self, source_url, stream_info, max_age_ms=45000):
         """Say whether a captured signed FamilyPornHD URL is old enough to refresh.
 
@@ -38487,16 +38524,41 @@ try {
                             f"discarded {_discarded_count} non-Family media URL(s)"
                         )
                 else:
-                    # A different host's MP4 (for example the repeated
-                    # playhubconnect ad URL) must not be promoted as the
-                    # FamilyPornHD video when the page supplied no matching
-                    # get_file stream.
-                    if normalized_candidates:
+                    # No get_file stream on this page. A different host's MP4
+                    # (for example the repeated playhubconnect ad URL) must
+                    # not be promoted as the FamilyPornHD video — but some
+                    # articles are hosted elsewhere, and there the other
+                    # hoster's stream is the ONLY candidate, so discarding
+                    # everything left them unplayable. Drop the ad network
+                    # and keep whatever is left.
+                    _family_fallback = (
+                        self._familypornhd_non_ad_media_candidates(
+                            normalized_candidates)
+                    )
+                    if _family_fallback:
+                        _fallback_hosts = []
+                        for _c in _family_fallback:
+                            try:
+                                _h = (urlparse(_c).hostname or '').lower()
+                            except Exception:
+                                _h = ''
+                            if _h and _h not in _fallback_hosts:
+                                _fallback_hosts.append(_h)
                         print(
-                            "[BROWSER_CLICK] FamilyPornHD filter found no "
-                            "direct get_file video; ignoring non-Family media URLs"
+                            "[BROWSER_CLICK] FamilyPornHD page has no direct "
+                            f"get_file video; keeping "
+                            f"{len(_family_fallback)} non-ad candidate(s) from "
+                            f"{', '.join(_fallback_hosts[:3]) or '?'}"
                         )
-                    normalized_candidates = []
+                        normalized_candidates = _family_fallback
+                    else:
+                        if normalized_candidates:
+                            print(
+                                "[BROWSER_CLICK] FamilyPornHD filter found no "
+                                "direct get_file video; ignoring non-Family "
+                                "media URLs"
+                            )
+                        normalized_candidates = []
 
             # Normalize the verified set the same way so the comparison
             # below matches (raw subprocess values vs normalized candidates).
