@@ -674,6 +674,50 @@ report([u.rsplit('/', 1)[-1] for u in only_trailers] == ['tr_720p.mp4', 'tr_240p
 
 report(v._rank_real_media_candidates([], '') == [], 'no candidates -> no candidates')
 
+# ── 10. Captured-links panel must not claim a row the collapse deleted ───────
+class AbsorbStub:
+    _relabel_absorbed_links = lift('VideoPlayer', '_relabel_absorbed_links')
+
+    def __init__(self, absorbed, key_raises=False):
+        self._last_mirror_absorptions = absorbed
+        self._key_raises = key_raises
+        self.notes = []
+
+    def _link_flow_key(self, url):
+        if self._key_raises:
+            raise RuntimeError('boom')
+        return str(url or '').strip().lower()
+
+    def _note_link(self, url, status='', detail=''):
+        self.notes.append((url, status, detail))
+
+
+PAGE = 'https://javgg.net/v/abc'          # the row that survives
+MIRROR = 'https://javstreamhq.to/e/abc'   # folded in, row deleted
+a = AbsorbStub({MIRROR: PAGE})
+a._relabel_absorbed_links([MIRROR, PAGE])
+report(a.notes == [(MIRROR, 'mirror',
+                    'merged into an existing row — use its mirror menu')],
+       f'absorbed link relabelled, surviving row left alone: {a.notes}')
+
+b = AbsorbStub({})
+b._relabel_absorbed_links([MIRROR])
+report(b.notes == [], f'nothing absorbed -> nothing relabelled: {b.notes}')
+
+c = AbsorbStub({MIRROR: PAGE}, key_raises=True)
+c._relabel_absorbed_links([MIRROR])
+report(c.notes == [(MIRROR, 'mirror',
+                    'merged into an existing row — use its mirror menu')],
+       f'a raising key function falls back and still matches: {c.notes}')
+
+d = AbsorbStub({MIRROR: PAGE})
+d._relabel_absorbed_links([])
+report(d.notes == [], f'no added urls -> no notes: {d.notes}')
+
+e = AbsorbStub({MIRROR: PAGE})
+e._relabel_absorbed_links(['https://unrelated.example/x'])
+report(e.notes == [], f'an unrelated link is untouched: {e.notes}')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

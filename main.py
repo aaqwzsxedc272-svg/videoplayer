@@ -24002,6 +24002,13 @@ try {
             grouped.setdefault(key, []).append((idx, path))
 
         remove_indexes = set()
+        # absorbed playlist path -> the surviving row it was folded into.
+        # Keyed by PATH, not by the display-group key: every row in a group
+        # shares that key, including the primary, so it cannot tell an
+        # absorbed row from the survivor. The Captured-links panel needs
+        # this because it reports "added to playlist" per URL before this
+        # pass deletes the absorbed rows.
+        absorbed_by_path = {}
         for key, items in grouped.items():
             unique_items = []
             seen_paths = set()
@@ -24052,6 +24059,7 @@ try {
             absorbed_current = ''
             for idx, path in unique_items[1:]:
                 remove_indexes.add(idx)
+                absorbed_by_path[path] = primary
                 if current_key and self._mirror_path_key(path) == current_key:
                     absorbed_current = path
             if absorbed_current and self._mirror_path_key(primary) != current_key:
@@ -24079,6 +24087,8 @@ try {
                     pass
                 changed = True
 
+        self._last_mirror_absorptions = absorbed_by_path
+
         if changed:
             try:
                 self._split_conflicting_fileditch_mirrors()
@@ -24094,6 +24104,34 @@ try {
             except Exception:
                 pass
         return changed
+
+    def _relabel_absorbed_links(self, urls):
+        """Correct the Captured-links panel after a mirror collapse.
+
+        _collapse_duplicate_url_mirrors() deletes the rows it absorbs, so a
+        link the panel just reported as 'added to playlist' can end up with
+        no row of its own — the reported symptom was links that appear in
+        the popup but never in the playlist. Say where the link went
+        instead of leaving a false 'done'.
+        """
+        absorbed = getattr(self, '_last_mirror_absorptions', None) or {}
+        if not absorbed:
+            return
+        index = {}
+        for path, primary in absorbed.items():
+            try:
+                index[self._link_flow_key(path)] = primary
+            except Exception:
+                index[str(path or '').strip().lower()] = primary
+        for url in urls or []:
+            try:
+                wanted = self._link_flow_key(url)
+            except Exception:
+                wanted = str(url or '').strip().lower()
+            if index.get(wanted):
+                self._note_link(
+                    url, 'mirror',
+                    'merged into an existing row — use its mirror menu')
 
     def _mirror_label(self, file_path, current=False):
         parts = []
@@ -40894,6 +40932,7 @@ try {
 
         self.playlist_widget.setUpdatesEnabled(False)
         added_count = 0
+        added_urls = []
         first_added = None
         remote_duration_candidates = []
         for entry in prepared_entries:
@@ -40919,6 +40958,7 @@ try {
                 existing_remote_keys.add(entry_key)
             remote_duration_candidates.append(entry_url)
             added_count += 1
+            added_urls.append(entry_url)
             self._note_link(entry_url, 'done', 'added to playlist')
             if first_added is None:
                 first_added = entry_url
@@ -40950,6 +40990,7 @@ try {
                 if self._is_remote_url(entry_url):
                     remote_duration_candidates.append(entry_url)
                 added_count += 1
+                added_urls.append(url)
                 self._note_link(url, 'done', 'added to playlist')
                 if first_added is None:
                     first_added = entry_url
@@ -40958,6 +40999,10 @@ try {
             self._rebuild_playlist_folder_badges()
             if not self._collapse_duplicate_url_mirrors():
                 self.apply_playlist_filtering()
+            # The collapse deletes the rows it folds into an existing mirror
+            # group, so relabel those links in the Captured-links panel
+            # instead of leaving them claiming to be playlist rows.
+            self._relabel_absorbed_links(added_urls)
         self._schedule_remote_duration_probes(remote_duration_candidates)
 
         if not album_urls:
