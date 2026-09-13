@@ -38755,6 +38755,165 @@ try {
         except Exception:
             return score
 
+    def _is_noodlemagazine_host(self, host):
+        return 'noodlemagazine' in str(host or '').lower()
+
+    @staticmethod
+    def _parse_window_playlist_json(html):
+        """Extract the ``window.playlist = {...};`` object from a page.
+
+        Brace-matched rather than "up to the first semicolon", because a
+        semicolon inside a string value would truncate the JSON.
+        """
+        text = str(html or '')
+        index = text.find('window.playlist')
+        if index < 0:
+            return None
+        start = text.find('{', index)
+        if start < 0:
+            return None
+        depth = 0
+        in_string = False
+        escaped = False
+        for offset in range(start, len(text)):
+            char = text[offset]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == '\\':
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == '{':
+                depth += 1
+            elif char == '}':
+                depth -= 1
+                if depth == 0:
+                    try:
+                        import json
+                        return json.loads(text[start:offset + 1])
+                    except Exception:
+                        return None
+        return None
+
+    @staticmethod
+    def _noodlemagazine_sources_from_playlist(playlist):
+        """(url, label, height) from a noodlemagazine playlist's real sources.
+
+        The object carries the short preview alongside the film, so any key
+        whose name mentions a preview is skipped outright, and so is any
+        source URL that looks like one.
+        """
+        results = []
+        if not isinstance(playlist, dict):
+            return results
+        for key, value in playlist.items():
+            if 'preview' in str(key).lower():
+                continue
+            if not isinstance(value, list):
+                continue
+            for item in value:
+                url = ''
+                label = ''
+                height = 0
+                if isinstance(item, str):
+                    url = item
+                elif isinstance(item, dict):
+                    url = str(item.get('file') or item.get('src')
+                              or item.get('url') or '').strip()
+                    label = str(item.get('label') or item.get('title') or '').strip()
+                    try:
+                        height = int(item.get('height') or 0)
+                    except Exception:
+                        height = 0
+                    if not height and label:
+                        digits = re.search(r'(\d{3,4})', label)
+                        height = int(digits.group(1)) if digits else 0
+                url = str(url or '').strip()
+                if not url or url.startswith('blob:'):
+                    continue
+                if 'preview' in url.lower():
+                    continue
+                results.append((url, label or (f'{height}p' if height else ''), height))
+        return results
+
+    def _resolve_noodlemagazine_source(self, source_url):
+        """Resolve the REAL noodlemagazine stream.
+
+        The watch page advertises a short preview, and the actual sources
+        live in a ``window.playlist`` JSON on a separate /download/ page
+        that is gated by an age_verification cookie. Scraping the watch
+        page for media URLs therefore yields the preview — which is what
+        happened before this resolver existed.
+        """
+        try:
+            import requests
+        except Exception:
+            return None
+        headers = self._stream_request_headers(source_url, {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        })
+        cookies = {'age_verification': '1'}
+        try:
+            response = requests.get(source_url, headers=headers, cookies=cookies,
+                                    timeout=15, allow_redirects=True)
+            if not response.ok:
+                print(f"[NOODLEMAGAZINE] watch page HTTP {response.status_code}")
+                return None
+            html = response.text or ''
+            page_url = response.url or source_url
+        except Exception as exc:
+            print(f"[NOODLEMAGAZINE] watch page failed: {exc}")
+            return None
+        title_match = re.search(
+            r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
+            html, re.IGNORECASE)
+        title = self._clean_remote_title(
+            title_match.group(1) if title_match else self._html_page_title(html))
+        video_match = re.search(
+            r'<meta[^>]+property=["\']og:video["\'][^>]+content=["\']([^"\']+)',
+            html, re.IGNORECASE)
+        if not video_match:
+            print("[NOODLEMAGAZINE] watch page has no og:video")
+            return None
+        player_url = urljoin(page_url, html_unescape(video_match.group(1)).strip())
+        download_url = player_url.replace('/player/', '/download/')
+        if download_url == player_url:
+            download_url = player_url.replace('player', 'download')
+        try:
+            download_response = requests.get(download_url, headers=headers,
+                                             cookies=cookies, timeout=15,
+                                             allow_redirects=True)
+            if not download_response.ok:
+                print(f"[NOODLEMAGAZINE] download page HTTP "
+                      f"{download_response.status_code} for {download_url[:120]}")
+                return None
+            playlist = self._parse_window_playlist_json(download_response.text or '')
+        except Exception as exc:
+            print(f"[NOODLEMAGAZINE] download page failed: {exc}")
+            return None
+        sources = self._noodlemagazine_sources_from_playlist(playlist)
+        if not sources:
+            print(f"[NOODLEMAGAZINE] no non-preview sources in {download_url[:120]}")
+            return None
+        sources.sort(key=lambda item: (item[2] or 0), reverse=True)
+        best_url, best_label, best_height = sources[0]
+        best_url = urljoin(download_url, best_url)
+        print(f"[NOODLEMAGAZINE] {len(sources)} real source(s) from "
+              f"{download_url[:100]}; chose {best_url[:130]} ({best_label or 'best'})")
+        return {
+            'playback_url': best_url,
+            'headers': self._media_playback_headers(page_url, best_url),
+            'title': title,
+            'height': best_height,
+            'resolver_provider': 'noodlemagazine',
+            'resolved_at_ms': int(time.time() * 1000),
+        }
+
     def _resolve_stream_from_html(self, source_url):
         try:
             import requests
@@ -39305,6 +39464,10 @@ try {
                 resolved = self._resolve_cyberfile_source(source_url)
             elif self._is_mega_host(host):
                 resolved = self._resolve_mega_source(source_url)
+            elif self._is_noodlemagazine_host(host):
+                # Must run before the generic HTML scan: that scan reads the
+                # watch page, whose only inline media is the preview clip.
+                resolved = self._resolve_noodlemagazine_source(source_url)
             elif self._is_lulustream_host(host):
                 resolved = self._resolve_lulustream_source(source_url)
             elif self._is_voe_host(host):
