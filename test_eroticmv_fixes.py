@@ -1587,7 +1587,8 @@ report(cap._is_familypornhd_direct_video_url(_streams19[0]) is True if _streams1
 # refresh must re-read the embed page instead of the (video-less) article page
 _int19 = open('familypornhd_integration.py', encoding='utf-8').read()
 report('static_result.get("kvs_embed")' in _int19
-       and '"capture_method": "kvs_embed_static"' in _int19,
+       and '"kvs_embed_static" if static_result.get("kvs_embed")' in _int19
+       and 'if static_links and _static_kind:' in _int19,
        'the worker hands KVS renditions straight to the playlist, skipping the browser')
 _grab19 = open('familypornhd_grab.py', encoding='utf-8').read()
 report('"kvs_embed": kvs_embed' in _grab19,
@@ -1721,6 +1722,104 @@ report('FirePlayer getVideo raw:' in _grab21,
        'the raw payload is printed, since DevTools is blocked on this site')
 report('links = _extract_fireplayer_streams(html, page_url)' in _grab21,
        'fetch_and_extract falls through to FirePlayer when the KVS player finds nothing')
+
+# ── 22. FirePlayer: the cleartext Download menu, and never a ciphertext blob ─
+# /video/<id> answers a plain GET with the rendered player page whose Download
+# menu holds the direct MP4s unencrypted. The POST response encrypts them, and
+# that ciphertext was being handed to the playlist as if it were a stream.
+_PAGE22 = (
+    '<a href="https://bestvideostream.com/cdn/down/76603cb0d5efcec0eda71ebb2160ee77/'
+    'files/caught-red-handed_eng_360p.mp4?md5=NHwGqH8mH1oafdfKU53XBA&amp;expires=1789447486">'
+    '[ENG] 360p (84.97 MB)</a>'
+    '<a href="https://bestvideostream.com/cdn/down/76603cb0d5efcec0eda71ebb2160ee77/'
+    'files/caught-red-handed_eng_720p.mp4?md5=2O9Pn8glglM4gW9q_Vhqjw&amp;expires=1789447486">'
+    '[ENG] 720p (448.47 MB)</a>'
+    '<script src="https://ssl.p.jwpcdn.com/player/v/8.34.3/jwplayer.js"></script>'
+    '<img src="https://mediaboxplayer.com/p/cover.jpg">'
+)
+_CT22 = ('{"ct":"Z5eG/iA5lUAG1Bh1yrjrbEKQQ7Grj2tFhJ6qXDKzdf2cZPUy1Lo5k3k1vCWF6atPFDHH1yh==",'
+         '"iv":"5cc6efdd6e15495c6d231845e3f937c1","s":"fd848abc7cb19aad"}')
+
+report(fg19._looks_like_media_url(_CT22) is False,
+       'a CryptoJS ciphertext blob is not accepted as a media URL')
+report(fg19._looks_like_media_url('blob:https://watchstreamhd.com/74910ba6') is False
+       and fg19._looks_like_media_url('https://x.com/a.js') is False
+       and fg19._looks_like_media_url('https://x.com/cover.jpg') is False
+       and fg19._looks_like_media_url('') is False,
+       'blob:, scripts, images and empties are all rejected')
+report(fg19._looks_like_media_url(
+    'https://video-streams.com/cdn/down/x/files/v_eng_720p.mp4?md5=a&expires=1') is True,
+    'a signed /cdn/down/ MP4 is accepted')
+
+_real_get22, _real_post22 = fg19._http_get, fg19._http_post
+try:
+    fg19._http_get = lambda url, referer="", timeout=20: (url, _PAGE22)
+    _menu22 = fg19._fireplayer_download_links(
+        'https://watchstreamhd.com/video/b20bb95ab626d93fd976af958fbc61ba')
+    report(len(_menu22) == 2 and '_720p.mp4' in _menu22[0],
+           f'the Download menu is scraped, 720p first ({len(_menu22)} link(s))')
+    report(all('&amp;' not in u for u in _menu22),
+           'HTML entities in the query string are decoded, not passed through')
+    report(not any('jwplayer' in u or 'cover.jpg' in u for u in _menu22),
+           'the player script and the cover image are not mistaken for renditions')
+
+    _enc22 = {'hls': True,
+              'videoSource': 'https://watchstreamhd.com/cdn/hls/76603cb0d5efcec0eda71ebb2160ee77/master.txt',
+              'downloadLinks': [{'language': 'eng', 'label': '720p', 'file': _CT22,
+                                 'size': '448.47 MB'}]}
+    report(fg19._fireplayer_pick_best(_enc22) == [],
+           'the encrypted downloadLinks from the real payload yield nothing')
+
+    fg19._http_post = lambda url, data, referer="", timeout=20: (url, json.dumps(_enc22))
+    _res22 = fg19._extract_fireplayer_streams(_HTML21, 'https://familypornhd.com/caught-red-handed/')
+    report(len(_res22) == 2 and all('/cdn/down/' in u for u in _res22),
+           f'the cleartext menu wins over the encrypted POST ({len(_res22)} link(s))')
+
+    fg19._http_get = lambda url, referer="", timeout=20: (url, '<html>no downloads</html>')
+    report(fg19._extract_fireplayer_streams(_HTML21, 'https://x/') == [],
+           'with no menu and only ciphertext, the resolver yields nothing at all')
+
+    def _boom22(url, referer="", timeout=20):
+        raise RuntimeError('offline')
+    fg19._http_get = _boom22
+    report(fg19._extract_fireplayer_streams(_HTML21, 'https://x/') == [],
+           'a failed page fetch falls through instead of raising')
+finally:
+    fg19._http_get, fg19._http_post = _real_get22, _real_post22
+
+_int22 = open('familypornhd_integration.py', encoding='utf-8').read()
+report('if static_links and _static_kind:' in _int22
+       and '"fireplayer_static" if static_result.get("fireplayer")' in _int22,
+       'the worker skips the browser capture for FirePlayer links too, not just KVS')
+report('pyqtSlot(str, object, bool)' in _int22,
+       'the capture handler is still a registered pyqtSlot')
+_grab22 = open('familypornhd_grab.py', encoding='utf-8').read()
+report(_grab22.count('"fireplayer"') >= 2,
+       'fetch_and_extract advertises the fireplayer flag on every return path')
+
+# A second def of an existing helper silently shadows it, and the loser is the
+# one every other caller depends on: a redefined _looks_like_media_url quietly
+# stopped accepting the KVS ".mp4/?v-acctoken=…" shape and zeroed the whole KVS
+# path. Both modules are checked for redefinition.
+for _path22 in ('familypornhd_grab.py', 'familypornhd_integration.py'):
+    _names22 = [n.name for n in ast.parse(
+        open(_path22, encoding='utf-8').read()).body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    _dups22 = sorted({n for n in _names22 if _names22.count(n) > 1})
+    report(not _dups22, f'{_path22} defines no helper twice: {_dups22 or "clean"}')
+
+report(fg19._looks_like_media_url(
+    'https://dev.familypornhd.com/get_file/0/zwQJ0A71x.mp4/?v-acctoken=abc&embed=true')
+    is True,
+    'the signed KVS ".mp4/?v-acctoken=…" shape is still accepted as media')
+report(fg19._is_absolute_http_url('blob:https://watchstreamhd.com/x') is False
+       and fg19._is_absolute_http_url('{"ct":"x"}') is False
+       and fg19._is_absolute_http_url('https://x.com/a.mp4') is True,
+       'a blob URL and a ciphertext blob fail the absolute-URL rule')
+_site22 = open('site.txt', encoding='utf-8').read() if os.path.isfile('site.txt') else ''
+report(len(fg19._extract_kvs_player_streams(_site22, _EMBED19)) == 3,
+       f'the KVS extractor still yields all 3 renditions from site.txt '
+       f'(got {len(fg19._extract_kvs_player_streams(_site22, _EMBED19))})')
 
 print()
 print('FAILURES:', FAILS)

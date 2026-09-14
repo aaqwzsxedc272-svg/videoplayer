@@ -120,17 +120,23 @@ def _vp_launch_familypornhd_grab(self, source_url: str, play_first: bool = True)
                     # (age_ms=171266 -> InvalidMedia in the field logs).  Only
                     # fall through to the browser when the page is not a KVS
                     # embed, i.e. when there is nothing static to trust.
-                    if static_links and static_result.get("kvs_embed"):
+                    _static_kind = (
+                        "kvs_embed_static" if static_result.get("kvs_embed")
+                        else "fireplayer_static" if static_result.get("fireplayer")
+                        else ""
+                    )
+                    if static_links and _static_kind:
                         result = {
                             "source_url": src_url,
                             "title": static_result.get("title") or "",
                             "links": static_links,
                             "headers": static_result.get("headers") or {},
                             "resolved_info": dict(static_result),
-                            "capture_method": "kvs_embed_static",
+                            "capture_method": _static_kind,
                         }
                         print(
-                            f"[FAMILYPORNHD] using KVS embed renditions directly "
+                            f"[FAMILYPORNHD] using {_static_kind.replace('_static', '')} "
+                            f"renditions directly "
                             f"({len(static_links)} link(s), skipping browser capture): "
                             f"{static_links[0][:180]}"
                         )

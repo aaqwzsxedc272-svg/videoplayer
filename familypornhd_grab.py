@@ -409,6 +409,57 @@ def _http_post(url: str, data: dict, referer: str = "", timeout: int = 20) -> tu
     return (str(response.url or url), str(response.text or ""))
 
 
+# The same endpoint answers a plain GET with the rendered player page, and
+# that page's Download menu carries the direct MP4s in cleartext -- the AES
+# blobs in the POST response are only how the download button is dressed up.
+# Verified against /video/b20bb95ab626d93fd976af958fbc61ba, which served
+#   [ENG] 360p -> https://bestvideostream.com/cdn/down/<id>/files/…_eng_360p.mp4?md5=…&expires=…
+#   [ENG] 720p -> …_eng_720p.mp4?md5=…&expires=…
+# The CDN host rotates between requests (video-streams.com and
+# bestvideostream.com in two back-to-back fetches), so it is never assumed.
+
+_MEDIA_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+
+
+def _is_absolute_http_url(url: str) -> bool:
+    """Whether *url* is an absolute http(s) URL, as opposed to a blob or a blob
+    of ciphertext.
+
+    The FirePlayer POST puts AES ciphertext in ``downloadLinks[].file`` -- a
+    bare ``{"ct":…,"iv":…,"s":…}`` string -- and that shape was being handed to
+    the playlist as if it were a stream.  ``_looks_like_media_url`` alone would
+    already reject it, but the scheme is checked separately so the two rules
+    stay independently readable.
+    """
+    return str(url or "").strip().lower().startswith(("http://", "https://"))
+
+
+def _fireplayer_download_links(page_url: str) -> list:
+    """Scrape the cleartext Download menu off a FirePlayer player page."""
+    try:
+        _final, text = _http_get(page_url)
+    except Exception as exc:
+        print(f"[FAMILYPORNHD] FirePlayer page fetch failed: {exc}")
+        return []
+
+    found, seen = [], set()
+    for url in _MEDIA_URL_RE.findall(text or ""):
+        url = html_unescape(url)
+        if url in seen or "/cdn/down/" not in url:
+            continue
+        if not _is_absolute_http_url(url) or not _looks_like_media_url(url):
+            continue
+        seen.add(url)
+        match = _KVS_HEIGHT_RE.search(url)
+        found.append((int(match.group(1)) if match else 0, len(found), url))
+
+    found.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
+    if found:
+        print(f"[FAMILYPORNHD] FirePlayer download menu offers "
+              f"{len(found)} direct URL(s), best {found[0][2][:120]}")
+    return [url for _height, _order, url in found]
+
+
 def _fireplayer_pick_best(payload: dict) -> list:
     """Pull playable URLs out of a FirePlayer getVideo payload, best first.
 
@@ -424,7 +475,8 @@ def _fireplayer_pick_best(payload: dict) -> list:
 
     def _add(url, label):
         url = str(url or "").strip()
-        if not url or url in seen or url.startswith("blob:"):
+        if (not url or url in seen or not _is_absolute_http_url(url)
+                or not _looks_like_media_url(url)):
             return
         seen.add(url)
         match = _KVS_HEIGHT_RE.search(str(label or "")) or _KVS_HEIGHT_RE.search(url)
@@ -453,6 +505,10 @@ def _extract_fireplayer_streams(html: str, base_url: str) -> list:
     parsed = urlparse(page_url)
     if not (parsed.scheme and parsed.netloc):
         return []
+
+    links = _fireplayer_download_links(page_url)
+    if links:
+        return links
 
     api = f"{parsed.scheme}://{parsed.netloc}/player/index.php?data={video_id}&do=getVideo"
     print(f"[FAMILYPORNHD] FirePlayer embed {page_url} -> POST {api}")
@@ -560,12 +616,15 @@ def fetch_and_extract(url: str, session=None) -> dict:
                 if not title:
                     title = _extract_title(embed_html, embed_page_url)
 
+    fireplayer = False
     if not links:
         # Articles whose video is externally hosted embed FirePlayer instead
-        # of the KVS player. This is a plain POST -- no browser, and no need
-        # to decrypt the master.txt the player itself uses.
+        # of the KVS player. The player page's Download menu carries the
+        # direct MP4s in cleartext, so no browser is needed and the encrypted
+        # master.txt the player streams from is never touched.
         links = _extract_fireplayer_streams(html, page_url)
         if links:
+            fireplayer = True
             referer = page_url
 
     if not links:
@@ -587,6 +646,10 @@ def fetch_and_extract(url: str, session=None) -> dict:
         # i.e. they are signed get_file URLs minted moments ago rather than
         # whatever the generic HTML sweep happened to find.
         "kvs_embed": kvs_embed,
+        # True when the links came from a FirePlayer Download menu. Like
+        # ``kvs_embed`` this marks them as minted on purpose, so the caller
+        # can skip the browser capture.
+        "fireplayer": fireplayer,
     }
 
 
@@ -598,7 +661,7 @@ def grab_all(url: str, play_first: bool = True) -> dict:
     """
     del play_first
     result = {"source_url": url, "title": "", "links": [], "headers": {},
-              "kvs_embed": False}
+              "kvs_embed": False, "fireplayer": False}
     try:
         result = fetch_and_extract(url)
         links = result["links"]
