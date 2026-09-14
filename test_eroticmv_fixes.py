@@ -1821,6 +1821,76 @@ report(len(fg19._extract_kvs_player_streams(_site22, _EMBED19)) == 3,
        f'the KVS extractor still yields all 3 renditions from site.txt '
        f'(got {len(fg19._extract_kvs_player_streams(_site22, _EMBED19))})')
 
+# ── 23. FirePlayer: the signed HLS master is the fallback, not the primary ──
+# The Download menu is built by scripts.php from jData.downloadLinks at
+# runtime, so it is absent from the raw HTML the app fetches -- scraping it
+# finds nothing. And for hls videos downloadLinks[].file is AES ciphertext,
+# which cannot be decrypted without a key we do not have. Every response does
+# carry a signed HLS master in cleartext, including the videos whose
+# downloadLinks is empty, and mpv plays that directly.
+_EMPTY_DL23 = {
+    'hls': True,
+    'videoSource': 'https://watchstreamhd.com/cdn/hls/a305902aeacf302c3a44accafc0894cd/master.txt',
+    'securedLink': ('https://watchstreamhd.com/cdn/hls/a305902aeacf302c3a44accafc0894cd/'
+                    'master.m3u8?md5=j22qa6ShPYGlnPQFbIy0xg&expires=1789370878'),
+    'downloadLinks': [], 'attachmentLinks': [],
+}
+_ENC_DL23 = {
+    'hls': True,
+    'videoSource': 'https://watchstreamhd.com/cdn/hls/76603cb0d5efcec0eda71ebb2160ee77/master.txt',
+    'securedLink': ('https://watchstreamhd.com/cdn/hls/76603cb0d5efcec0eda71ebb2160ee77/'
+                    'master.m3u8?md5=nrpII79Bipk4zc2OwUB8JA&expires=1789370667'),
+    'downloadLinks': [{'language': 'eng', 'label': '720p', 'size': '448.47 MB',
+                       'file': _CT22}],
+}
+_VID23 = 'f47330643ae134ca204bf6b2481fec47'
+_HTML23 = (f'<html><title>Stepbro</title>'
+           f'<iframe src="https://watchstreamhd.com/video/{_VID23}"></iframe></html>')
+
+report(fg19._is_hls_master_url('https://x/cdn/hls/a/master.m3u8?md5=1&expires=2') is True
+       and fg19._is_hls_master_url('https://x/a.mp4?md5=1') is False
+       and fg19._is_hls_master_url('') is False,
+       'an HLS master is told apart from a progressive file by its path, not its query')
+
+# raw HTML carries no JS-built menu, which is the case that defeated the scrape
+_raw23_get, _raw23_post = fg19._http_get, fg19._http_post
+try:
+    fg19._http_get = lambda url, referer="", timeout=20: (
+        url, _HTML23 if 'familypornhd.com/' in url else "<html><div id='downloads'></div></html>")
+
+    def _stub_post23(payload):
+        def _post(url, data, referer="", timeout=20):
+            return (url, json.dumps(payload))
+        return _post
+
+    for _label23, _payload23 in (('empty downloadLinks', _EMPTY_DL23),
+                                 ('encrypted downloadLinks', _ENC_DL23)):
+        fg19._http_post = _stub_post23(_payload23)
+        _got23 = fg19._extract_fireplayer_streams(_HTML23, 'https://familypornhd.com/x/')
+        report(_got23 == [_payload23['securedLink']],
+               f'with {_label23} the signed HLS master is returned instead of nothing')
+
+    fg19._http_post = _stub_post23(_EMPTY_DL23)
+    _res23 = fg19.fetch_and_extract('https://familypornhd.com/i-can-get-naked-when-i-want-stepbro-2/')
+    report(_res23['fireplayer'] is False and _res23['fireplayer_hls'] is True,
+           'the master is flagged as a fallback, so the browser capture still gets first shot')
+    report(_res23['headers'].get('Referer')
+           == f'https://watchstreamhd.com/video/{_VID23}',
+           'the Referer is the player page the master was issued for, not the article')
+    report(not any('master.txt' in u for u in _res23['links'])
+           and not any(u.startswith('{') for u in _res23['links']),
+           'neither the encrypted master.txt nor a ciphertext blob is ever offered')
+finally:
+    fg19._http_get, fg19._http_post = _raw23_get, _raw23_post
+
+# The worker must not short-circuit on an HLS master: the progressive MP4 the
+# capture finds is strictly better to seek in, and it already works.
+report('"fireplayer_static" if static_result.get("fireplayer")' in _int22
+       and 'fireplayer_hls' not in _int22,
+       'the worker short-circuits only for KVS and download renditions, never for the master')
+report('result = static_result' in _int22,
+       'the static links are still used when the browser capture comes back empty')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

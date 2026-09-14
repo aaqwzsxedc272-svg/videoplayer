@@ -421,6 +421,11 @@ def _http_post(url: str, data: dict, referer: str = "", timeout: int = 20) -> tu
 _MEDIA_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 
 
+def _is_hls_master_url(url: str) -> bool:
+    """Whether *url* is an HLS playlist rather than a progressive file."""
+    return str(url or "").split("?", 1)[0].lower().endswith((".m3u8", ".m3u"))
+
+
 def _is_absolute_http_url(url: str) -> bool:
     """Whether *url* is an absolute http(s) URL, as opposed to a blob or a blob
     of ciphertext.
@@ -541,6 +546,19 @@ def _extract_fireplayer_streams(html: str, base_url: str) -> list:
     if links:
         print(f"[FAMILYPORNHD] FirePlayer yielded {len(links)} URL(s), "
               f"best {links[0][:160]}")
+        return links
+
+    # No progressive MP4 to be had: for hls videos downloadLinks[].file is AES
+    # ciphertext, and some videos carry no download variants at all.  The
+    # response still names a signed HLS master in cleartext --
+    #   "securedLink":"https://watchstreamhd.com/cdn/hls/<id>/master.m3u8?md5=…&expires=…"
+    # -- which is the same playlist the in-page player streams, and mpv reads
+    # it directly.  It needs no Referer trick and no decryption, so it is what
+    # the videos with an empty downloadLinks fall back to.
+    secured = str(payload.get("securedLink") or "").strip() if isinstance(payload, dict) else ""
+    if _is_absolute_http_url(secured):
+        print(f"[FAMILYPORNHD] FirePlayer signed HLS master: {secured[:150]}")
+        return [secured]
     return links
 
 
@@ -617,6 +635,7 @@ def fetch_and_extract(url: str, session=None) -> dict:
                     title = _extract_title(embed_html, embed_page_url)
 
     fireplayer = False
+    fireplayer_hls = False
     if not links:
         # Articles whose video is externally hosted embed FirePlayer instead
         # of the KVS player. The player page's Download menu carries the
@@ -624,8 +643,17 @@ def fetch_and_extract(url: str, session=None) -> dict:
         # master.txt the player streams from is never touched.
         links = _extract_fireplayer_streams(html, page_url)
         if links:
-            fireplayer = True
-            referer = page_url
+            # An HLS master is a fallback, not a replacement: the progressive
+            # MP4 the browser capture finds is strictly better to seek in, and
+            # it already works for the videos that offer downloads.  Only the
+            # short-circuit flag is withheld, so the capture still gets first
+            # shot and the master is used when it comes back empty.
+            _embed22 = _WATCHSTREAM_EMBED_RE.search(html or "")
+            referer = _embed22.group(1) if _embed22 else page_url
+            if _is_hls_master_url(links[0]):
+                fireplayer_hls = True
+            else:
+                fireplayer = True
 
     if not links:
         links = extract_video_urls_from_html(html, page_url)
@@ -650,6 +678,9 @@ def fetch_and_extract(url: str, session=None) -> dict:
         # ``kvs_embed`` this marks them as minted on purpose, so the caller
         # can skip the browser capture.
         "fireplayer": fireplayer,
+        # True when the only thing FirePlayer offered was a signed HLS master.
+        # Deliberately does not short-circuit the browser capture.
+        "fireplayer_hls": fireplayer_hls,
     }
 
 
@@ -661,7 +692,7 @@ def grab_all(url: str, play_first: bool = True) -> dict:
     """
     del play_first
     result = {"source_url": url, "title": "", "links": [], "headers": {},
-              "kvs_embed": False, "fireplayer": False}
+              "kvs_embed": False, "fireplayer": False, "fireplayer_hls": False}
     try:
         result = fetch_and_extract(url)
         links = result["links"]
