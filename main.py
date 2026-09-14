@@ -27686,6 +27686,39 @@ try {
         except Exception:
             return False
 
+    @staticmethod
+    def _is_family_cdn_media_line(line):
+        """True for a capture line naming a watchstreamhd-family CDN file.
+
+        The watchstreamhd embed decrypts its ``master.txt`` in JavaScript and
+        then fires one plain request per rendition, all within a second or
+        two::
+
+            /cdn/hls/<id>/master.txt
+            /cdn/down/<id>/files/<slug>_und_360p.mp4?md5=...&expires=...
+            /cdn/down/<id>/files/<slug>_und_720p.mp4?md5=...&expires=...
+
+        The CDN hostname rotates (video-streams.com, bestvideostream.com,
+        mediaboxplayer.com and others have all been seen), so the path shape
+        is the stable signal.  Seeing it means the decrypted URLs are already
+        in the pipe and there is nothing left to wait for: the player is a
+        blob:/MediaSource element, so VERIFIED_MEDIA never fires and the
+        capture would otherwise sit out the whole ~135s deadline.
+        """
+        try:
+            raw = str(line or '')
+            if not raw.startswith('MEDIA_URL::'):
+                return False
+            candidate = raw.split('::', 1)[1].strip()
+            path = urlparse(candidate).path.lower()
+            return (
+                '/cdn/down/' in path
+                and '/files/' in path
+                and path.endswith(('.mp4', '.m4v', '.webm', '.mkv', '.mov'))
+            )
+        except Exception:
+            return False
+
     # Hosts an article page loads for ads and analytics. These must still be
     # thrown away when the page has no get_file stream of its own: the
     # repeated playhubconnect MP4 is an advert, not the video. Everything
@@ -38378,6 +38411,7 @@ try {
             _pw_html_at = None
             _pw_media_at = None
             _pw_m3u8_at = None
+            _pw_family_cdn_at = None
             _pw_child_dead_at = None
             while True:
                 _now = time.time()
@@ -38405,8 +38439,12 @@ try {
                         _pw_m3u8_at = time.time()
                         if _pw_media_at is None:
                             _pw_media_at = _pw_m3u8_at
-                    elif line.startswith('MEDIA_URL::') and _pw_media_at is None:
-                        _pw_media_at = time.time()
+                    elif line.startswith('MEDIA_URL::'):
+                        if _pw_media_at is None:
+                            _pw_media_at = time.time()
+                        if (_pw_family_cdn_at is None
+                                and self._is_family_cdn_media_line(line)):
+                            _pw_family_cdn_at = time.time()
                     elif line.startswith('PAGE_HTML_B64::') and _pw_html_at is None:
                         _pw_html_at = time.time()
                     if line and not line.startswith(
@@ -38446,6 +38484,19 @@ try {
                         # don't wait out the rest of the window with the
                         # browser tab open.
                         _kill_pw_tree('file-host capture done, child stuck closing browser')
+                        break
+                    if (_pw_family_cdn_at is not None
+                            and _now - _pw_family_cdn_at > 8):
+                        # The decrypted renditions are already in the pipe.
+                        # Timed from the FIRST one and not reset by later
+                        # ones: the browser re-requests the chosen file for
+                        # range reads, and resetting would pin the capture
+                        # open for as long as the download runs.
+                        # The blob:/MediaSource player never raises
+                        # VERIFIED_MEDIA, so without this rung the capture
+                        # held a URL it had finished collecting for two
+                        # minutes before handing it over.
+                        _kill_pw_tree('family CDN renditions captured, closing browser')
                         break
                     if (early_m3u8 and _pw_m3u8_at is not None
                             and _now - _pw_m3u8_at > 8):

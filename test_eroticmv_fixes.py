@@ -1601,6 +1601,57 @@ report('refreshing aged captured URL from article page' not in _main19,
 report('_family_fresh = self._resolve_stream_from_html(_family_origin_page)' in _main19,
        'the generic HTML pass is kept as a fallback, not deleted')
 
+# ── 20. stop the capture once the decrypted renditions are in the pipe ───────
+# Every FamilyPornHD capture in the user's log printed
+# "killed capture subprocess (deadline reached)" BEFORE selecting a stream:
+# the two /cdn/down/ MP4s arrived within a second of master.txt, then the
+# capture idled for the rest of the ~135s window because the blob:/MSE player
+# never raises VERIFIED_MEDIA. These are the verbatim lines from that log.
+_is_family_cdn_media_line = lift('VideoPlayer', '_is_family_cdn_media_line')
+
+_CDN_HITS20 = [
+    'MEDIA_URL::https://video-streams.com/cdn/down/76603cb0d5efcec0eda71ebb2160ee77/files/caught-red-handed_eng_360p.mp4?md5=3BBnQR6V0PPi-taiZfFPNA&expires=1789442476',
+    'MEDIA_URL::https://video-streams.com/cdn/down/76603cb0d5efcec0eda71ebb2160ee77/files/caught-red-handed_eng_720p.mp4?md5=DjwzKnlNZWSzlnxcVCaAnQ&expires=1789442476',
+    'MEDIA_URL::https://bestvideostream.com/cdn/down/43c313477ed1dfebd68cb9d0d26eb8c8/files/finally_und_720p.mp4?md5=PAwqVX7oJEPxeOLeD1awiA&expires=1789442616',
+]
+report(all(_is_family_cdn_media_line(line) is True for line in _CDN_HITS20),
+       f'all {len(_CDN_HITS20)} real /cdn/down/ renditions arm the early exit')
+
+# the pre-roll advert is also an MP4 on a CDN-looking path -- it must not arm
+# the exit, or the capture would bail before the real video appeared
+report(_is_family_cdn_media_line(
+    'MEDIA_URL::https://playhubconnect.com/bn/alternative/709/557/01d/'
+    '70955701d2cb9942742e85402b1cc08a9aba7c9b-alt.mp4') is False,
+    'the playhubconnect pre-roll advert does not arm the early exit')
+
+_CDN_MISSES20 = [
+    # the encrypted master playlist itself: a signal, never a playable file
+    'MEDIA_URL::https://watchstreamhd.com/cdn/hls/871885b5ce8f4eb8663ee09a36fa44a7/master.txt',
+    'MEDIA_URL::https://www.googletagmanager.com/gtag/js?id=G-C8V6DNVNQK&cx=c&gtm=4e6992',
+    'MEDIA_URL::https://familypornhd.com/wp-includes/js/jquery/jquery.min.js?ver=3.7.1',
+    'MEDIA_URL::https://watchstreamhd.com/player/assets/js/cryptojs-aes.min.js',
+    'MEDIA_URL::https://excavatenearbywand.com/aas/r45d/vki/2089950/402c05c4.js',
+    'MEDIA_URL::https://goodimpressioncrboost.com/v1/track/impression?data=eyJhbGciOi',
+    'MEDIA_URL::https://ssl.p.jwpcdn.com/player/v/8.34.3/jwplayer.js',
+    # the KVS path has its own resolver; it must not trip this rung
+    'MEDIA_URL::https://dev.familypornhd.com/get_file/0/zwQJ0A71.mp4/?v-acctoken=abc',
+    'PAGE_TITLE::Myra Moans - Straight & Narrow - Family Therapy',
+    'BROWSER_COOKIES::_gid=GA1.2.327975906.1789336876',
+    '',
+]
+report(all(_is_family_cdn_media_line(line) is False for line in _CDN_MISSES20),
+       f'none of the {len(_CDN_MISSES20)} other captured lines arm it')
+
+# the predicate is only useful if the loop actually consults it
+_main20 = open('main.py', encoding='utf-8').read()
+report('self._is_family_cdn_media_line(line)' in _main20
+       and "_pw_family_cdn_at = None" in _main20
+       and "'family CDN renditions captured, closing browser'" in _main20,
+       'the capture loop records the timestamp and breaks on it')
+report(_main20.count('_pw_family_cdn_at') == 5,
+       f'timestamp initialised, set, and tested exactly once each '
+       f'({_main20.count("_pw_family_cdn_at")} references)')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
