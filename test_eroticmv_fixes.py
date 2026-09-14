@@ -1145,6 +1145,8 @@ class CaptureStub:
         'VideoPlayer', '_familypornhd_player_page')
     _capture_candidate_is_obfuscated_master = lift(
         'VideoPlayer', '_capture_candidate_is_obfuscated_master')
+    _familypornhd_master_wait_seconds = staticmethod(
+        lift('VideoPlayer', '_familypornhd_master_wait_seconds'))
 
 
 cap = CaptureStub()
@@ -1406,6 +1408,56 @@ _call = re.search(
 report(_call is not None and _call.group(1) == 'media_candidates',
        f'the call site passes the full capture, not the truncated window: '
        f'{_call.group(1) if _call else "call site not found"}')
+
+# ── 17. hold the capture open across the master -> decrypted-file gap ───────
+# straight-narrow never reached the playlist because master.txt was the LAST
+# media URL captured, immediately followed by "killed capture subprocess
+# (deadline reached)". caught-red-handed and finally had their /cdn/down/
+# files arrive before the deadline. These are the real MEDIA_URL lines.
+def classify(urls):
+    """The exact state transitions the capture loop now performs."""
+    master_at = file_at = None
+    for u in urls:
+        mu = u.strip().lower()          # the loop lowercases before testing
+        if file_at is None and '/cdn/down/' in mu:
+            file_at = True
+        elif master_at is None and cap._capture_candidate_is_obfuscated_master(mu):
+            master_at = True
+    return master_at is not None and file_at is None
+
+NARROW_MEDIA = [
+    'https://playhubconnect.com/bn/alternative/709/557/01d/70955701d2cb9942742e85402b1cc08a9aba7c9b-alt.mp4',
+    'https://watchstreamhd.com/cdn/hls/871885b5ce8f4eb8663ee09a36fa44a7/master.txt',
+]
+CRH_MEDIA = [
+    'https://playhubconnect.com/bn/alternative/709/557/01d/70955701d2cb9942742e85402b1cc08a9aba7c9b-alt.mp4',
+    'https://watchstreamhd.com/cdn/hls/76603cb0d5efcec0eda71ebb2160ee77/master.txt',
+    'https://streaming-video-today.com/cdn/down/76603cb0d5efcec0eda71ebb2160ee77/files/caught-red-handed_eng_360p.mp4?md5=5LuXzHFDYOo7hDEDY3qavQ&expires=1789434591',
+    'https://streaming-video-today.com/cdn/down/76603cb0d5efcec0eda71ebb2160ee77/files/caught-red-handed_eng_720p.mp4?md5=4pJltQX5ydj9APY8e5MSQw&expires=1789434591',
+]
+report(classify(NARROW_MEDIA) is True,
+       'straight-narrow (master, no file) triggers the extension')
+report(classify(CRH_MEDIA) is False,
+       'caught-red-handed (master then files) does not, so it is not slowed')
+report(classify(['https://playhubconnect.com/bn/alternative/x-alt.mp4']) is False,
+       'an ordinary page with no player master is untouched')
+report(cap._capture_candidate_is_obfuscated_master(
+           'HTTPS://WATCHSTREAMHD.COM/CDN/HLS/871885B5/MASTER.TXT') is True,
+       'the predicate still matches the lowercased form the loop feeds it')
+report(cap._familypornhd_master_wait_seconds() == 45,
+       f'the extension is {cap._familypornhd_master_wait_seconds()}s')
+
+_src17 = open('main.py', encoding='utf-8').read()
+_deadline_branch = re.search(
+    r'if _now >= _pw_deadline:\n(.*?)_kill_pw_tree\(.deadline reached.\)',
+    _src17, re.S)
+report(_deadline_branch is not None
+       and '_pw_family_extended = True' in _deadline_branch.group(1)
+       and '_pw_family_file_at is None' in _deadline_branch.group(1),
+       'the extension lives inside the deadline branch, not on every line — '
+       'a capture that is going normally loses no time')
+report(_src17.count('_pw_family_extended = True') == 1,
+       'and it can only ever fire once')
 
 print()
 print('FAILURES:', FAILS)
