@@ -11,6 +11,7 @@ USAGE:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -348,6 +349,145 @@ def _find_kvs_embed_url(html: str, base_url: str) -> str:
     return ""
 
 
+# ── FirePlayer (watchstreamhd) ───────────────────────────────────────────────
+#
+# The articles that are NOT hosted by the site's own KVS player embed
+# ``watchstreamhd.com/video/<32-hex>``, which runs FirePlayer.  Its source is
+# fetched by an XHR whose shape is fixed and readable straight out of
+# ``/player/assets/scripts.php``::
+#
+#     $.ajax({ type:"POST", url:"/player/index.php?data="+ID+"&do=getVideo",
+#              data:{hash:ID, r:document.referrer},
+#              success: function(data){ var jData = JSON.parse(data); ... } })
+#
+# and then either ``jwSettings.file = jData.videoSource`` (hls) or
+# ``jwSettings.sources = jData.videoSources``.  The site blocks DevTools -- the
+# player will not even start while it is open -- so the response is read here
+# instead of in a browser, and printed so its shape is visible in the console.
+#
+# The three articles that DO resolve show the player requesting plain
+# ``/cdn/down/<id>/files/<slug>_und_720p.mp4?md5=...&expires=...`` URLs a
+# second after the encrypted ``master.txt``, which is what those MP4s look
+# like when the decryption succeeds.
+
+_WATCHSTREAM_EMBED_RE = re.compile(
+    r"(https?://[a-z0-9.\-]+/video/([0-9a-f]{16,40}))", re.IGNORECASE)
+
+
+def _http_post(url: str, data: dict, referer: str = "", timeout: int = 20) -> tuple:
+    """POST *data* and return ``(final_url, text)``, preferring curl_cffi."""
+    headers = {
+        "User-Agent": _UA,
+        "Referer": referer or "https://familypornhd.com/",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "X-Requested-With": "XMLHttpRequest",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Origin": referer.rsplit("/", 1)[0] if referer else "",
+    }
+    errors = []
+    try:
+        import curl_cffi.requests as cfreq
+
+        response = cfreq.post(url, data=data, headers=headers,
+                              impersonate="chrome131", timeout=timeout,
+                              allow_redirects=True)
+        if getattr(response, "status_code", 200) < 400:
+            return (str(getattr(response, "url", "") or url),
+                    str(response.text or ""))
+        errors.append(f"curl_cffi HTTP {response.status_code}")
+    except ImportError:
+        errors.append("curl_cffi not installed")
+    except Exception as exc:
+        errors.append(f"curl_cffi {type(exc).__name__}: {exc}")
+
+    if requests is None:
+        raise RuntimeError("; ".join(errors) or "no HTTP transport available")
+    response = requests.post(url, data=data, headers=headers, timeout=timeout,
+                             allow_redirects=True)
+    response.raise_for_status()
+    return (str(response.url or url), str(response.text or ""))
+
+
+def _fireplayer_pick_best(payload: dict) -> list:
+    """Pull playable URLs out of a FirePlayer getVideo payload, best first.
+
+    Handled defensively because the site blocks DevTools and the exact key
+    layout has never been observed: JW Player takes ``sources`` as objects
+    with a ``file``, FirePlayer's own download list uses ``downloadLinks``,
+    and a bare ``videoSource`` string is the HLS fallback.
+    """
+    if not isinstance(payload, dict):
+        return []
+
+    found, seen = [], set()
+
+    def _add(url, label):
+        url = str(url or "").strip()
+        if not url or url in seen or url.startswith("blob:"):
+            return
+        seen.add(url)
+        match = _KVS_HEIGHT_RE.search(str(label or "")) or _KVS_HEIGHT_RE.search(url)
+        height = int(match.group(1)) if match else 0
+        found.append((height, len(found), url))
+
+    for key in ("videoSources", "sources", "downloadLinks", "attachmentLinks"):
+        for item in payload.get(key) or []:
+            if isinstance(item, dict):
+                _add(item.get("file") or item.get("src") or item.get("url")
+                     or item.get("href") or item.get("link"),
+                     item.get("label") or item.get("title") or "")
+            else:
+                _add(item, "")
+
+    found.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
+    return [url for _height, _order, url in found]
+
+
+def _extract_fireplayer_streams(html: str, base_url: str) -> list:
+    """Resolve a watchstreamhd/FirePlayer embed to its plain media URLs."""
+    match = _WATCHSTREAM_EMBED_RE.search(html or "")
+    if not match:
+        return []
+    page_url, video_id = match.group(1), match.group(2)
+    parsed = urlparse(page_url)
+    if not (parsed.scheme and parsed.netloc):
+        return []
+
+    api = f"{parsed.scheme}://{parsed.netloc}/player/index.php?data={video_id}&do=getVideo"
+    print(f"[FAMILYPORNHD] FirePlayer embed {page_url} -> POST {api}")
+    try:
+        _final, text = _http_post(api, {"hash": video_id, "r": base_url},
+                                  referer=base_url)
+    except Exception as exc:
+        print(f"[FAMILYPORNHD] FirePlayer getVideo failed: {exc}")
+        return []
+
+    # The endpoint answers plain text when it refuses ("Video not found."),
+    # so JSON is the only success signal -- same test the player itself uses.
+    try:
+        payload = json.loads(text)
+    except Exception:
+        print(f"[FAMILYPORNHD] FirePlayer getVideo was not JSON: {str(text)[:200]!r}")
+        return []
+
+    if isinstance(payload, dict):
+        print(
+            "[FAMILYPORNHD] FirePlayer getVideo keys: "
+            f"{sorted(payload.keys())} hls={payload.get('hls')!r}"
+        )
+        # Printed deliberately: DevTools is blocked on this site, so this is
+        # the only way the real payload shape ever reaches us. Truncated
+        # because it can carry a long encrypted playlist.
+        print(f"[FAMILYPORNHD] FirePlayer getVideo raw: {str(text)[:1200]}")
+
+    links = _fireplayer_pick_best(payload if isinstance(payload, dict) else {})
+    if links:
+        print(f"[FAMILYPORNHD] FirePlayer yielded {len(links)} URL(s), "
+              f"best {links[0][:160]}")
+    return links
+
+
 def _http_get(url: str, referer: str = "", timeout: int = 20) -> tuple:
     """Fetch *url* and return ``(final_url, text)``.
 
@@ -419,6 +559,14 @@ def fetch_and_extract(url: str, session=None) -> dict:
                 referer = embed_page_url
                 if not title:
                     title = _extract_title(embed_html, embed_page_url)
+
+    if not links:
+        # Articles whose video is externally hosted embed FirePlayer instead
+        # of the KVS player. This is a plain POST -- no browser, and no need
+        # to decrypt the master.txt the player itself uses.
+        links = _extract_fireplayer_streams(html, page_url)
+        if links:
+            referer = page_url
 
     if not links:
         links = extract_video_urls_from_html(html, page_url)

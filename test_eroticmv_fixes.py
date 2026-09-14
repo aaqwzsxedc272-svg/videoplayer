@@ -1652,6 +1652,76 @@ report(_main20.count('_pw_family_cdn_at') == 5,
        f'timestamp initialised, set, and tested exactly once each '
        f'({_main20.count("_pw_family_cdn_at")} references)')
 
+# ── 21. FirePlayer: read the getVideo response instead of the browser ────────
+# The watchstreamhd player refuses to start while DevTools is open, so the
+# getVideo response cannot be inspected by hand. The endpoint is fixed and
+# readable out of /player/assets/scripts.php, so the app POSTs to it directly
+# and prints the payload -- the console log is the only channel that works.
+_EMBED21 = 'https://watchstreamhd.com/video/c44e503833b64e9f27197a484f4257c0'
+_HTML21 = f'<iframe src="{_EMBED21}" allowfullscreen></iframe>'
+
+_m21 = fg19._WATCHSTREAM_EMBED_RE.search(_HTML21)
+report(bool(_m21) and _m21.group(2) == 'c44e503833b64e9f27197a484f4257c0',
+       f'the FirePlayer video id is lifted out of the watch page iframe: '
+       f'{_m21.group(2) if _m21 else "no match"}')
+report(fg19._WATCHSTREAM_EMBED_RE.search(
+    'https://playhubconnect.com/bn/alternative/709/557/01d/70955701d2cb-alt.mp4') is None
+    and fg19._WATCHSTREAM_EMBED_RE.search('<p>no player</p>') is None,
+    'the advert and a player-less page are not mistaken for a FirePlayer embed')
+
+_payload21 = {
+    'hls': True,
+    'videoSource': 'https://watchstreamhd.com/cdn/hls/871885b5ce8f4eb8663ee09a36fa44a7/master.txt',
+    'videoSources': [
+        {'file': 'https://video-streams.com/cdn/down/x/files/straight-narrow_und_360p.mp4?md5=a&expires=1',
+         'label': '360p'},
+        {'file': 'https://video-streams.com/cdn/down/x/files/straight-narrow_und_720p.mp4?md5=b&expires=1',
+         'label': '720p'},
+    ],
+    'downloadLinks': [
+        {'label': '1080p', 'size': '0',
+         'url': 'https://video-streams.com/cdn/down/x/files/straight-narrow_und_1080p.mp4?md5=c&expires=1'},
+    ],
+}
+_picked21 = fg19._fireplayer_pick_best(_payload21)
+report(len(_picked21) == 3 and '1080p' in _picked21[0],
+       f'renditions from every list, best first ({len(_picked21)}): '
+       f'{[u.split("/files/")[1][:16] for u in _picked21]}')
+report(not any('master.txt' in u for u in _picked21),
+       'the encrypted master.txt is never offered as a playable rendition')
+report(fg19._fireplayer_pick_best({'videoSources': [{'file': 'blob:https://watchstreamhd.com/x'}]}) == [],
+    'a blob: MediaSource URL is rejected -- mpv cannot open one')
+report(fg19._fireplayer_pick_best({}) == [] and fg19._fireplayer_pick_best(None) == [],
+    'an empty or missing payload yields nothing rather than raising')
+
+_real21 = fg19._http_post
+try:
+    fg19._http_post = lambda url, data, referer="", timeout=20: (url, json.dumps(_payload21))
+    _got21 = fg19._extract_fireplayer_streams(_HTML21, 'https://familypornhd.com/straight-narrow/')
+    report(len(_got21) == 3 and '1080p' in _got21[0],
+           f'the resolver POSTs and returns {len(_got21)} playable URL(s), 1080p first')
+
+    fg19._http_post = lambda url, data, referer="", timeout=20: (url, 'Video not found.')
+    report(fg19._extract_fireplayer_streams(_HTML21, 'https://x/') == [],
+           'a plain-text refusal is reported and yields no links')
+
+    def _boom21(url, data, referer="", timeout=20):
+        raise RuntimeError('network down')
+    fg19._http_post = _boom21
+    report(fg19._extract_fireplayer_streams(_HTML21, 'https://x/') == [],
+           'a transport failure degrades to the browser capture instead of raising')
+finally:
+    fg19._http_post = _real21
+
+report(fg19._extract_fireplayer_streams('<p>no player</p>', 'https://x/') == [],
+       'a page with no FirePlayer embed is left alone')
+
+_grab21 = open('familypornhd_grab.py', encoding='utf-8').read()
+report('FirePlayer getVideo raw:' in _grab21,
+       'the raw payload is printed, since DevTools is blocked on this site')
+report('links = _extract_fireplayer_streams(html, page_url)' in _grab21,
+       'fetch_and_extract falls through to FirePlayer when the KVS player finds nothing')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
