@@ -1143,6 +1143,8 @@ class CaptureStub:
         'VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
     _familypornhd_player_page = lift(
         'VideoPlayer', '_familypornhd_player_page')
+    _capture_candidate_is_obfuscated_master = lift(
+        'VideoPlayer', '_capture_candidate_is_obfuscated_master')
 
 
 cap = CaptureStub()
@@ -1204,8 +1206,10 @@ MASTER = CAPTURE[-3]
 
 report(cap._capture_candidate_is_media(MP4_720) is True,
        'the mediaboxplayer MP4 is media')
-report(cap._capture_candidate_is_media(MASTER) is True,
-       'watchstreamhd serves its HLS master as .txt and that still counts')
+report(cap._capture_candidate_is_media(MASTER) is False,
+       'the master is disguised as .txt but is ciphertext, not a stream')
+report(cap._capture_candidate_is_obfuscated_master(MASTER) is True,
+       'it is recognised as the player master instead')
 report(cap._capture_candidate_is_media(
     'https://www.googletagmanager.com/gtag/js?id=G-C8V6DNVNQK&cx=c') is False,
     'the Google tag endpoint that got played as a video is not media')
@@ -1215,15 +1219,16 @@ report(all(not cap._capture_candidate_is_media(u) for u in CAPTURE
 
 ordered = sorted(CAPTURE, key=lambda u: 0 if cap._capture_candidate_is_media(u) else 1)
 window = ordered[:12]
-report(MP4_720 in window and MP4_360 in window and MASTER in window,
-       f'all three real streams fit the 12-candidate window after sorting: '
+report(MP4_720 in window and MP4_360 in window,
+       f'both real streams fit the 12-candidate window after sorting: '
        f'{[u.rsplit("/", 1)[-1][:34] for u in window if cap._capture_candidate_is_media(u)]}')
 report(MP4_720 not in CAPTURE[:12],
        'and before sorting they were outside it, which is why nothing played')
 
 kept = cap._familypornhd_non_ad_media_candidates(CAPTURE)
-report(MP4_720 in kept and MP4_360 in kept and MASTER in kept,
-       f'the FamilyPornHD fallback keeps the real streams: {len(kept)} candidate(s)')
+report(MP4_720 in kept and MP4_360 in kept and MASTER not in kept,
+       f'the fallback keeps the two streams and not the master: '
+       f'{len(kept)} candidate(s)')
 report(not any('googletagmanager' in u or u.endswith('.js') or u.endswith('.php')
                for u in kept),
        f'and no script among them: {[u.rsplit("/", 1)[-1][:30] for u in kept]}')
@@ -1276,6 +1281,73 @@ report(cap._familypornhd_player_page(
     ['https://mediaboxnow.com/cdn/down/x/files/y_eng_720p.mp4?md5=a&expires=1'],
     ARTICLE) == '',
     'the CDN alone does not identify a player')
+
+# ── 15. master.txt is ciphertext, not a stream ───────────────────────────────
+# Both captures below are verbatim from the field log. "straight-narrow" is
+# the case where the player reached its master but never fetched a /cdn/down/
+# file inside the capture window; "finally" is the case that played at
+# 1280x720 once the Referer became the player page.
+NOISE = [
+    'https://playhubconnect.com/bn/alternative/709/557/01d/70955701d2cb9942742e85402b1cc08a9aba7c9b-alt.mp4',
+    'https://www.googletagmanager.com/gtag/js?id=G-C8V6DNVNQK&cx=c&gtm=4e6992',
+    'https://familypornhd.com/wp-includes/js/jquery/jquery.min.js?ver=3.7.1',
+    'https://js.capndr.com/advertising.js',
+    'https://secure.gravatar.com/avatar/7d5bc0da74f3aae75a18708660ce5075f6d99228cbb56a2cbbe5f36ced39e5b5?s=40&d=mm&r=x',
+    'https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495',
+    '//phonydepth.com/c/Dw9/6.bf2j5_l_ScW_Qc9ONvj/AlzXNETTUd0/OkC/0/2BMeDsM/1aN/TFQS5t',
+]
+WS_ASSETS = [
+    'https://watchstreamhd.com/player/assets/scripts.php?v=6',
+    'https://watchstreamhd.com/player/assets/remodal/remodal.min.js',
+    'https://ssl.p.jwpcdn.com/player/v/8.34.3/jwplayer.js',
+    'https://watchstreamhd.com/player/assets/js/cryptojs-aes.min.js',
+    'https://watchstreamhd.com/player/assets/js/cryptojs-aes-format.js',
+]
+
+NARROW = NOISE + [
+    'https://watchstreamhd.com/video/c44e503833b64e9f27197a484f4257c0',
+] + WS_ASSETS + [
+    'https://watchstreamhd.com/cdn/hls/871885b5ce8f4eb8663ee09a36fa44a7/master.txt',
+]
+FINALLY = NOISE + [
+    'https://watchstreamhd.com/video/97af4fb322bb5c8973ade16764156bed',
+] + WS_ASSETS + [
+    'https://watchstreamhd.com/cdn/hls/43c313477ed1dfebd68cb9d0d26eb8c8/master.txt',
+    'https://videostreamingworld.com/cdn/down/43c313477ed1dfebd68cb9d0d26eb8c8/files/finally_und_360p.mp4?md5=LK-vMtRPKtRdC2SxYj5QFg&expires=1789431441',
+    'https://videostreamingworld.com/cdn/down/43c313477ed1dfebd68cb9d0d26eb8c8/files/finally_und_720p.mp4?md5=m0wGaIrlvoMtVtT_mdW3fw&expires=1789431441',
+]
+NARROW_MASTER = 'https://watchstreamhd.com/cdn/hls/871885b5ce8f4eb8663ee09a36fa44a7/master.txt'
+
+report(cap._capture_candidate_is_obfuscated_master(NARROW_MASTER) is True,
+       'the disguised master is recognised as one')
+report(cap._capture_candidate_is_media(NARROW_MASTER) is False,
+       'but no longer counts as media, so it cannot be queued for mpv')
+report(cap._capture_candidate_is_media(
+    'https://videostreamingworld.com/cdn/down/x/files/y_eng_720p.mp4?md5=a&expires=1') is True
+    and cap._capture_candidate_is_obfuscated_master(
+        'https://videostreamingworld.com/cdn/down/x/files/y_eng_720p.mp4?md5=a&expires=1') is False,
+    'a real /cdn/down/ MP4 is media and is not mistaken for a master')
+
+report(cap._familypornhd_non_ad_media_candidates(NARROW) == [],
+       f'a capture holding only the master yields no candidate: '
+       f'{cap._familypornhd_non_ad_media_candidates(NARROW)}')
+report(cap._familypornhd_player_page(
+           NARROW, 'https://familypornhd.com/straight-narrow/')
+       == 'https://watchstreamhd.com/video/c44e503833b64e9f27197a484f4257c0',
+       'the master still identifies the player for the Referer')
+
+_fin = cap._familypornhd_non_ad_media_candidates(FINALLY)
+report(len(_fin) == 2 and 'finally_und_720p.mp4' in _fin[0]
+       and 'finally_und_360p.mp4' in _fin[1],
+       f'the played 720p file is still first and the master is dropped: {_fin}')
+report(cap._familypornhd_player_page(
+           FINALLY, 'https://familypornhd.com/finally/')
+       == 'https://watchstreamhd.com/video/97af4fb322bb5c8973ade16764156bed',
+       'the finally capture still resolves its player page')
+
+_caught = cap._familypornhd_non_ad_media_candidates(CAPTURE)
+report(len(_caught) == 2 and 'caught-red-handed_eng_720p.mp4' in _caught[0],
+       f'regression guard — caught-red-handed still picks 720p: {_caught}')
 
 print()
 print('FAILURES:', FAILS)

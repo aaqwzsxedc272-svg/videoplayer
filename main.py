@@ -27715,11 +27715,36 @@ try {
             path = (urlparse(url).path or '').lower()
         except Exception:
             return False
-        if any(path.endswith(suffix)
-               for suffix in self._PLAYABLE_MEDIA_SUFFIXES):
-            return True
-        # watchstreamhd.com serves its HLS master as .txt to slip past
-        # adblockers: https://watchstreamhd.com/cdn/hls/<id>/master.txt
+        return any(path.endswith(suffix)
+                   for suffix in self._PLAYABLE_MEDIA_SUFFIXES)
+
+    def _capture_candidate_is_obfuscated_master(self, url):
+        """True for the embedded player's disguised HLS master.
+
+        watchstreamhd.com serves its playlist as .txt to slip past
+        adblockers: https://watchstreamhd.com/cdn/hls/<id>/master.txt
+
+        Its entries are NOT URLs. Each one is the literal scheme "\\m3\\"
+        followed by base64(base64(ciphertext)) — decoded from a field
+        capture, 224 bytes of high-entropy data in 14 AES blocks, the first
+        three blocks identical across the 360p and 720p renditions, which is
+        what fixed-IV ECB/CBC looks like over two plaintexts sharing a
+        prefix. The key sits in that player's cryptojs-aes bundle, so we
+        cannot decrypt it, and handing the master to mpv only produces
+        "No protocol handler found to open URL \\m3\\..." followed by
+        "unrecognized file format" — six attempts, six failures, in one
+        field log.
+
+        So this is a SIGNAL that the embedded player was reached (and
+        _familypornhd_player_page reads it as one), never a candidate to
+        play. The playable file is the /cdn/down/ MP4 the player fetches a
+        moment after decrypting.
+        """
+        url = str(url or '').strip().lower()
+        try:
+            path = urlparse(url).path or ''
+        except Exception:
+            return False
         return path.endswith('.txt') and '/cdn/hls/' in path
 
     def _capture_candidate_is_clearly_not_media(self, url):
@@ -38688,7 +38713,30 @@ try {
                         )
                         normalized_candidates = _family_fallback
                     else:
-                        if normalized_candidates:
+                        _family_master = next(
+                            (_c for _c in normalized_candidates
+                             if self._capture_candidate_is_obfuscated_master(_c)),
+                            '',
+                        )
+                        if _family_master:
+                            # The player was reached but never fetched a
+                            # playable file inside the capture window. The
+                            # master itself is undecryptable ciphertext (see
+                            # _capture_candidate_is_obfuscated_master), so
+                            # queueing it just burns the whole load-failed
+                            # ladder. Say what happened instead.
+                            print(
+                                "[BROWSER_CLICK] FamilyPornHD captured only "
+                                "the player's obfuscated HLS master, which "
+                                f"cannot be played directly: {_family_master[:120]}"
+                            )
+                            print(
+                                "[BROWSER_CLICK] FamilyPornHD: the player did "
+                                "not fetch a /cdn/down/ file in time — open the "
+                                "article again; the decrypted MP4 usually "
+                                "appears a moment after the master"
+                            )
+                        elif normalized_candidates:
                             print(
                                 "[BROWSER_CLICK] FamilyPornHD filter found no "
                                 "direct get_file video; ignoring non-Family "
