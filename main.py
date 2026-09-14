@@ -38663,11 +38663,19 @@ try {
 
             _family_referer = ''
             if _is_family_article:
-                # Resolve the embedded player's page BEFORE the filter below
-                # narrows the list, so its Referer is still available for the
-                # file the filter keeps.
+                # Resolve the embedded player's page from the FULL capture,
+                # not from normalized_candidates: that one is built from
+                # media_candidates[:12], and the player page is an HTML
+                # document, so it sorts into the non-media group and sits far
+                # outside the window behind ~40 theme scripts. Passing the
+                # truncated list found nothing, the Referer fell back to the
+                # article, and every /cdn/down/ request came back 500 — the
+                # "FamilyPornHD embedded player:" line simply stopped
+                # appearing. It only worked before by accident, because
+                # master.txt still counted as media then and carried
+                # /cdn/hls/ into the window.
                 _family_referer = self._familypornhd_player_page(
-                    normalized_candidates, source_url)
+                    media_candidates, source_url)
                 if _family_referer:
                     print(f"[BROWSER_CLICK] FamilyPornHD embedded player: "
                           f"{_family_referer[:140]}")

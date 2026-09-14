@@ -1349,6 +1349,64 @@ _caught = cap._familypornhd_non_ad_media_candidates(CAPTURE)
 report(len(_caught) == 2 and 'caught-red-handed_eng_720p.mp4' in _caught[0],
        f'regression guard — caught-red-handed still picks 720p: {_caught}')
 
+# ── 16. the player page must survive the 12-candidate window ────────────────
+# af078f0 made master.txt non-media, which correctly kept it away from mpv but
+# also pushed the only /cdn/hls/ marker out of the truncated window. The
+# Referer detection then found nothing and the /cdn/down/ files went back to
+# 500. This capture is the field list for caught-red-handed, trimmed to the
+# entries that decide the outcome but keeping their real positions.
+CRH = [
+    'https://playhubconnect.com/bn/alternative/709/557/01d/70955701d2cb9942742e85402b1cc08a9aba7c9b-alt.mp4',
+    'https://www.google-analytics.com/analytics.js',
+    'https://www.googletagmanager.com/gtag/js?id=G-C8V6DNVNQK&cx=c&gtm=4e6992',
+    'https://familypornhd.com/wp-content/plugins/wordpress-popular-posts/assets/js/wpp.min.js?ver=7.4.2',
+    'https://familypornhd.com/wp-includes/js/jquery/jquery.min.js?ver=3.7.1',
+    'https://familypornhd.com/wp-includes/js/jquery/jquery-migrate.min.js?ver=3.4.1',
+    'https://familypornhd.com/wp-content/themes/bimber/js/modernizr/modernizr-custom.min.js?ver=3.3.0',
+    'https://www.googletagmanager.com/gtag/js?id=UA-111541081-1',
+    'https://855c33fea3.df3f107f93.com/1a39882995cce8f50cbf6de58c176067.js',
+    'https://js.capndr.com/advertising.js',
+    'https://855c33fea3.df3f107f93.com/d6aea5d7618730bc69da23ec176067.js',
+    'https://855c33fea3.df3f107f93.com/67fab6bb68b16a2c7592f9cd4bdb2727.js',
+    'https://familypornhd.com/wp-includes/js/wp-emoji-release.min.js',
+    'https://secure.gravatar.com/avatar/7d5bc0da74f3aae75a18708660ce5075?s=40&d=mm&r=x',
+    'https://watchstreamhd.com/video/b20bb95ab626d93fd976af958fbc61ba',
+    'https://familypornhd.com/wp-content/themes/bimber/js/global.js?ver=9.2.5',
+    '//phonydepth.com/c/Dw9/6.bf2j5_l_ScW_Qc9ONvj/AlzXNETTUd0/OkC/0/2BMeDsM/1aN/TFQS5t',
+    'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1',
+    '//code.jquery.com/jquery-1.12.4.min.js',
+    'https://watchstreamhd.com/player/assets/scripts.php?v=6',
+    'https://ssl.p.jwpcdn.com/player/v/8.34.3/jwplayer.js',
+    'https://watchstreamhd.com/player/assets/js/cryptojs-aes.min.js',
+    'https://watchstreamhd.com/player/assets/js/cryptojs-aes-format.js',
+    'https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e8',
+    'https://excavatenearbywand.com/aas/r45d/vki/2089950/402c05c4.js',
+    'https://watchstreamhd.com/cdn/hls/76603cb0d5efcec0eda71ebb2160ee77/master.txt',
+    'https://mediaplayerboxx.com/cdn/down/76603cb0d5efcec0eda71ebb2160ee77/files/caught-red-handed_eng_360p.mp4?md5=gwV4m907cX99BcsXQuePcw&expires=1789433374',
+    'https://mediaplayerboxx.com/cdn/down/76603cb0d5efcec0eda71ebb2160ee77/files/caught-red-handed_eng_720p.mp4?md5=a1vp09GSCu5O6hfQ_D4Fog&expires=1789433374',
+]
+ART = 'https://familypornhd.com/caught-red-handed/'
+PLAYER_PAGE = 'https://watchstreamhd.com/video/b20bb95ab626d93fd976af958fbc61ba'
+
+_sorted = sorted(CRH, key=lambda u: 0 if cap._capture_candidate_is_media(u) else 1)
+_window = _sorted[:12]
+report(PLAYER_PAGE not in _window,
+       f'the player page really is outside the 12-candidate window '
+       f'({_window.index(PLAYER_PAGE) if PLAYER_PAGE in _window else "absent"}), '
+       f'which is what broke the Referer')
+report(cap._familypornhd_player_page(_window, ART) == '',
+       'so handing the detector the truncated list finds no player at all')
+report(cap._familypornhd_player_page(_sorted, ART) == PLAYER_PAGE,
+       f'handing it the full capture finds the player page: '
+       f'{cap._familypornhd_player_page(_sorted, ART)}')
+
+_call = re.search(
+    r'_family_referer\s*=\s*self\._familypornhd_player_page\(\s*(\w+)',
+    open('main.py', encoding='utf-8').read())
+report(_call is not None and _call.group(1) == 'media_candidates',
+       f'the call site passes the full capture, not the truncated window: '
+       f'{_call.group(1) if _call else "call site not found"}')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
