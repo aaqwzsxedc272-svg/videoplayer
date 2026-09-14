@@ -27718,24 +27718,6 @@ try {
         return any(path.endswith(suffix)
                    for suffix in self._PLAYABLE_MEDIA_SUFFIXES)
 
-    @staticmethod
-    def _familypornhd_master_wait_seconds():
-        """Extra capture seconds once the disguised HLS master has shown up.
-
-        The embedded player fetches master.txt, decrypts its \m3\ entries
-        and only THEN requests the real /cdn/down/ file. In the field logs
-        that gap is usually a second or two, but on straight-narrow the
-        capture window closed inside it — master.txt was the last media URL
-        captured, immediately followed by "killed capture subprocess
-        (deadline reached)" and "no playable media URLs were found", so the
-        video never reached the playlist at all.
-
-        Only spent when the deadline is actually hit with a master in hand
-        and no file yet, so a capture that is going normally is not slowed
-        down by a single second.
-        """
-        return 45
-
     def _capture_candidate_is_obfuscated_master(self, url):
         """True for the embedded player's disguised HLS master.
 
@@ -38380,25 +38362,9 @@ try {
             _pw_media_at = None
             _pw_m3u8_at = None
             _pw_child_dead_at = None
-            _pw_family_master_at = None
-            _pw_family_file_at = None
-            _pw_family_extended = False
             while True:
                 _now = time.time()
                 if _now >= _pw_deadline:
-                    if (_pw_family_master_at is not None
-                            and _pw_family_file_at is None
-                            and not _pw_family_extended):
-                        # The player reached its master but has not asked for
-                        # the decrypted file yet. One extension, then give up
-                        # as before.
-                        _pw_family_extended = True
-                        _extra = self._familypornhd_master_wait_seconds()
-                        _pw_deadline = _now + _extra
-                        print(f"[BROWSER_CLICK] FamilyPornHD player master "
-                              f"captured but no /cdn/down/ file yet; holding "
-                              f"the capture {_extra}s longer")
-                        continue
                     _kill_pw_tree('deadline reached')
                     break
                 try:
@@ -38410,15 +38376,6 @@ try {
                 if line is not None:
                     _pw_last_line_at = time.time()
                     _pw_out_lines.append(line)
-                    if line.startswith('MEDIA_URL::'):
-                        # Separate from the elif chain below, which only
-                        # records the FIRST media URL.
-                        _mu = line.split('::', 1)[1].strip().lower()
-                        if _pw_family_file_at is None and '/cdn/down/' in _mu:
-                            _pw_family_file_at = time.time()
-                        elif (_pw_family_master_at is None
-                                and self._capture_candidate_is_obfuscated_master(_mu)):
-                            _pw_family_master_at = time.time()
                     if line.startswith('PW_BROWSER_PID::'):
                         try:
                             _pw_browser_pids.append(
