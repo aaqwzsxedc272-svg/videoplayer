@@ -120,9 +120,23 @@ def _vp_launch_familypornhd_grab(self, source_url: str, play_first: bool = True)
                     # (age_ms=171266 -> InvalidMedia in the field logs).  Only
                     # fall through to the browser when the page is not a KVS
                     # embed, i.e. when there is nothing static to trust.
+                    #
+                    # The same holds for a FirePlayer signed HLS master. It was
+                    # originally left to the capture on the theory that the
+                    # progressive MP4 the capture finds is nicer to seek in,
+                    # but a 24-link field run showed the opposite: the three
+                    # slowest links were exactly the three browser-captured
+                    # 720p MP4s, at 448.47 MB and 436.65 MB, whose transfers the
+                    # CDN closed short ("Stream ends prematurely at 468433764,
+                    # should be 470257707"). Their moov atom sits at the end of
+                    # the file, so a short read has no index and mpv has to
+                    # download the whole thing again -- three or four times,
+                    # 18-22 s each. The master from the same response streamed
+                    # first time on all twelve rows that used it.
                     _static_kind = (
                         "kvs_embed_static" if static_result.get("kvs_embed")
                         else "fireplayer_static" if static_result.get("fireplayer")
+                        else "fireplayer_hls_static" if static_result.get("fireplayer_hls")
                         else ""
                     )
                     if static_links and _static_kind:

@@ -1883,11 +1883,11 @@ try:
 finally:
     fg19._http_get, fg19._http_post = _raw23_get, _raw23_post
 
-# The worker must not short-circuit on an HLS master: the progressive MP4 the
-# capture finds is strictly better to seek in, and it already works.
-report('"fireplayer_static" if static_result.get("fireplayer")' in _int22
-       and 'fireplayer_hls' not in _int22,
-       'the worker short-circuits only for KVS and download renditions, never for the master')
+# Superseded by section 25: the worker now short-circuits on the master too,
+# because the captured 720p MP4 proved slower, not better. What must survive is
+# that both kinds are still gated on the static result being trustworthy.
+report('"fireplayer_static" if static_result.get("fireplayer")' in _int22,
+       'the worker still short-circuits on KVS and FirePlayer renditions')
 report('result = static_result' in _int22,
        'the static links are still used when the browser capture comes back empty')
 
@@ -1937,6 +1937,49 @@ try:
            'and there the capture keeps first shot, since it ends early on the MP4')
 finally:
     fg19._http_get, fg19._http_post = _get24, _post24
+
+# ── 25. the signed master is played at once, not after a browser capture ────
+# In a 24-link field run the three slowest links were the three
+# browser-captured 720p MP4s (448.47 MB, 436.65 MB). The CDN closed those
+# transfers short, their moov atom is at the end of the file, and mpv had to
+# re-download the whole thing three or four times. The master from the same
+# getVideo response streamed first time on all twelve rows that used it, and
+# needs no capture at all.
+_int25 = open('familypornhd_integration.py', encoding='utf-8').read()
+report('"fireplayer_hls_static" if static_result.get("fireplayer_hls")' in _int25,
+       'the worker short-circuits on a FirePlayer HLS master as well')
+report(_int25.index('"fireplayer_hls_static"') < _int25.index('if static_links and _static_kind:'),
+       'and that rung is evaluated before the short-circuit decision, not after')
+report('pyqtSlot(str, object, bool)' in _int25,
+       'the capture handler is still a registered pyqtSlot')
+_names25 = [n.name for n in ast.parse(_int25).body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+report(not {n for n in _names25 if _names25.count(n) > 1},
+       'familypornhd_integration.py still defines no helper twice')
+
+# Both response shapes must now reach a short-circuiting flag, so no FirePlayer
+# article is left waiting on a capture.
+_get25, _post25 = fg19._http_get, fg19._http_post
+try:
+    fg19._http_get = lambda url, referer="", timeout=20: (
+        url, _HTML24 if 'familypornhd.com/' in url else "<html><div id='downloads'></div></html>")
+
+    def _stub25(payload):
+        def _post(url, data, referer="", timeout=20):
+            return (url, json.dumps(payload))
+        return _post
+
+    for _label25, _payload25 in (('empty downloadLinks', _NO_DL24),
+                                 ('encrypted downloadLinks',
+                                  dict(_NO_DL24, downloadLinks=[
+                                      {'language': 'eng', 'label': '720p',
+                                       'file': _CT22, 'size': '448.47 MB'}]))):
+        fg19._http_post = _stub25(_payload25)
+        _r25 = fg19.fetch_and_extract('https://familypornhd.com/caught-red-handed/')
+        report(bool(_r25['fireplayer'] or _r25['fireplayer_hls']) and _r25['links'] == [_SEC24],
+               f'{_label25}: the master is returned with a short-circuiting flag')
+finally:
+    fg19._http_get, fg19._http_post = _get25, _post25
 
 print()
 print('FAILURES:', FAILS)

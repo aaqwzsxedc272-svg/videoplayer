@@ -505,16 +505,9 @@ def _extract_fireplayer_streams(html: str, base_url: str) -> tuple:
     """Resolve a watchstreamhd/FirePlayer embed.
 
     Returns ``(links, downloads_absent)``.  ``downloads_absent`` is True when
-    the getVideo response carried no ``downloadLinks`` at all.
-
-    That distinction decides whether the browser capture is worth running.
-    When the response lists download variants the capture reliably ends early
-    on the ``/cdn/down/`` MP4 it fetches, and that file is better to seek in
-    than the HLS master -- so the capture gets first shot.  When the list is
-    empty there is no such file to fetch, the capture can only run to its full
-    deadline and come back with nothing, and the master should be played
-    straight away.  Three HLS-only articles in one field log each burned the
-    whole deadline before falling back: age_ms 91274, 50778 and 88906.
+    the getVideo response carried no ``downloadLinks`` at all; the caller uses
+    it only to label the capture method, since either way the signed master is
+    what gets played (see the note in the Qt worker).
     """
     match = _WATCHSTREAM_EMBED_RE.search(html or "")
     if not match:
