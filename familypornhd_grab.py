@@ -501,19 +501,32 @@ def _fireplayer_pick_best(payload: dict) -> list:
     return [url for _height, _order, url in found]
 
 
-def _extract_fireplayer_streams(html: str, base_url: str) -> list:
-    """Resolve a watchstreamhd/FirePlayer embed to its plain media URLs."""
+def _extract_fireplayer_streams(html: str, base_url: str) -> tuple:
+    """Resolve a watchstreamhd/FirePlayer embed.
+
+    Returns ``(links, downloads_absent)``.  ``downloads_absent`` is True when
+    the getVideo response carried no ``downloadLinks`` at all.
+
+    That distinction decides whether the browser capture is worth running.
+    When the response lists download variants the capture reliably ends early
+    on the ``/cdn/down/`` MP4 it fetches, and that file is better to seek in
+    than the HLS master -- so the capture gets first shot.  When the list is
+    empty there is no such file to fetch, the capture can only run to its full
+    deadline and come back with nothing, and the master should be played
+    straight away.  Three HLS-only articles in one field log each burned the
+    whole deadline before falling back: age_ms 91274, 50778 and 88906.
+    """
     match = _WATCHSTREAM_EMBED_RE.search(html or "")
     if not match:
-        return []
+        return [], False
     page_url, video_id = match.group(1), match.group(2)
     parsed = urlparse(page_url)
     if not (parsed.scheme and parsed.netloc):
-        return []
+        return [], False
 
     links = _fireplayer_download_links(page_url)
     if links:
-        return links
+        return links, False
 
     api = f"{parsed.scheme}://{parsed.netloc}/player/index.php?data={video_id}&do=getVideo"
     print(f"[FAMILYPORNHD] FirePlayer embed {page_url} -> POST {api}")
@@ -522,7 +535,7 @@ def _extract_fireplayer_streams(html: str, base_url: str) -> list:
                                   referer=base_url)
     except Exception as exc:
         print(f"[FAMILYPORNHD] FirePlayer getVideo failed: {exc}")
-        return []
+        return [], False
 
     # The endpoint answers plain text when it refuses ("Video not found."),
     # so JSON is the only success signal -- same test the player itself uses.
@@ -530,7 +543,7 @@ def _extract_fireplayer_streams(html: str, base_url: str) -> list:
         payload = json.loads(text)
     except Exception:
         print(f"[FAMILYPORNHD] FirePlayer getVideo was not JSON: {str(text)[:200]!r}")
-        return []
+        return [], False
 
     if isinstance(payload, dict):
         print(
@@ -546,7 +559,7 @@ def _extract_fireplayer_streams(html: str, base_url: str) -> list:
     if links:
         print(f"[FAMILYPORNHD] FirePlayer yielded {len(links)} URL(s), "
               f"best {links[0][:160]}")
-        return links
+        return links, False
 
     # No progressive MP4 to be had: for hls videos downloadLinks[].file is AES
     # ciphertext, and some videos carry no download variants at all.  The
@@ -557,9 +570,14 @@ def _extract_fireplayer_streams(html: str, base_url: str) -> list:
     # the videos with an empty downloadLinks fall back to.
     secured = str(payload.get("securedLink") or "").strip() if isinstance(payload, dict) else ""
     if _is_absolute_http_url(secured):
-        print(f"[FAMILYPORNHD] FirePlayer signed HLS master: {secured[:150]}")
-        return [secured]
-    return links
+        _has_downloads = bool(isinstance(payload, dict) and (payload.get("downloadLinks") or []))
+        print(
+            f"[FAMILYPORNHD] FirePlayer signed HLS master: {secured[:150]}"
+            + ("" if _has_downloads else
+               " (no download variants offered, skipping the browser capture)")
+        )
+        return [secured], not _has_downloads
+    return links, False
 
 
 def _http_get(url: str, referer: str = "", timeout: int = 20) -> tuple:
@@ -641,16 +659,15 @@ def fetch_and_extract(url: str, session=None) -> dict:
         # of the KVS player. The player page's Download menu carries the
         # direct MP4s in cleartext, so no browser is needed and the encrypted
         # master.txt the player streams from is never touched.
-        links = _extract_fireplayer_streams(html, page_url)
+        links, _fp_no_downloads = _extract_fireplayer_streams(html, page_url)
         if links:
-            # An HLS master is a fallback, not a replacement: the progressive
-            # MP4 the browser capture finds is strictly better to seek in, and
-            # it already works for the videos that offer downloads.  Only the
-            # short-circuit flag is withheld, so the capture still gets first
-            # shot and the master is used when it comes back empty.
             _embed22 = _WATCHSTREAM_EMBED_RE.search(html or "")
             referer = _embed22.group(1) if _embed22 else page_url
-            if _is_hls_master_url(links[0]):
+            # With download variants on offer the browser capture ends early on
+            # the progressive MP4, which is better to seek in than HLS -- so
+            # only that case withholds the short-circuit.  Without them the
+            # capture has nothing to find and would idle to its deadline.
+            if _is_hls_master_url(links[0]) and not _fp_no_downloads:
                 fireplayer_hls = True
             else:
                 fireplayer = True

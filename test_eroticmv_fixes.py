@@ -1698,29 +1698,29 @@ report(fg19._fireplayer_pick_best({}) == [] and fg19._fireplayer_pick_best(None)
 _real21 = fg19._http_post
 try:
     fg19._http_post = lambda url, data, referer="", timeout=20: (url, json.dumps(_payload21))
-    _got21 = fg19._extract_fireplayer_streams(_HTML21, 'https://familypornhd.com/straight-narrow/')
+    _got21, _abs21 = fg19._extract_fireplayer_streams(_HTML21, 'https://familypornhd.com/straight-narrow/')
     report(len(_got21) == 3 and '1080p' in _got21[0],
            f'the resolver POSTs and returns {len(_got21)} playable URL(s), 1080p first')
 
     fg19._http_post = lambda url, data, referer="", timeout=20: (url, 'Video not found.')
-    report(fg19._extract_fireplayer_streams(_HTML21, 'https://x/') == [],
+    report(fg19._extract_fireplayer_streams(_HTML21, 'https://x/') == ([], False),
            'a plain-text refusal is reported and yields no links')
 
     def _boom21(url, data, referer="", timeout=20):
         raise RuntimeError('network down')
     fg19._http_post = _boom21
-    report(fg19._extract_fireplayer_streams(_HTML21, 'https://x/') == [],
+    report(fg19._extract_fireplayer_streams(_HTML21, 'https://x/') == ([], False),
            'a transport failure degrades to the browser capture instead of raising')
 finally:
     fg19._http_post = _real21
 
-report(fg19._extract_fireplayer_streams('<p>no player</p>', 'https://x/') == [],
+report(fg19._extract_fireplayer_streams('<p>no player</p>', 'https://x/') == ([], False),
        'a page with no FirePlayer embed is left alone')
 
 _grab21 = open('familypornhd_grab.py', encoding='utf-8').read()
 report('FirePlayer getVideo raw:' in _grab21,
        'the raw payload is printed, since DevTools is blocked on this site')
-report('links = _extract_fireplayer_streams(html, page_url)' in _grab21,
+report('links, _fp_no_downloads = _extract_fireplayer_streams(html, page_url)' in _grab21,
        'fetch_and_extract falls through to FirePlayer when the KVS player finds nothing')
 
 # ── 22. FirePlayer: the cleartext Download menu, and never a ciphertext blob ─
@@ -1771,18 +1771,18 @@ try:
            'the encrypted downloadLinks from the real payload yield nothing')
 
     fg19._http_post = lambda url, data, referer="", timeout=20: (url, json.dumps(_enc22))
-    _res22 = fg19._extract_fireplayer_streams(_HTML21, 'https://familypornhd.com/caught-red-handed/')
+    _res22, _abs22 = fg19._extract_fireplayer_streams(_HTML21, 'https://familypornhd.com/caught-red-handed/')
     report(len(_res22) == 2 and all('/cdn/down/' in u for u in _res22),
            f'the cleartext menu wins over the encrypted POST ({len(_res22)} link(s))')
 
     fg19._http_get = lambda url, referer="", timeout=20: (url, '<html>no downloads</html>')
-    report(fg19._extract_fireplayer_streams(_HTML21, 'https://x/') == [],
+    report(fg19._extract_fireplayer_streams(_HTML21, 'https://x/') == ([], False),
            'with no menu and only ciphertext, the resolver yields nothing at all')
 
     def _boom22(url, referer="", timeout=20):
         raise RuntimeError('offline')
     fg19._http_get = _boom22
-    report(fg19._extract_fireplayer_streams(_HTML21, 'https://x/') == [],
+    report(fg19._extract_fireplayer_streams(_HTML21, 'https://x/') == ([], False),
            'a failed page fetch falls through instead of raising')
 finally:
     fg19._http_get, fg19._http_post = _real_get22, _real_post22
@@ -1866,14 +1866,14 @@ try:
     for _label23, _payload23 in (('empty downloadLinks', _EMPTY_DL23),
                                  ('encrypted downloadLinks', _ENC_DL23)):
         fg19._http_post = _stub_post23(_payload23)
-        _got23 = fg19._extract_fireplayer_streams(_HTML23, 'https://familypornhd.com/x/')
+        _got23, _abs23 = fg19._extract_fireplayer_streams(_HTML23, 'https://familypornhd.com/x/')
         report(_got23 == [_payload23['securedLink']],
                f'with {_label23} the signed HLS master is returned instead of nothing')
 
     fg19._http_post = _stub_post23(_EMPTY_DL23)
     _res23 = fg19.fetch_and_extract('https://familypornhd.com/i-can-get-naked-when-i-want-stepbro-2/')
-    report(_res23['fireplayer'] is False and _res23['fireplayer_hls'] is True,
-           'the master is flagged as a fallback, so the browser capture still gets first shot')
+    report(_res23['fireplayer'] is True and _res23['fireplayer_hls'] is False,
+           'an HLS master reached with no download variants is played straight away')
     report(_res23['headers'].get('Referer')
            == f'https://watchstreamhd.com/video/{_VID23}',
            'the Referer is the player page the master was issued for, not the article')
@@ -1890,6 +1890,53 @@ report('"fireplayer_static" if static_result.get("fireplayer")' in _int22
        'the worker short-circuits only for KVS and download renditions, never for the master')
 report('result = static_result' in _int22,
        'the static links are still used when the browser capture comes back empty')
+
+# ── 24. do not idle through the capture deadline when there is nothing to find
+# Three HLS-only articles in one field log each ran the capture to its full
+# deadline before falling back to a master the resolver had within a second:
+# age_ms 91274, 50778, 88906. Their getVideo responses all had
+# "downloadLinks":[], so no /cdn/down/ MP4 exists for the capture to find.
+# When download variants ARE listed the capture ends early on that MP4, which
+# is the better thing to play -- so only the empty case short-circuits.
+_SEC24 = ('https://watchstreamhd.com/cdn/hls/fc6bf663d70156aa8d22873e18ad802a/'
+          'master.m3u8?md5=M4hBVEF9Tb1yPQjrS0I4mA&expires=1789413751')
+_VID24 = '2ac2406e835bd49c70469acae337d292'
+_HTML24 = (f'<html><title>Apple Pie</title>'
+           f'<iframe src="https://watchstreamhd.com/video/{_VID24}"></iframe></html>')
+_NO_DL24 = {'hls': True, 'videoSource': 'https://watchstreamhd.com/cdn/hls/x/master.txt',
+            'securedLink': _SEC24, 'downloadLinks': [], 'attachmentLinks': []}
+
+_get24, _post24 = fg19._http_get, fg19._http_post
+try:
+    fg19._http_get = lambda url, referer="", timeout=20: (
+        url, _HTML24 if 'familypornhd.com/' in url else "<html><div id='downloads'></div></html>")
+
+    def _stub24(payload):
+        def _post(url, data, referer="", timeout=20):
+            return (url, json.dumps(payload))
+        return _post
+
+    fg19._http_post = _stub24(_NO_DL24)
+    _links24, _absent24 = fg19._extract_fireplayer_streams(_HTML24, 'https://familypornhd.com/x/')
+    report(_links24 == [_SEC24] and _absent24 is True,
+           'an empty downloadLinks marks the master as all there is')
+
+    _r24 = fg19.fetch_and_extract('https://familypornhd.com/my-best-friends-stepmom-gave-me-warm-apple-pie/')
+    report(_r24['fireplayer'] is True and _r24['fireplayer_hls'] is False,
+           'so the master is used at once instead of waiting out the capture deadline')
+
+    _WITH_DL24 = dict(_NO_DL24, downloadLinks=[{'language': 'eng', 'label': '720p',
+                                               'file': _CT22, 'size': '448.47 MB'}])
+    fg19._http_post = _stub24(_WITH_DL24)
+    _links24b, _absent24b = fg19._extract_fireplayer_streams(_HTML24, 'https://familypornhd.com/x/')
+    report(_links24b == [_SEC24] and _absent24b is False,
+           'encrypted download variants are still reported as present')
+
+    _r24b = fg19.fetch_and_extract('https://familypornhd.com/caught-red-handed/')
+    report(_r24b['fireplayer'] is False and _r24b['fireplayer_hls'] is True,
+           'and there the capture keeps first shot, since it ends early on the MP4')
+finally:
+    fg19._http_get, fg19._http_post = _get24, _post24
 
 print()
 print('FAILURES:', FAILS)
