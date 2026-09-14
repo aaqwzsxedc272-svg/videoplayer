@@ -111,6 +111,34 @@ def _vp_launch_familypornhd_grab(self, source_url: str, play_first: bool = True)
                     ]
                     static_result["links"] = static_links
 
+                    # The KVS embed page hands over signed get_file URLs that
+                    # were minted seconds ago, for every rendition at once.
+                    # Using them directly is strictly better than the browser
+                    # capture below: the capture spends up to 90 seconds
+                    # driving a player before mpv ever sees the URL, and that
+                    # is precisely the window in which the token expires
+                    # (age_ms=171266 -> InvalidMedia in the field logs).  Only
+                    # fall through to the browser when the page is not a KVS
+                    # embed, i.e. when there is nothing static to trust.
+                    if static_links and static_result.get("kvs_embed"):
+                        result = {
+                            "source_url": src_url,
+                            "title": static_result.get("title") or "",
+                            "links": static_links,
+                            "headers": static_result.get("headers") or {},
+                            "resolved_info": dict(static_result),
+                            "capture_method": "kvs_embed_static",
+                        }
+                        print(
+                            f"[FAMILYPORNHD] using KVS embed renditions directly "
+                            f"({len(static_links)} link(s), skipping browser capture): "
+                            f"{static_links[0][:180]}"
+                        )
+                        self.familypornhd_capture_ready.emit(
+                            src_url, result, bool(p_first)
+                        )
+                        continue
+
                     # A URL in the initial HTML can be a pre-roll/ad asset.
                     # Visit the page in the same headed Playwright capture
                     # used by the main resolver and let it click Play, wait

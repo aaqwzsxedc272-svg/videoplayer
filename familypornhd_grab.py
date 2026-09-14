@@ -252,33 +252,193 @@ def _extract_title(html: str, fallback_url: str) -> str:
     return re.sub(r"\s+", " ", html_unescape(match.group(1))).strip() if match else ""
 
 
-def fetch_and_extract(url: str, session=None) -> dict:
-    """Fetch one page and return its extracted links plus playback headers."""
+# ── KVS player embed page ────────────────────────────────────────────────────
+#
+# FamilyPornHD is a KVS (Kernel Video Sharing) install.  The watch page only
+# carries an <iframe src=".../embed/<video_id>">, so fetching the article
+# finds no media at all.  The embed page is the one that matters: it is plain
+# server-rendered HTML holding the whole player config, with a freshly minted
+# ``v-acctoken`` on every rendition::
+#
+#     video_url:      'https://dev.familypornhd.com/get_file/0/<id>.mp4/?v-acctoken=...&embed=true',
+#     video_url_text: '480p',
+#     video_alt_url:  '.../get_file/0/<id>.mp4/?v-acctoken=...',
+#     video_alt_url_text: '720p',
+#     video_alt_url2: '.../get_file/0/<id>.mp4/?v-acctoken=...',
+#     video_alt_url2_text: '1080p',
+#
+# The token is minted server-side at render time and carries no expiry field
+# (it decodes to "<n>|<embed>|<n>|<md5>" plus a 16-char hex suffix), so a URL
+# read off a freshly fetched embed page is ready to hand to mpv immediately.
+# This is what makes the whole browser capture unnecessary for these videos:
+# two HTTP requests replace a 90-second Playwright session, and there is no
+# window in which the token can go stale.
+#
+# ``event_reporting2`` also holds a get_file URL, but it is the stats beacon
+# and must never be treated as a rendition, so only the video_* keys are read.
+
+_KVS_URL_KEY_RE = re.compile(
+    r"\b(video_url|video_alt_url\d*)\s*:\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
+_KVS_TEXT_KEY_RE = re.compile(
+    r"\b(video_url_text|video_alt_url\d*_text)\s*:\s*[\"']([^\"']+)[\"']",
+    re.IGNORECASE)
+_KVS_EMBED_RE = re.compile(r"(https?://[a-z0-9.\-]+/embed/\d+)", re.IGNORECASE)
+_KVS_EMBED_REL_RE = re.compile(r'''["']/?((?:embed|player)/\d+)["']''', re.IGNORECASE)
+_KVS_HEIGHT_RE = re.compile(r"(\d{3,4})\s*p(?![0-9a-z])", re.IGNORECASE)
+
+
+def _kvs_quality_rank(key: str, label: str) -> tuple:
+    """Sort key for one KVS rendition, best first.
+
+    Prefer the explicit ``_text`` label (``1080p``); fall back to the key's
+    numeric suffix, because KVS numbers its renditions in ascending quality
+    (``video_url`` < ``video_alt_url`` < ``video_alt_url2``).
+    """
+    match = _KVS_HEIGHT_RE.search(label or "")
+    height = int(match.group(1)) if match else 0
+    suffix = re.search(r"(\d+)$", key or "")
+    if suffix:
+        order = int(suffix.group(1))
+    else:
+        # An unnumbered key is still ordered by KVS: plain ``video_url`` is the
+        # lowest rendition and ``video_alt_url`` sits between it and
+        # ``video_alt_url2``, so it must not tie with ``video_url`` at 0.
+        order = 1 if str(key or "").startswith("video_alt_url") else 0
+    return (height, order)
+
+
+def _extract_kvs_player_streams(html: str, base_url: str) -> list:
+    """Pull every rendition out of a KVS player config, best quality first."""
+    text = html or ""
+    if "video_url" not in text:
+        return []
+    labels = {}
+    for match in _KVS_TEXT_KEY_RE.finditer(text):
+        labels[match.group(1).lower()] = match.group(2).strip()
+
+    found, seen = [], set()
+    for match in _KVS_URL_KEY_RE.finditer(text):
+        key = match.group(1).lower()
+        url = _normalise_candidate(match.group(2), base_url)
+        if not url or url in seen or not _looks_like_media_url(url):
+            continue
+        seen.add(url)
+        label = labels.get(key + "_text", "")
+        found.append((_kvs_quality_rank(key, label), label, url))
+
+    found.sort(key=lambda item: item[0], reverse=True)
+    if found:
+        best = found[0]
+        print(
+            f"[FAMILYPORNHD] KVS player config offers {len(found)} rendition(s), "
+            f"best is {best[1] or 'unlabelled'}: {best[2][:120]}"
+        )
+    return [url for _rank, _label, url in found]
+
+
+def _find_kvs_embed_url(html: str, base_url: str) -> str:
+    """Return the KVS ``/embed/<id>`` page URL referenced by a watch page."""
+    text = html or ""
+    match = _KVS_EMBED_RE.search(text)
+    if match:
+        return match.group(1)
+    match = _KVS_EMBED_REL_RE.search(text)
+    if match:
+        return urljoin(base_url, "/" + match.group(1))
+    return ""
+
+
+def _http_get(url: str, referer: str = "", timeout: int = 20) -> tuple:
+    """Fetch *url* and return ``(final_url, text)``.
+
+    Prefers curl_cffi so the TLS/JA3 fingerprint looks like a real browser --
+    the site is behind Cloudflare (its embed page loads rocket-loader) and a
+    bare ``requests`` GET can be challenged.  Falls back to ``requests`` when
+    curl_cffi is missing or errors, and raises only if both fail.
+    """
+    headers = {
+        "User-Agent": _UA,
+        "Referer": referer or "https://familypornhd.com/",
+        "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+                   "image/avif,image/webp,*/*;q=0.8"),
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    errors = []
+    try:
+        import curl_cffi.requests as cfreq
+
+        response = cfreq.get(url, headers=headers, impersonate="chrome131",
+                             timeout=timeout, allow_redirects=True)
+        if getattr(response, "status_code", 200) < 400:
+            return (str(getattr(response, "url", "") or url),
+                    str(response.text or ""))
+        errors.append(f"curl_cffi HTTP {response.status_code}")
+    except ImportError:
+        errors.append("curl_cffi not installed")
+    except Exception as exc:
+        errors.append(f"curl_cffi {type(exc).__name__}: {exc}")
+
     if requests is None:
-        raise RuntimeError("requests is required for familypornhd extraction (pip install requests)")
-
-    if session is None:
-        session = requests.Session()
-    session.headers.update({"User-Agent": _UA, "Referer": "https://familypornhd.com/"})
-
-    response = session.get(url, timeout=20, allow_redirects=True)
+        raise RuntimeError("; ".join(errors) or "no HTTP transport available")
+    response = requests.get(url, headers=headers, timeout=timeout,
+                            allow_redirects=True)
     response.raise_for_status()
-    page_url = response.url or url
-    html = response.text or ""
-    links = extract_video_urls_from_html(html, page_url)
+    return (str(response.url or url), str(response.text or ""))
+
+
+def fetch_and_extract(url: str, session=None) -> dict:
+    """Fetch one page and return its extracted links plus playback headers.
+
+    The KVS embed page is tried first because it is the only place the signed
+    ``get_file`` URLs actually appear.  The generic HTML sweep stays as a
+    fallback for pages that do not use the KVS player.
+    """
+    del session  # each hop now uses its own browser-impersonating request
+
+    page_url, html = _http_get(url)
+    title = _extract_title(html, page_url)
+
+    links = _extract_kvs_player_streams(html, page_url)
+    kvs_embed = bool(links)
+    # The player page the request should look like it came from.  KVS rejects
+    # (or redirects away from) a get_file request with an empty Referer, hence
+    # ``empty_referer_redirect`` in the config, so this is not optional.
+    referer = page_url
+
+    if not links:
+        embed_url = _find_kvs_embed_url(html, page_url)
+        if embed_url and embed_url != page_url:
+            print(f"[FAMILYPORNHD] watch page points at KVS embed: {embed_url}")
+            try:
+                embed_page_url, embed_html = _http_get(embed_url, referer=page_url)
+            except Exception as exc:
+                print(f"[FAMILYPORNHD] embed page fetch failed for {embed_url}: {exc}")
+            else:
+                links = _extract_kvs_player_streams(embed_html, embed_page_url)
+                kvs_embed = bool(links)
+                referer = embed_page_url
+                if not title:
+                    title = _extract_title(embed_html, embed_page_url)
+
+    if not links:
+        links = extract_video_urls_from_html(html, page_url)
     if not links:
         links = extract_m3u8_from_packed_js(html, page_url)
 
-    parsed = urlparse(page_url)
+    parsed = urlparse(referer)
     origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
-    headers = {"User-Agent": _UA, "Referer": page_url}
+    headers = {"User-Agent": _UA, "Referer": referer}
     if origin:
         headers["Origin"] = origin
     return {
         "source_url": page_url,
-        "title": _extract_title(html, page_url),
+        "title": title,
         "links": links,
         "headers": headers,
+        # True only when these links were read out of a KVS player config,
+        # i.e. they are signed get_file URLs minted moments ago rather than
+        # whatever the generic HTML sweep happened to find.
+        "kvs_embed": kvs_embed,
     }
 
 
@@ -289,7 +449,8 @@ def grab_all(url: str, play_first: bool = True) -> dict:
     playlist autoplay is handled by the Qt integration, not by this module.
     """
     del play_first
-    result = {"source_url": url, "title": "", "links": [], "headers": {}}
+    result = {"source_url": url, "title": "", "links": [], "headers": {},
+              "kvs_embed": False}
     try:
         result = fetch_and_extract(url)
         links = result["links"]

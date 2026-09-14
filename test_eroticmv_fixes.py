@@ -1508,6 +1508,99 @@ _main18 = open('main.py', encoding='utf-8').read()
 report('has no remote_control.php recovery' in _main18,
        'the comment now says plainly that no recovery step exists')
 
+# ── 19. the KVS embed page carries every signed rendition in plain HTML ──────
+# site.txt is the verbatim source of https://dev.familypornhd.com/embed/42
+# ("One Way Or Another") that the user saved from their browser.  The app used
+# to fetch only the watch page, which contains nothing but an <iframe>, and
+# then spend 90 seconds driving a player to capture what was already sitting in
+# this HTML.  These assertions run the shipped extractors over the real page.
+import familypornhd_grab as fg19
+
+_SITE19 = 'site.txt'
+report(os.path.isfile(_SITE19),
+       f'{_SITE19} (the saved KVS embed page) is present as the fixture')
+_html19 = open(_SITE19, encoding='utf-8').read() if os.path.isfile(_SITE19) else ''
+_EMBED19 = 'https://dev.familypornhd.com/embed/42'
+
+_streams19 = fg19._extract_kvs_player_streams(_html19, _EMBED19)
+report(len(_streams19) == 3,
+       f'all three renditions are read out of the player config, got {len(_streams19)}')
+report(bool(_streams19) and _streams19[0].startswith(
+    'https://dev.familypornhd.com/get_file/0/zwQJ0A71'),
+       f'best quality first: {_streams19[0][:96] if _streams19 else "nothing"}')
+report(all('/get_file/' in s for s in _streams19),
+       'every rendition is a signed get_file URL')
+report(not any('E2ZW1slF' in s for s in _streams19),
+       'the event_reporting2 stats beacon is not mistaken for a rendition')
+report(not any('preview' in s.lower() for s in _streams19),
+       'no preview/poster asset is offered as a rendition')
+
+# the quality labels drive the ordering, not the key order in the page
+report(fg19._kvs_quality_rank('video_alt_url2', '1080p')
+       > fg19._kvs_quality_rank('video_alt_url', '720p')
+       > fg19._kvs_quality_rank('video_url', '480p'),
+       'labelled renditions rank 1080p > 720p > 480p')
+report(fg19._kvs_quality_rank('video_alt_url2', '')
+       > fg19._kvs_quality_rank('video_alt_url', '')
+       > fg19._kvs_quality_rank('video_url', ''),
+       'unlabelled renditions still rank by the key suffix KVS assigns')
+
+# the watch page only points at the embed page; finding it is the whole trick
+report(fg19._find_kvs_embed_url(
+    '<iframe src="https://dev.familypornhd.com/embed/42" allowfullscreen></iframe>',
+    'https://familypornhd.com/one-way-or-another/') == 'https://dev.familypornhd.com/embed/42',
+    'the absolute embed URL is lifted out of the watch page iframe')
+report(fg19._find_kvs_embed_url(
+    '<div data-src="/embed/77"></div>', 'https://familypornhd.com/x/')
+    == 'https://familypornhd.com/embed/77',
+    'a relative embed path resolves against the watch page')
+report(fg19._find_kvs_embed_url('<p>no player here</p>', 'https://x/') == '',
+    'a page with no player yields no embed URL rather than a guess')
+report(fg19._extract_kvs_player_streams('<p>no player here</p>', 'https://x/') == [],
+    'a page with no player config yields no streams')
+
+# the v-acctoken is server-minted and carries no expiry field, unlike the
+# remote_control.php acctoken -- which is why a freshly read page is usable
+_tok19 = re.search(r'v-acctoken=([A-Za-z0-9]+)', _streams19[0]) if _streams19 else None
+_dec19 = ''
+if _tok19:
+    _raw19 = _tok19.group(1)
+    for _cut19 in range(len(_raw19), 0, -1):
+        try:
+            _try19 = base64.b64decode(_raw19[:_cut19] + '=' * (-_cut19 % 4)).decode('utf-8')
+        except Exception:
+            continue
+        if _try19.isprintable():
+            _dec19 = _try19
+            break
+_parts19 = _dec19.split('|')
+report(len(_parts19) == 4 and len(_parts19[3]) == 32,
+       f'v-acctoken decodes to "<n>|<embed>|<n>|<md5>": {_dec19!r}')
+report(not any(p.isdigit() and len(p) == 10 for p in _parts19),
+       'no unix expiry inside the token, so a freshly read page is immediately usable')
+
+# the URLs the static path now produces must survive the family URL filter
+report(cap._is_familypornhd_direct_video_url(_streams19[0]) is True if _streams19 else False,
+       'the get_file URL the embed page yields is accepted as a direct video URL')
+
+# the worker must prefer this over the browser capture, and the aged-URL
+# refresh must re-read the embed page instead of the (video-less) article page
+_int19 = open('familypornhd_integration.py', encoding='utf-8').read()
+report('static_result.get("kvs_embed")' in _int19
+       and '"capture_method": "kvs_embed_static"' in _int19,
+       'the worker hands KVS renditions straight to the playlist, skipping the browser')
+_grab19 = open('familypornhd_grab.py', encoding='utf-8').read()
+report('"kvs_embed": kvs_embed' in _grab19,
+       'fetch_and_extract reports whether the links came from a KVS player config')
+_main19 = open('main.py', encoding='utf-8').read()
+report('from familypornhd_grab import fetch_and_extract as _kvs_fetch' in _main19
+       and "'resolver_provider': 'familypornhd_kvs_embed'" in _main19,
+       'the aged-URL refresh re-reads the KVS embed page instead of the article page')
+report('refreshing aged captured URL from article page' not in _main19,
+       'the log line no longer claims the refresh comes from the article page')
+report('_family_fresh = self._resolve_stream_from_html(_family_origin_page)' in _main19,
+       'the generic HTML pass is kept as a fallback, not deleted')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

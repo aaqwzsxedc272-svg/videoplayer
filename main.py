@@ -40035,9 +40035,10 @@ try {
             # The playlist stores the browser-captured delivery URL so a fresh
             # result can be played immediately.  Once a batch has been sitting
             # long enough for that signed URL to age out, refresh from the
-            # article page before asking mpv to open it.  This is a lightweight
-            # static page refresh; the existing browser/cookie fallback remains
-            # below when the page does not expose a usable replacement.
+            # article page before asking mpv to open it.  The refresh goes
+            # through the KVS embed page, because that is the only page that
+            # carries a video URL; the browser/cookie fallback remains below
+            # when neither page exposes a usable replacement.
             _family_origin_page = str(_family_cached_entry.get('origin_page') or '').strip()
             if (
                 _family_origin_page
@@ -40045,14 +40046,49 @@ try {
                 and self._is_remote_url(_family_origin_page)
             ):
                 print(
-                    f"[FAMILYPORNHD] refreshing aged captured URL from article page "
-                    f"({source_url[:120]})"
+                    f"[FAMILYPORNHD] refreshing aged captured URL via the KVS "
+                    f"embed page ({source_url[:120]})"
                 )
+                _family_fresh = None
                 try:
-                    _family_fresh = self._resolve_stream_from_html(_family_origin_page)
+                    # The article page holds no video URL at all, only an
+                    # <iframe src=".../embed/<id>">, so a generic HTML pass
+                    # over it was guaranteed to come back empty.  The KVS
+                    # embed page is where the signed get_file URLs are minted,
+                    # and it is plain server-rendered HTML, so re-reading it
+                    # yields a genuinely fresh token for every rendition.
+                    from familypornhd_grab import fetch_and_extract as _kvs_fetch
+
+                    _kvs_page = _kvs_fetch(_family_origin_page)
+                    _kvs_links = [
+                        str(_kvs_link).strip()
+                        for _kvs_link in (_kvs_page.get('links') or [])
+                        if str(_kvs_link).strip()
+                    ]
+                    if _kvs_page.get('kvs_embed') and _kvs_links:
+                        _family_fresh = {
+                            'playback_url': _kvs_links[0],
+                            'alternate_urls': _kvs_links[1:],
+                            'title': _kvs_page.get('title') or '',
+                            'headers': dict(_kvs_page.get('headers') or {}),
+                            'resolver_provider': 'familypornhd_kvs_embed',
+                        }
+                        print(
+                            f"[FAMILYPORNHD] re-read KVS embed page, "
+                            f"{len(_kvs_links)} fresh rendition(s) available"
+                        )
                 except Exception as _family_refresh_exc:
                     print(f"[FAMILYPORNHD] aged URL refresh failed: {_family_refresh_exc}")
                     _family_fresh = None
+                if _family_fresh is None:
+                    try:
+                        _family_fresh = self._resolve_stream_from_html(_family_origin_page)
+                    except Exception as _family_refresh_exc:
+                        print(
+                            f"[FAMILYPORNHD] aged URL refresh fallback failed: "
+                            f"{_family_refresh_exc}"
+                        )
+                        _family_fresh = None
                 if isinstance(_family_fresh, dict) and _family_fresh.get('playback_url'):
                     _family_fresh = dict(_family_fresh)
                     _family_fresh['origin_page'] = _family_origin_page
