@@ -1145,6 +1145,8 @@ class CaptureStub:
         'VideoPlayer', '_familypornhd_player_page')
     _capture_candidate_is_obfuscated_master = lift(
         'VideoPlayer', '_capture_candidate_is_obfuscated_master')
+    _is_familypornhd_direct_video_url = lift(
+        'VideoPlayer', '_is_familypornhd_direct_video_url')
 
 
 cap = CaptureStub()
@@ -1458,6 +1460,53 @@ report(sum(1 for n in _ast17.walk(_ast17.parse(_int17))
            if isinstance(n, _ast17.FunctionDef)
            and n.name == '_familypornhd_capture_links') == 1,
        'no duplicate definition of the helper')
+
+# ── 18. the remote_control.php delivery form is the one that actually plays ─
+# FetchV pulled this URL off the one-way-or-another page and it plays both in
+# a browser and in the app. It lives on srv1.familypornhd.com and carries its
+# token in the QUERY, so the old path-only test (which required /get_file/)
+# would have discarded it. Its acctoken is base64 of
+# "<md5>|<expiry>|0|<host>|0|<client IP>|<md5>" — signed against the expiry,
+# the host and the requesting IP, which is why a captured get_file URL dies
+# after a few minutes and why we cannot mint a replacement.
+RC = ('https://srv1.familypornhd.com/remote_control.php'
+      '?file=zThQYIHld6o29k2VXJ-jNnQUy8AEzJZH6dS3JO_TE3TzSUk43BNaazaGuZ9_SmWo_kd5Kb8G'
+      'kzsMrF7jdfrrNs7BxVIHYtdpCb63i3tdVZ65-eUKlbXmRixe2ctAJnxtKAgXZuC21xTIEpC27_S6RWeaeG'
+      '72YrP1CGS8wujiJ9N_RTv7AG15yT3dy2SQUS04Zkdt1j3ACw.mp4'
+      '&acctoken=Yzg4Yjg3MmZlY2RjZmFmMTg0OWMwYWNkZDMzY2MyN2VmYTJjNTBmYmE0YmJmMDFmNDYyYzdiZDNh')
+GF = ('https://dev.familypornhd.com/get_file/0/_f6WasOxVWKNQ67C0Bwyt0kE8bJk35UiTyBdLvsoqpyipXDppw'
+      '8mtAp0HxDYrRUWE9WilMPa37QuXLpkyRfqLmdv2aQBa6hhvBXwC1mXIE9--A.mp4/'
+      '?v-acctoken=OTA0fDF8MTN8&embed=true&rnd=1789349719311')
+
+report(cap._is_familypornhd_direct_video_url(RC) is True,
+       'the working remote_control.php URL is recognised as a direct video')
+report(cap._is_familypornhd_direct_video_url(GF) is True,
+       'and get_file still is')
+report(cap._is_familypornhd_direct_video_url(
+    'https://watchstreamhd.com/cdn/hls/871885b5ce8f4eb8663ee09a36fa44a7/master.txt') is False,
+    'the player master is still not a direct video')
+report(cap._is_familypornhd_direct_video_url(
+    'https://familypornhd.com/one-way-or-another-2/') is False,
+    'nor is the article page')
+report(cap._is_familypornhd_direct_video_url(
+    'https://example.org/remote_control.php?file=a.mp4&acctoken=b') is False,
+    'the same path on a non-family host is still rejected')
+report(cap._is_familypornhd_direct_video_url(
+    'https://srv1.familypornhd.com/remote_control.php?file=a.mp4') is False,
+    'remote_control.php without an acctoken is not a delivery URL')
+
+import base64 as _b64_18
+_tok18 = ('Yzg4Yjg3MmZlY2RjZmFmMTg0OWMwYWNkZDMzY2MyN2VmYTJjNTBmYmE0YmJmMDFmNDYyYzdiZDNh'
+          'NGZkYzIwZnwxNzg5MzU5OTczfDB8ZGV2LmZhbWlseXBvcm5oZC5jb218MHwxOTcuMTQ2LjU0LjIz'
+          'NnxmYTkzMmY4YWIxMDJhYWE3YTMxZjc1NDZlMTJhNTI1OQ')
+_dec18 = _b64_18.b64decode(_tok18 + '=' * (-len(_tok18) % 4)).decode()
+report(_dec18.split('|')[1] == '1789359973' and _dec18.split('|')[3] == 'dev.familypornhd.com'
+       and _dec18.split('|')[5] == '197.146.54.236',
+       f'the token is signed against expiry, host and client IP: {_dec18}')
+
+_main18 = open('main.py', encoding='utf-8').read()
+report('has no remote_control.php recovery' in _main18,
+       'the comment now says plainly that no recovery step exists')
 
 print()
 print('FAILURES:', FAILS)

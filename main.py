@@ -27661,10 +27661,27 @@ try {
                 or host == 'fad.com'
                 or host.endswith('.fad.com')
             )
+            # Two signed delivery shapes, both KVS/kt_player:
+            #   dev.familypornhd.com/get_file/0/<opaque>.mp4/?v-acctoken=…
+            #   srv1.familypornhd.com/remote_control.php?file=<b64>.mp4&acctoken=<b64>
+            # The second carries the token in the QUERY, so a path-only test
+            # misses it — and it is the form that actually plays. Its acctoken
+            # is plain base64 of "<md5>|<expiry>|0|<host>|0|<client IP>|<md5>",
+            # which is why a captured get_file URL dies after a few minutes and
+            # why we cannot mint a replacement: it is signed against the
+            # expiry, the host and the requesting IP.
+            query = (parsed.query or '').lower()
+            is_remote_control = (
+                path.endswith('/remote_control.php')
+                and 'file=' in query
+                and 'acctoken=' in query
+            )
             return bool(
                 is_delivery_host
-                and '/get_file/' in path
-                and re.search(r'\.mp4(?:/|$)', path)
+                and (
+                    ('/get_file/' in path and re.search(r'\.mp4(?:/|$)', path))
+                    or is_remote_control
+                )
             )
         except Exception:
             return False
@@ -40061,10 +40078,13 @@ try {
                     )
                     return self._merge_stream_info(source_url, _family_fresh)
             # Keep the captured URL as the fallback when the article is
-            # blocked or does not expose a replacement. Applying it lets the
-            # existing mpv load-failure ladder perform its cookie/browser
-            # refresh and remote_control.php recovery instead of turning a
-            # refresh miss into a hard resolution failure.
+            # blocked or does not expose a replacement, so the mpv
+            # load-failure ladder can still try its cookie/browser refresh
+            # instead of turning a refresh miss into a hard resolution
+            # failure. NOTE: that ladder has no remote_control.php recovery
+            # step — an earlier version of this comment claimed one, and no
+            # such code has ever existed here. _is_familypornhd_direct_video_url
+            # recognises the shape; nothing reconstructs one.
             print('[FAMILYPORNHD] retaining aged captured URL for existing playback fallback')
             return _family_cached_entry
 
