@@ -38949,6 +38949,17 @@ try {
                     'embed_url': source_url,
                     'resolver_provider': 'browser_click',
                     'resolved_at_ms': int(time.time() * 1000),
+                    # The capture holds every rendition (…_eng_360p.mp4 and
+                    # …_eng_720p.mp4 arrive together). Only the best-ranked
+                    # one is played, but the others are the same film on the
+                    # same signed CDN, and the 720p routinely truncates —
+                    # "https: Stream ends prematurely at 468433764, should be
+                    # 470257707" then "moov atom not found", because a 448 MiB
+                    # file with its moov at the end needs the whole transfer.
+                    # The 360p is a fraction of the size and opens. Keeping
+                    # them costs nothing and gives the row somewhere to fall
+                    # back to.
+                    'alternate_urls': [c for c in _non_ad[1:] if c != best],
                 }
                 if subtitle_tracks:
                     result_dict['subtitle_tracks'] = subtitle_tracks

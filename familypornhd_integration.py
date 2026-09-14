@@ -147,7 +147,7 @@ def _vp_launch_familypornhd_grab(self, source_url: str, play_first: bool = True)
                         handoff_result = {
                             "source_url": src_url,
                             "title": resolved_payload.get("title") or static_result.get("title") or "",
-                            "links": [handoff_url],
+                            "links": _familypornhd_capture_links(handoff_url, resolved_payload),
                             "headers": resolved_payload.get("headers") or static_result.get("headers") or {},
                             "resolved_info": dict(resolved_payload),
                             "capture_method": "browser_duration_verified",
@@ -243,7 +243,7 @@ def _vp_launch_familypornhd_grab(self, source_url: str, play_first: bool = True)
                             result = {
                                 "source_url": src_url,
                                 "title": resolved_result.get("title") or static_result.get("title") or "",
-                                "links": [browser_url],
+                                "links": _familypornhd_capture_links(browser_url, resolved_result),
                                 "headers": resolved_result.get("headers") or static_result.get("headers") or {},
                                 "resolved_info": resolved_result,
                                 "capture_method": "browser_duration_verified",
@@ -284,6 +284,28 @@ def _vp_launch_familypornhd_grab(self, source_url: str, play_first: bool = True)
 
 
 # ── UI-thread result handlers ─────────────────────────────────────────────────
+
+def _familypornhd_capture_links(primary_url, resolved_payload):
+    """The captured stream followed by its other renditions, best first.
+
+    The browser capture sees every rendition of the same film at once
+    (…_eng_360p.mp4 and …_eng_720p.mp4 arrive back to back off the same
+    signed CDN). Only the best-ranked one is handed to mpv, but the 720p
+    routinely truncates mid-transfer on these ~450 MiB files — "Stream ends
+    prematurely" then "moov atom not found", because the moov sits at the end
+    of a non-faststart MP4. The 360p is a fraction of the size and opens.
+
+    The caller turns links[0] into the playlist row and links[1:] into that
+    row's mirrors, so a film stays one row no matter how many renditions the
+    player exposed.
+    """
+    links = [str(primary_url or "").strip()]
+    for raw in (resolved_payload or {}).get("alternate_urls") or []:
+        value = str(raw or "").strip()
+        if value and value not in links:
+            links.append(value)
+    return [link for link in links if link]
+
 
 def _familypornhd_stream_info(
     page_url: str,

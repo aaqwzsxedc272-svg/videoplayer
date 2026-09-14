@@ -1407,6 +1407,58 @@ report(_call is not None and _call.group(1) == 'media_candidates',
        f'the call site passes the full capture, not the truncated window: '
        f'{_call.group(1) if _call else "call site not found"}')
 
+# ── 17. both renditions survive the capture, as one row plus a mirror ───────
+# The field capture always sees the 360p and the 720p together. Only the
+# 720p was handed over, and on these ~450 MiB non-faststart files it
+# truncates: "https: Stream ends prematurely at 468433764, should be
+# 470257707" then "moov atom not found". The 360p is the fallback.
+import ast as _ast17
+_int17 = open('familypornhd_integration.py', encoding='utf-8').read()
+_fn17 = next(n for n in _ast17.walk(_ast17.parse(_int17))
+             if isinstance(n, _ast17.FunctionDef)
+             and n.name == '_familypornhd_capture_links')
+_g17 = {}
+exec(compile(_ast17.Module(body=[_fn17], type_ignores=[]), '<int>', 'exec'), _g17)
+_links17 = _g17['_familypornhd_capture_links']
+
+P720 = 'https://mediaboxplayer.com/cdn/down/76603cb0d5efcec0eda71ebb2160ee77/files/caught-red-handed_eng_720p.mp4?md5=Ka5CZaq6QDPBw0a1QZh-OA&expires=1789436138'
+P360 = 'https://mediaboxplayer.com/cdn/down/76603cb0d5efcec0eda71ebb2160ee77/files/caught-red-handed_eng_360p.mp4?md5=oqJtBdViU9hzPGUnTVQAcg&expires=1789436138'
+
+report(_links17(P720, {'alternate_urls': [P360]}) == [P720, P360],
+       f'the 360p rides along behind the 720p: '
+       f'{[u.rsplit("/", 1)[-1][:30] for u in _links17(P720, {"alternate_urls": [P360]})]}')
+report(_links17(P720, {'alternate_urls': [P720, P360, P360]}) == [P720, P360],
+       'the primary and a repeated mirror are each kept once')
+report(_links17(P720, {}) == [P720] and _links17(P720, None) == [P720]
+       and _links17(P720, {'alternate_urls': []}) == [P720],
+       'no alternates, no payload and an empty list all give just the primary')
+report(_links17('', {'alternate_urls': [P360]}) == [P360],
+       'a missing primary falls back to the first alternate instead of an empty row')
+
+_main17 = open('main.py', encoding='utf-8').read()
+report("'alternate_urls': [c for c in _non_ad[1:] if c != best]" in _main17,
+       'the resolver now returns the remaining renditions instead of dropping them')
+report(_int17.count('_familypornhd_capture_links(') == 3,
+       'both handoff sites build their links through the helper')
+
+# Inserting the helper next to a decorated def once put it BETWEEN the
+# @pyqtSlot decorator and its function, which silently stole the decorator
+# and left the signal handler unregistered. Guard the decorators explicitly.
+_decos17 = {n.name: [ast.unparse(d) for d in n.decorator_list]
+            for n in _ast17.walk(_ast17.parse(_int17))
+            if isinstance(n, _ast17.FunctionDef)}
+report(_decos17.get('_vp_on_familypornhd_capture_ready') == ['pyqtSlot(str, object, bool)'],
+       f'the capture-ready handler keeps its pyqtSlot decorator: '
+       f'{_decos17.get("_vp_on_familypornhd_capture_ready")}')
+report(_decos17.get('_vp_on_familypornhd_capture_failed') == ['pyqtSlot(str, str)'],
+       'and so does the capture-failed handler')
+report(_decos17.get('_familypornhd_capture_links') == [],
+       'the new helper is undecorated and defined exactly once')
+report(sum(1 for n in _ast17.walk(_ast17.parse(_int17))
+           if isinstance(n, _ast17.FunctionDef)
+           and n.name == '_familypornhd_capture_links') == 1,
+       'no duplicate definition of the helper')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
