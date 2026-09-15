@@ -8462,6 +8462,11 @@ class VideoPlayer(QMainWindow):
         self.remote_loading_timer = QTimer(self)
         self.remote_loading_timer.setInterval(140)
         self.remote_loading_timer.timeout.connect(self._tick_remote_loading_indicator)
+        # The button is a permanent entry point, so put it up at once instead
+        # of waiting for the first capture to trigger a refresh. Deferred one
+        # tick so the rest of __init__ (hb_overlay and friends) is in place
+        # before it repositions itself.
+        QTimer.singleShot(0, self._update_remote_loading_indicator)
 
         self.manga_resume_prompt = QFrame(self)
         self.manga_resume_prompt.setObjectName("mangaResumePrompt")
@@ -9775,7 +9780,18 @@ class VideoPlayer(QMainWindow):
                 label.show()
         else:
             timer.stop()
-            label.hide()
+            # No links captured yet, but the button is still the way in — the
+            # popup says "No captured links yet" rather than failing — so it
+            # stays up as a permanent toggle. Only fullscreen hides it, same
+            # as the two branches above, since it belongs to the menu bar
+            # that fullscreen removes.
+            label.setText('≡')
+            label.adjustSize()
+            label.setToolTip('Captured links — click to show the list')
+            if in_fullscreen:
+                label.hide()
+            else:
+                label.show()
         self._reposition_hb_overlay()
 
     @pyqtSlot(int)

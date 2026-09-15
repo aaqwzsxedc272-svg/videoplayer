@@ -2276,6 +2276,77 @@ report('not _cached_entry.get(\'use_mpv_ytdl\') and not _cached_entry.get(\'pre_
 report('_family_capture_stale\n' in _t30_src or '_family_capture_stale' in _t30_src,
        'and the FamilyPornHD staleness clause is preserved')
 
+# ── 31. the captured-links button is always up, except in fullscreen ─────────
+# The third branch of the indicator used to hide the button outright whenever
+# nothing had been captured and no analysis was running, so on a fresh start
+# there was no way into the popup at all. It is now a permanent toggle; only
+# fullscreen hides it, matching the other two branches.
+_T31 = next(x for x in _t30_cls.body
+            if isinstance(x, ast.FunctionDef) and x.name == '_update_remote_loading_indicator')
+report(_T31 is not None, '_update_remote_loading_indicator was lifted from main.py')
+_t31_stub = ast.ClassDef(name='_T31Stub', bases=[], keywords=[], body=[_T31], decorator_list=[])
+_t31_mod = ast.Module(body=[_t31_stub], type_ignores=[])
+ast.fix_missing_locations(_t31_mod)
+_t31_ns = {}
+exec(compile(_t31_mod, '<main.py>', 'exec'), _t31_ns)
+
+class _T31Label:
+    def __init__(self):
+        self.shown, self.text, self.tooltip = None, '', ''
+        self.adjusted = 0
+    def show(self): self.shown = True
+    def hide(self): self.shown = False
+    def setText(self, t): self.text = t
+    def adjustSize(self): self.adjusted += 1
+    def setToolTip(self, t): self.tooltip = t
+
+class _T31Timer:
+    def __init__(self): self.active, self.stopped = False, 0
+    def isActive(self): return self.active
+    def start(self): self.active = True
+    def stop(self): self.active = False; self.stopped += 1
+
+class _T31Host(_t31_ns['_T31Stub']):
+    def __init__(self, fullscreen, active_count, rows, unseen=0):
+        self.remote_loading_label = _T31Label()
+        self.remote_loading_timer = _T31Timer()
+        self._remote_analysis_count = active_count
+        self._link_flow_rows = rows
+        self._link_flow_unseen = unseen
+        self._remote_loading_frames = ('o', 'O')
+        self._remote_loading_frame = 0
+        self._fullscreen = fullscreen
+        self.repositioned = 0
+    def _is_app_fullscreen(self): return self._fullscreen
+    def _reposition_hb_overlay(self): self.repositioned += 1
+
+# (label, fullscreen, active, rows, expected_visible, expected_text_prefix)
+for _label31, _fs31, _act31, _rows31, _want31, _txt31 in [
+    ('fresh start, nothing captured', False, 0, None, True,  '≡'),
+    ('fresh start, in fullscreen',    True,  0, None, False, '≡'),
+    ('idle with captured links',      False, 0, ['http://a/1'], True, '≡'),
+    ('idle with links, fullscreen',   True,  0, ['http://a/1'], False, '≡'),
+    ('unseen badge',                  False, 0, ['http://a/1'], True, '≡3'),
+    ('analysis running',              False, 2, None, True,  'o'),
+    ('analysis running, fullscreen',  True,  2, None, False, 'o'),
+]:
+    _h31 = _T31Host(_fs31, _act31, _rows31,
+                    unseen=3 if _label31 == 'unseen badge' else 0)
+    _h31._update_remote_loading_indicator()
+    report(_h31.remote_loading_label.shown is _want31,
+           f'{_label31}: visible={_want31}')
+    if _want31 and _txt31:
+        report(_h31.remote_loading_label.text.startswith(_txt31),
+               f'{_label31}: text starts {_txt31!r} (got {_h31.remote_loading_label.text!r})')
+
+# And it has to come up at launch rather than after the first capture.
+report('QTimer.singleShot(0, self._update_remote_loading_indicator)'
+       in open('main.py', encoding='utf-8').read(),
+       'the indicator is refreshed once at startup so the button is there from launch')
+# Fullscreen must still be able to hide it, and exiting must bring it back.
+report('self.remote_loading_label.hide()' in open('main.py', encoding='utf-8').read(),
+       'entering fullscreen still hides it explicitly')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
