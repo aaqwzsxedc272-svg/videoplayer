@@ -45,7 +45,7 @@ AD_PATH_TOKENS = ('/api/spots/', '/spots/', '/banner', '/popunder', '/pop.js')
 PLAYER_HOST_TOKENS = (
     'dood', 'doply', 'all3do', 'd-s', 'do7go', 'vide0', 'playmogo',
     'ds2play', 'ds2video', 'dsvplay', 'doodcdn', 'doodstream',
-    'streamtape', 'voe', 'mixdrop', 'mxdrop', 'pornfhd', 'trailerhg',
+    'streamtape', 'voe', 'mixdrop', 'mxdrop', 'pornfhd',
     'emturbovid', 'turbovid', 'javclan', 'vidara',
     'filelions', 'lulustream', 'luluvdo', 'streamwish', 'vidhide',
     'vidwatch', 'maxstream', 'turtleviplay', 'roshy',
@@ -53,9 +53,85 @@ PLAYER_HOST_TOKENS = (
     'kinoger', 'ryderjet', 'smoothpre', 'dhtpre', 'peytonepre', 'earnvids',
     'kamehamehaa', 'kamehaus', 'veev.to', 'chillx', 'streamsb', 'ssbstream',
     'sextb.net',
+    # The player sextb renders inside <div id="sextb-player"> on
+    # https://sextb.net/jul-509-rm -- confirmed against the saved page.
+    # trailerhg is deliberately NOT here: it is the preview trailer, and it
+    # stays on AD_HOST_TOKENS so the film is never replaced by the trailer.
+    'turboplays',
 )
 
 _MEDIA_SUFFIXES = ('.m3u8', '.m3u', '.mpd', '.mp4', '.m4v', '.webm', '.mkv')
+
+
+def _is_trailer_iframe(candidate: str) -> bool:
+    """True for the preview trailer, which must never be taken for the film.
+
+    sextb puts one in the same document
+    (<iframe id="IframeTrailer" src="https://trailerhg.xyz/e/xfu7jtpb70d9">)
+    and it is a well-formed player URL that every other filter waves through.
+    """
+    low = (candidate or '').lower()
+    return 'trailer' in low
+
+
+def _is_self_embed(candidate: str, page_url: str | None) -> bool:
+    """True for the watch page's own embed box (sextb.net/e/<same slug>).
+
+    It is real markup, not a stream -- returning it would send the caller
+    straight back to the page we just fetched.
+    """
+    if not page_url:
+        return False
+    low = (candidate or '').lower()
+    if 'sextb.net/e/' not in low:
+        return False
+    try:
+        slug = urlparse(page_url).path.strip('/').split('/')[0].lower()
+    except Exception:
+        return False
+    return bool(slug) and f'/e/{slug}' in low
+
+
+def _extract_inline_player(page_html: str, page_url: str | None = None) -> str | None:
+    """Pull the active episode's player straight out of the watch-page HTML.
+
+    sextb ships it already rendered, no API call and no browser needed:
+
+        <div id="sextb-player" class="player" style="...">
+          <iframe src="https://turboplays.click/t/6a80cae62b911?poster=...">
+        </div>
+
+    The same document also carries a trailer
+    (<iframe id="IframeTrailer" src="https://trailerhg.xyz/e/...">), a
+    self-embed of the watch page itself (sextb.net/e/<slug>, used for the
+    "embed" box) and several ad iframes. All of those pass a naive iframe
+    scan, so scope the search to the player container first.
+    """
+    if not page_html:
+        return None
+
+    # Preferred: the iframe inside the player container. Take a window after
+    # the opening tag rather than matching to </div> -- the container markup
+    # is not ours to assume stays balanced.
+    for m in re.finditer(
+            r'<div[^>]+(?:id=["\']sextb-player["\']|class=["\'][^"\']*player'
+            r'(?:-wrapper)?[^"\']*["\'])[^>]*>',
+            page_html, re.I):
+        window = page_html[m.end():m.end() + 2000]
+        for im in re.finditer(r'<iframe[^>]+src=["\']([^"\']+)["\']', window, re.I):
+            cand = unescape(im.group(1).strip())
+            if (_looks_like_player(cand) and not _is_trailer_iframe(cand)
+                    and not _is_self_embed(cand, page_url)):
+                return cand
+
+    # Fallback: first acceptable iframe in document order that is neither the
+    # trailer nor the page's own embed.
+    for m in re.finditer(r'<iframe[^>]+src=["\']([^"\']+)["\']', page_html, re.I):
+        cand = unescape(m.group(1).strip())
+        if (_looks_like_player(cand) and not _is_trailer_iframe(cand)
+                and not _is_self_embed(cand, page_url)):
+            return cand
+    return None
 
 
 def _looks_like_player(candidate: str) -> bool:
@@ -261,10 +337,19 @@ def grab_all_static(url: str) -> dict:
         return result
     
     result['title'] = _extract_title(html)
+
+    # The active episode's player is already rendered in the document (inside
+    # <div id="sextb-player">), so take it before spending anything on the
+    # API -- which wants a Cloudflare Turnstile token we do not have.
+    inline = _extract_inline_player(html, url)
+    if inline:
+        result['streams'].append(inline)
+        print(f"  [+] inline player: {inline[:90]}")
+
     buttons = _extract_buttons(html)
     print(f"  Found {len(buttons)} episode buttons: {[b['label'] for b in buttons]} (session={session_kind})")
     
-    seen = set()
+    seen = set(result['streams'])
     for btn in buttons:
         if btn['label'].upper().startswith('VIP'):
             continue  # skip VIP buttons

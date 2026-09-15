@@ -2695,6 +2695,67 @@ for _label35, _resp35, _want35 in [
     _got35 = sg34._fetch_episode_stream('16934905', '4124790', 'https://sextb.net/jul-509-rm', _s35)
     report(_got35 == _want35, f'api parse {_label35} -> {_want35!r} (got {_got35!r})')
 
+# ── 36. sextb inline player, against the real saved watch page ───────────────
+# sextb.txt is the saved source of https://sextb.net/jul-509-rm (uploaded by
+# the user). Every sextb turn before this one guessed at the page shape; this
+# is the first fixture taken from the live site, so the assertions here are
+# ground truth rather than hypothesis.
+#
+# What the real page shows: the active episode's player is ALREADY in the
+# document, inside <div id="sextb-player">, as
+#   https://turboplays.click/t/6a80cae62b911?poster=...
+# grab_all_static never looked at the page's own iframes -- it went straight
+# to the buttons and the /api/episode/ endpoint, which needs a Cloudflare
+# Turnstile token and so returned 403, then non-JSON.
+_SEXTB_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sextb.txt')
+if os.path.exists(_SEXTB_PAGE):
+    _sp = open(_SEXTB_PAGE, encoding='utf-8', errors='replace').read()
+    _SEXTB_URL = 'https://sextb.net/jul-509-rm'
+    _WANT_PLAYER = ('https://turboplays.click/t/6a80cae62b911'
+                    '?poster=https://cdn001.imggle.net/cover-player.jpg')
+
+    report(sg34._extract_inline_player(_sp, _SEXTB_URL) == _WANT_PLAYER,
+           'inline player is the turboplays iframe')
+    report('turboplays' in sg34.PLAYER_HOST_TOKENS, 'turboplays is on the player allowlist')
+    report('turboplays' not in sg34.AD_HOST_TOKENS, 'turboplays is NOT on the ad blocklist')
+
+    # Of every iframe on the page, exactly one may survive the whole filter.
+    _iframes = [m.group(1) for m in re.finditer(r'<iframe[^>]+src="([^"]+)"', _sp, re.I)]
+    report(len(_iframes) == 8, f'the saved page carries 8 iframes (got {len(_iframes)})')
+    _survivors = [u for u in _iframes
+                  if sg34._looks_like_player(u) and not sg34._is_trailer_iframe(u)
+                  and not sg34._is_self_embed(u, _SEXTB_URL)]
+    report(_survivors == [_WANT_PLAYER],
+           f'exactly one iframe survives -> the film (got {_survivors})')
+
+    # The three decoys, each rejected for its own reason.
+    report(not sg34._looks_like_player('https://trailerhg.xyz/e/xfu7jtpb70d9')
+           and sg34._is_trailer_iframe('https://trailerhg.xyz/e/xfu7jtpb70d9'),
+           'the preview trailer is rejected (never the film)')
+    report(sg34._is_self_embed('https://sextb.net/e/jul-509-rm', _SEXTB_URL)
+           and not sg34._is_self_embed('https://sextb.net/e/other-slug', _SEXTB_URL),
+           'only the page\'s own embed counts as a self-embed')
+    # Five, not four: spot 346725 is embedded twice on the page.
+    _ads = [u for u in _iframes if 'duq8bcrl.xyz' in u]
+    report(len(_ads) == 5 and not any(sg34._looks_like_player(u) for u in _ads),
+           f'all {len(_ads)} ad iframes are rejected')
+
+    # The buttons really are what _extract_buttons reports -- and the two VIP
+    # buttons on the page are excluded.
+    _btns = sg34._extract_buttons(_sp)
+    report([b['label'] for b in _btns] == ['TB', 'SW', 'PM', 'DD', 'FL'],
+           f"5 non-VIP buttons with the right labels (got {[b['label'] for b in _btns]})")
+    report(all(b['source'] == '16934905' for b in _btns), 'every button carries the film id')
+    report(sg34._extract_title(_sp).startswith('JUL-509-RM'), 'title parsed from the real page')
+
+    # Order matters: the inline player must be taken before any API call.
+    _src36 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'sextb_grab.py'), encoding='utf-8').read()
+    report(_src36.index('_extract_inline_player(html, url)') < _src36.index('_fetch_episode_stream(btn'),
+           'the inline player is read before the API is called')
+else:
+    report(False, 'sextb.txt fixture is present')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
