@@ -2756,6 +2756,127 @@ if os.path.exists(_SEXTB_PAGE):
 else:
     report(False, 'sextb.txt fixture is present')
 
+# ── 37. sextb second hop: player page -> video file ──────────────────────────
+# turboplays.click/t/<id> is HTML, so grab_all_static takes one more hop to
+# scrape the .m3u8/.mp4 out of it, the way generic_jav_grab does. Without that
+# the playlist receives a web page and mpv has nothing to play.
+for _u37, _w37 in [
+    ('https://cdn.example.net/hls/x/master.m3u8',            True),
+    ('https://cdn.example.net/hls/x/master.m3u8?token=abc',  True),
+    ('https://cdn.example.net/v/movie.mp4',                  True),
+    ('https://turboplays.click/t/6a80cae62b911',             False),
+    ('https://sextb.net/e/jul-509-rm',                       False),
+    ('',                                                     False),
+]:
+    report(sg34._is_media_url(_u37) is _w37, f'media test {_u37[:44]!r} -> {_w37}')
+
+_M3U8_PAGE = (
+    '<html><script>var src = "https:\\/\\/cdn.example.net\\/hls\\/jul509\\/master.m3u8?token=zz";'
+    '<video src="https://cdn.example.net/v/movie.mp4"></video>'
+    '<source src="https://cdn.example.net/v/preview-10s.mp4"></source>'
+    '<iframe src="https://doodstream.com/e/abc123"></iframe></script></html>')
+report(sg34._scrape_media_from_html(_M3U8_PAGE) == [
+    'https://cdn.example.net/hls/jul509/master.m3u8?token=zz',
+    'https://cdn.example.net/v/movie.mp4'],
+    'escaped-slash m3u8 and mp4 are unescaped, the 10 s preview is dropped')
+report(sg34._nested_player_iframes(_M3U8_PAGE) == ['https://doodstream.com/e/abc123'],
+       'the nested player iframe is followed')
+report(sg34._scrape_media_from_html('') == [] and sg34._nested_player_iframes('') == [],
+       'empty markup yields nothing')
+
+class _T37Resp:
+    def __init__(self, body): self.text = body; self.status_code = 200
+    def json(self): return {}
+class _T37Session:
+    def __init__(self, pages): self.pages = pages; self.seen = []
+    def get(self, url, headers=None, timeout=None):
+        self.seen.append(url)
+        return _T37Resp(self.pages.get(url, ''))
+
+_s37 = _T37Session({'https://turboplays.click/t/6a80cae62b911': _M3U8_PAGE})
+_got37 = sg34._resolve_embed_page('https://turboplays.click/t/6a80cae62b911',
+                                  'https://sextb.net/jul-509-rm', _s37)
+report(_got37 == ['https://cdn.example.net/hls/jul509/master.m3u8?token=zz',
+                  'https://cdn.example.net/v/movie.mp4'],
+       f'one hop turns the player page into media (got {_got37})')
+
+# A page with no media but a nested player: follow it exactly once.
+_s37b = _T37Session({
+    'https://turboplays.click/t/6a80cae62b911': '<iframe src="https://doodstream.com/e/abc123"></iframe>',
+    'https://doodstream.com/e/abc123': '<script>file:"https://cdn.example.net/v/deep.mp4";</script>',
+})
+_got37b = sg34._resolve_embed_page('https://turboplays.click/t/6a80cae62b911',
+                                   'https://sextb.net/jul-509-rm', _s37b)
+report(_got37b == ['https://cdn.example.net/v/deep.mp4'],
+       f'the nested player is followed one hop (got {_got37b})')
+report(_s37b.seen == ['https://turboplays.click/t/6a80cae62b911',
+                      'https://doodstream.com/e/abc123'],
+       'exactly two fetches -- it does not recurse forever')
+report(sg34._resolve_embed_page('https://x.example/y', '', _T37Session({}), depth=2) == [],
+       'the hop limit is enforced')
+
+# ── 38. grab_all_static end to end, on the real saved page ───────────────────
+# Drives the actual function with a stub HTTP layer: the real sextb.txt for the
+# watch page and a plausible player page for the turboplays embed. This is the
+# path the user's playlist depends on.
+class _T38Time:
+    @staticmethod
+    def sleep(_s): return None
+    @staticmethod
+    def time(): return 1_700_000_000.0
+
+class _T38Resp:
+    def __init__(self, body, ctype='text/html'):
+        self.text = body; self.status_code = 200
+        self.headers = {'Content-Type': ctype}
+class _T38Session:
+    def __init__(self, pages): self.pages = pages; self.seen = []
+    def get(self, url, headers=None, timeout=None):
+        self.seen.append(url); return _T38Resp(self.pages.get(url, ''))
+
+_T38_MEDIA = ('<script>sources:[{file:"https:\\/\\/cdn.turbo.example\\/jul-509\\/index.m3u8'
+              '?token=abc"}]</script>')
+_real_time = sg34.time
+_real_session = sg34._make_session
+try:
+    _sess38 = _T38Session({
+        'https://sextb.net/jul-509-rm': _sp,
+        'https://turboplays.click/t/6a80cae62b911?poster=https://cdn001.imggle.net/cover-player.jpg': _T38_MEDIA,
+    })
+    sg34.time = _T38Time
+    sg34._make_session = lambda: (_sess38, 'test-stub')
+    _res38 = sg34.grab_all_static('https://sextb.net/jul-509-rm')
+finally:
+    sg34.time = _real_time
+    sg34._make_session = _real_session
+
+report(_res38['streams'] == ['https://cdn.turbo.example/jul-509/index.m3u8?token=abc'],
+       f"grab_all_static returns the .m3u8 (got {_res38['streams']})")
+report(_res38['title'].startswith('JUL-509-RM'), 'grab_all_static keeps the real title')
+# The page was fetched once, the embed once, and the remaining buttons still
+# go to the API -- the inline player is an addition, not a replacement.
+report(_sess38.seen[0] == 'https://sextb.net/jul-509-rm', 'the watch page is fetched first')
+report(sum(1 for u in _sess38.seen if '/api/episode/16934905/' in u) == 5,
+       f'all 5 buttons still hit the API (got {_sess38.seen})')
+report(any('turboplays.click' in u for u in _sess38.seen),
+       'the inline player page was fetched for its media')
+
+# If the embed page yields no media, the real player page is kept rather than
+# an empty playlist row.
+try:
+    sg34.time = _T38Time
+    sg34._make_session = lambda: (_T38Session({
+        'https://sextb.net/jul-509-rm': _sp,
+    }), 'test-stub')
+    _res38b = sg34.grab_all_static('https://sextb.net/jul-509-rm')
+finally:
+    sg34.time = _real_time
+    sg34._make_session = _real_session
+report(_res38b['streams'] == [_WANT_PLAYER],
+       f"no media on the embed -> the player page is kept (got {_res38b['streams'][:1]})")
+report(not any('duq8bcrl' in u or 'dtscout' in u for u in _res38b['streams']),
+       'no ad ever reaches the playlist')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

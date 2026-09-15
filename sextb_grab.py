@@ -63,6 +63,101 @@ PLAYER_HOST_TOKENS = (
 _MEDIA_SUFFIXES = ('.m3u8', '.m3u', '.mpd', '.mp4', '.m4v', '.webm', '.mkv')
 
 
+def _is_media_url(candidate: str) -> bool:
+    """True when the URL is a video file rather than a player page."""
+    try:
+        path = urlparse(candidate or '').path.lower()
+    except Exception:
+        return False
+    return path.endswith(_MEDIA_SUFFIXES)
+
+
+_MEDIA_SCAN_RES = (
+    re.compile(r'https?://[^\s"\'<>\\]+?\.m3u8[^\s"\'<>\\]*', re.I),
+    re.compile(r'https?://[^\s"\'<>\\]+?\.mp4[^\s"\'<>\\]*', re.I),
+)
+
+
+def _scrape_media_from_html(page_html: str) -> list:
+    """Pull direct video URLs out of an embed page's markup.
+
+    Same approach as generic_jav_grab: the markup carries the .m3u8/.mp4
+    literally, often with escaped slashes.
+    """
+    out = []
+    if not page_html:
+        return out
+    # Player pages routinely ship the URL with every slash escaped
+    # ("https:\\/\\/cdn.example.net\\/x.m3u8"). Un-escape the whole document
+    # first -- the regexes need a literal "://" to anchor on.
+    page_html = page_html.replace('\\/', '/')
+    for rx in _MEDIA_SCAN_RES:
+        for m in rx.finditer(page_html):
+            u = unescape(m.group(0)).replace('\\/', '/')
+            low = u.lower()
+            # the site's ~10 s preview must never stand in for the film
+            if any(t in low for t in ('preview', 'trailer', 'sample')):
+                continue
+            if u not in out:
+                out.append(u)
+    return out
+
+
+def _nested_player_iframes(page_html: str) -> list:
+    """Player iframes embedded one level deeper in an embed page."""
+    out = []
+    if not page_html:
+        return out
+    for m in re.finditer(r'<iframe[^>]+src=["\']([^"\']+)["\']', page_html, re.I):
+        cand = unescape(m.group(1).strip()).replace('\\/', '/')
+        if cand.startswith('//'):
+            cand = 'https:' + cand
+        if _looks_like_player(cand) and not _is_trailer_iframe(cand) and cand not in out:
+            out.append(cand)
+    return out
+
+
+def _resolve_embed_page(embed_url: str, referer: str, session, depth: int = 0) -> list:
+    """Fetch a player page and scrape the actual video out of it.
+
+    turboplays.click/t/<id> is HTML, not a video, so the playlist needs the
+    .m3u8/.mp4 it contains. One extra hop is allowed for nested players.
+    """
+    if depth > 1 or not embed_url:
+        return []
+    headers = {
+        'User-Agent': _UA,
+        'Referer': referer or 'https://sextb.net/',
+        'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    try:
+        resp = session.get(embed_url, headers=headers, timeout=20)
+        body = resp.text or ''
+    except Exception as e:
+        print(f"    [EMBED] {embed_url[:80]} -> fetch failed: {e}")
+        return []
+
+    found = _scrape_media_from_html(body)
+    for nested in _nested_player_iframes(body):
+        if nested == embed_url:
+            continue
+        found.extend(_resolve_embed_page(nested, embed_url, session, depth + 1))
+
+    seen, out = set(), []
+    for u in found:
+        if u not in seen and _is_media_url(u):
+            seen.add(u); out.append(u)
+
+    if out:
+        for u in out:
+            print(f"    [EMBED] {embed_url[:60]} -> {u[:90]}")
+    else:
+        print(f"    [EMBED] {embed_url[:60]} -> no media in {len(body)} bytes,"
+              f" head={body[:150]!r}")
+    return out
+
+
 def _is_trailer_iframe(candidate: str) -> bool:
     """True for the preview trailer, which must never be taken for the film.
 
@@ -361,7 +456,27 @@ def grab_all_static(url: str) -> dict:
             print(f"  [+] {btn['label']}: {stream_url[:80]}")
         
         time.sleep(0.5)
-    
+
+    # Everything collected so far is a player PAGE, not a video file. Take one
+    # hop to scrape the .m3u8/.mp4 out of it -- otherwise the playlist gets an
+    # HTML document and mpv has nothing to play. A page that yields no media is
+    # kept rather than dropped: a real player page is still better than an
+    # empty row, and the log above says what it held.
+    resolved = []
+    for cand in result['streams']:
+        if _is_media_url(cand):
+            if cand not in resolved:
+                resolved.append(cand)
+            continue
+        found = _resolve_embed_page(cand, url, session)
+        if found:
+            for u in found:
+                if u not in resolved:
+                    resolved.append(u)
+        elif cand not in resolved:
+            resolved.append(cand)
+    result['streams'] = resolved
+
     return result
 
 
