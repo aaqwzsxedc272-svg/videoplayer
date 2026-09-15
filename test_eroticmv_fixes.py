@@ -2598,8 +2598,11 @@ for _label34, _url34, _want34 in [
     report(sg34._is_ad_iframe(_url34) is _want34, f'ad filter {_label34} -> {_want34}')
 
 _sg34_src = open('sextb_grab.py', encoding='utf-8').read()
-report('not _is_ad_iframe(candidate)' in _sg34_src,
-       'the iframe acceptance site goes through the ad filter')
+# Superseded by section 35: the acceptance site now requires a positive match
+# (_looks_like_player, which itself still consults _is_ad_iframe) rather than
+# merely "not a known ad".
+report('if _looks_like_player(candidate):' in _sg34_src,
+       'the iframe acceptance site requires a positive player match')
 report('candidate = unescape(m.group(1).strip())' in _sg34_src,
        'and the entity-escaped iframe src is unescaped before use')
 report('AD_HOSTS' not in _sg34_src, 'the old host-only list is gone')
@@ -2636,6 +2639,61 @@ for _label34, _in34, _want34 in [
 ]:
     _got34 = _t34._sanitize_url(_in34)
     report(_got34 == _want34, f'sanitize {_label34}: {_want34!r} (got {_got34!r})')
+
+# ── 35. sextb scrapes for a player, instead of blocklisting ads ──────────────
+# Every field report so far has been a new ad domain slipping past a
+# blocklist: first duq8bcrl.xyz, then t.dtscout.com. sextb is the same kind of
+# aggregator as jav.guru / roshy / javgg, so it now uses the same positive
+# test generic_jav_grab uses -- accept only a known player host or a media
+# file. Also: with curl_cffi past the 403 the API body stopped parsing as
+# JSON, so the parser scrapes the body as markup instead.
+for _label35, _url35, _want35 in [
+    ('the dtscout tracker', 'https://t.dtscout.com/idg/?su=104017895091880F84399B51FA39B561', False),
+    ('the duq8bcrl ad',     '//duq8bcrl.xyz/api/spots/346725?p=1&s1=%subid1%&kw=', False),
+    ('placeholder',         'javascript:false', False),
+    ('sextb own embed',     'https://sextb.net/e/4124790', True),
+    ('doodstream embed',    'https://doodstream.com/e/qlb9nbe23jda', True),
+    ('emturbovid embed',    'https://emturbovid.com/t/abc123', True),
+    ('plain cdn m3u8',      'https://cdn.example.net/hls/x/master.m3u8', True),
+    ('plain cdn mp4',       'https://cdn.example.net/v/movie.mp4', True),
+    ('entity-escaped embed', 'https://doodstream.com/e/abc?a=1&amp;b=2', True),
+    ('empty',               '', False),
+]:
+    report(sg34._looks_like_player(_url35) is _want35, f'player test {_label35} -> {_want35}')
+
+# Drive the real _fetch_episode_stream with stub responses.
+class _T35Resp:
+    def __init__(self, status=200, ctype='text/html', body='', json_data=None):
+        self.status_code = status
+        self.headers = {'Content-Type': ctype}
+        self.text = body
+        self._json = json_data
+        self.url = 'x'
+    def json(self):
+        if self._json is None:
+            raise ValueError('Expecting value: line 1 column 1 (char 0)')
+        return self._json
+
+class _T35Session:
+    def __init__(self, resp): self.resp = resp; self.calls = []
+    def get(self, url, headers=None, timeout=None):
+        self.calls.append(url); return self.resp
+
+_IFRAME_BODY = ('<div class="player"><iframe src="https://sextb.net/e/4124790" '
+                'frameborder="0" allowfullscreen></iframe></div>')
+for _label35, _resp35, _want35 in [
+    ('HTML body with a player iframe',  _T35Resp(body=_IFRAME_BODY), 'https://sextb.net/e/4124790'),
+    ('HTML body with only an ad',       _T35Resp(body='<iframe src="https://t.dtscout.com/idg/?su=abc"></iframe>'), None),
+    ('json with a src key',             _T35Resp(ctype='application/json', json_data={'src': 'https://doodstream.com/e/zzz'}), 'https://doodstream.com/e/zzz'),
+    ('json with an html blob',          _T35Resp(ctype='application/json', json_data={'html': _IFRAME_BODY}), 'https://sextb.net/e/4124790'),
+    ('json that is not an object',      _T35Resp(ctype='application/json', body=_IFRAME_BODY), 'https://sextb.net/e/4124790'),
+    ('empty body',                      _T35Resp(body=''), None),
+    ('HTTP 403',                        _T35Resp(status=403, body='blocked'), None),
+    ('bare m3u8 in the body',           _T35Resp(body='<script>var u="https://cdn.example.net/hls/x/master.m3u8";</script>'), 'https://cdn.example.net/hls/x/master.m3u8'),
+]:
+    _s35 = _T35Session(_resp35)
+    _got35 = sg34._fetch_episode_stream('16934905', '4124790', 'https://sextb.net/jul-509-rm', _s35)
+    report(_got35 == _want35, f'api parse {_label35} -> {_want35!r} (got {_got35!r})')
 
 print()
 print('FAILURES:', FAILS)

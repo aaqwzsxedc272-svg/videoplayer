@@ -26,11 +26,53 @@ WAIT_AFTER_CLICK   = 3_500
 
 # Hosts whose iframes are advertising rather than a player.
 AD_HOST_TOKENS = ('z5g022gc', 'trailerhg', 'googlesyndication', 'doubleclick',
-                  'adsbygoogle', 'asg-interstitial', 'ads.', '/ads/')
+                  'adsbygoogle', 'asg-interstitial', 'ads.', '/ads/',
+                  # t.dtscout.com/idg/?su=... -- the tracker the TB button
+                  # resolved to on jul-509-rm and nima-081-sub.
+                  'dtscout', 'exoclick', 'juicyads', 'trafficjunky',
+                  'popcash', 'popads', 'adsterra')
 
 # Ad networks serve the creative from a "spot" endpoint, so the path gives it
 # away even when the hostname is a random throwaway .xyz.
 AD_PATH_TOKENS = ('/api/spots/', '/spots/', '/banner', '/popunder', '/pop.js')
+
+# Player hosts, mirroring generic_jav_grab.EMBED_HOST_TOKENS. sextb is the
+# same kind of aggregator as jav.guru / roshy / javgg: the buttons resolve to
+# an embed on one of these, and the stream is scraped out of that page.
+# Matching against an ALLOWLIST is what stops the ad whack-a-mole -- every
+# field report so far has been a new ad domain slipping past a blocklist
+# (duq8bcrl.xyz, then t.dtscout.com).
+PLAYER_HOST_TOKENS = (
+    'dood', 'doply', 'all3do', 'd-s', 'do7go', 'vide0', 'playmogo',
+    'ds2play', 'ds2video', 'dsvplay', 'doodcdn', 'doodstream',
+    'streamtape', 'voe', 'mixdrop', 'mxdrop', 'pornfhd', 'trailerhg',
+    'emturbovid', 'turbovid', 'javclan', 'vidara',
+    'filelions', 'lulustream', 'luluvdo', 'streamwish', 'vidhide',
+    'vidwatch', 'maxstream', 'turtleviplay', 'roshy',
+    'filemoon', 'swhoi', 'awish', 'javstreamhq',
+    'kinoger', 'ryderjet', 'smoothpre', 'dhtpre', 'peytonepre', 'earnvids',
+    'kamehamehaa', 'kamehaus', 'veev.to', 'chillx', 'streamsb', 'ssbstream',
+    'sextb.net',
+)
+
+_MEDIA_SUFFIXES = ('.m3u8', '.m3u', '.mpd', '.mp4', '.m4v', '.webm', '.mkv')
+
+
+def _looks_like_player(candidate: str) -> bool:
+    """True when an iframe src is a player embed or a media file.
+
+    The positive test, rather than another entry on the ad blocklist.
+    """
+    text = unescape((candidate or '').strip())
+    if not text or _is_ad_iframe(text):
+        return False
+    low = text.lower()
+    host = (urlparse(text).netloc if '//' in text else '').lower()
+    if host and any(tok in host for tok in PLAYER_HOST_TOKENS):
+        return True
+    path = urlparse(text).path.lower() if '//' in text else low
+    return any(path.endswith(suf) for suf in _MEDIA_SUFFIXES)
+
 
 # An unexpanded tracking macro. A real player URL never carries one, but an ad
 # tag rendered outside its own loader does: the field report captured
@@ -134,9 +176,12 @@ def _fetch_episode_stream(source_id: str, epid: str, referer: str, session) -> s
     """
     Call the sextb API to get the player URL for a given episode ID.
     Returns the player iframe src URL or None.
+
+    The session is supplied by the caller (see _make_session) — this function
+    does not need requests itself, and importing it here used to make the call
+    fail outright on a machine without requests even though a perfectly good
+    curl_cffi session had been passed in.
     """
-    import requests as r_mod
-    
     api_url = f"https://sextb.net/api/episode/{source_id}/{epid}"
     headers = {
         'User-Agent': _UA,
@@ -147,29 +192,39 @@ def _fetch_episode_stream(source_id: str, epid: str, referer: str, session) -> s
     
     try:
         resp = session.get(api_url, headers=headers, timeout=15)
-        if resp.status_code == 200:
-            data = resp.json()
-            # Check various response structures
-            src = (
-                data.get('src') or data.get('url') or 
-                data.get('embed') or data.get('iframe') or
-                data.get('link') or data.get('stream')
-            )
-            if src:
-                return src
-            # Maybe it returns HTML with an iframe
-            html_chunk = data.get('html') or data.get('content') or ''
-            if html_chunk:
-                m = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', html_chunk, re.IGNORECASE)
-                if m:
-                    return m.group(1)
-            # The six buttons on nima-081-sub all came back with nothing
-            # usable and the guesswork above is blind, so say what the
-            # response actually held instead of failing silently.
-            _keys = sorted(data.keys()) if isinstance(data, dict) else type(data).__name__
-            print(f"    [API] {api_url} -> 200 but no stream; keys={_keys}")
-        else:
+        if resp.status_code != 200:
             print(f"    [API] {api_url} -> HTTP {resp.status_code}")
+            return None
+        ctype = str(resp.headers.get('Content-Type') or '').lower()
+        body = resp.text or ''
+        if 'json' in ctype:
+            try:
+                data = resp.json()
+            except Exception:
+                data = None
+            if isinstance(data, dict):
+                src = (
+                    data.get('src') or data.get('url') or
+                    data.get('embed') or data.get('iframe') or
+                    data.get('link') or data.get('stream')
+                )
+                if src:
+                    return src
+                body = data.get('html') or data.get('content') or body
+        # Not JSON -- or JSON with none of the keys above. Once curl_cffi got
+        # past the 403 the response stopped parsing as JSON entirely
+        # ("Expecting value: line 1 column 1"), so treat the body as markup
+        # and scrape it the way generic_jav_grab scrapes an embed page.
+        for m in re.finditer(r'<iframe[^>]+src=["\']([^"\']+)["\']', body, re.IGNORECASE):
+            cand = unescape(m.group(1).strip())
+            if _looks_like_player(cand):
+                return cand
+        for m in re.finditer(r'https?://[^\s"\'<>]+', body):
+            cand = unescape(m.group(0).strip())
+            if _looks_like_player(cand):
+                return cand
+        print(f"    [API] {api_url} -> 200 {ctype or 'no content-type'},"
+              f" {len(body)} bytes, no player; head={body[:150]!r}")
     except Exception as e:
         print(f"    [API] {api_url} -> error: {e}")
     
@@ -379,7 +434,7 @@ def grab_all_playwright(url: str, visible: bool = False) -> dict:
                             # query separator shows up as &amp; and would
                             # corrupt the URL if passed on as-is.
                             candidate = unescape(m.group(1).strip())
-                            if candidate and not _is_ad_iframe(candidate):
+                            if _looks_like_player(candidate):
                                 src_found = candidate
                                 break
                         if src_found:
