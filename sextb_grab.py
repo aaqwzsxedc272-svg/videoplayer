@@ -130,6 +130,13 @@ def _fetch_episode_stream(source_id: str, epid: str, referer: str, session) -> s
                 m = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', html_chunk, re.IGNORECASE)
                 if m:
                     return m.group(1)
+            # The six buttons on nima-081-sub all came back with nothing
+            # usable and the guesswork above is blind, so say what the
+            # response actually held instead of failing silently.
+            _keys = sorted(data.keys()) if isinstance(data, dict) else type(data).__name__
+            print(f"    [API] {api_url} -> 200 but no stream; keys={_keys}")
+        else:
+            print(f"    [API] {api_url} -> HTTP {resp.status_code}")
     except Exception as e:
         print(f"    [API] {api_url} -> error: {e}")
     
