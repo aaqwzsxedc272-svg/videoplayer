@@ -22599,6 +22599,27 @@ try {
                     )))
                     parsed = urlparse(raw)
                     host = (parsed.netloc or '').lower()
+            # turbo.cr serves one clip under two paths: /d/<id> is a bare
+            # download page and /v/<id> is the watch page that actually
+            # embeds the player. Links handed to us are usually the /d/ form
+            # (that is what the site's own "Download" button and BBCode
+            # share box emit), and a download page has no player in it. Fold
+            # the download path onto the watch path — same idea as the dood
+            # collapse above. Host is matched exactly rather than by
+            # substring so a lookalike such as noturbo.creep cannot match.
+            if host == 'turbo.cr' or host.endswith('.turbo.cr'):
+                match = re.match(r'^/d/([^/?#]+)', parsed.path or '', re.IGNORECASE)
+                if match:
+                    raw = self._sanitize_url(urlunparse((
+                        parsed.scheme or 'https',
+                        parsed.netloc,
+                        f"/v/{match.group(1)}",
+                        '',
+                        parsed.query,
+                        '',
+                    )))
+                    parsed = urlparse(raw)
+                    host = (parsed.netloc or '').lower()
             if 'beeg.com' in host:
                 match = re.search(r'/-0*(\d+)$', parsed.path or '')
                 if match:

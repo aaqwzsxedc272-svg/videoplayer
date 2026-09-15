@@ -14,7 +14,7 @@ import json
 import os
 import re
 from html import unescape as html_unescape
-from urllib.parse import urlparse, unquote, urljoin
+from urllib.parse import urlparse, unquote, urljoin, urlunparse, parse_qs
 
 SRC = open('main.py', encoding='utf-8').read()
 TREE = ast.parse(SRC)
@@ -1980,6 +1980,45 @@ try:
                f'{_label25}: the master is returned with a short-circuiting flag')
 finally:
     fg19._http_get, fg19._http_post = _get25, _post25
+
+# ── 26. turbo.cr: fold the /d/ download path onto the /v/ watch page ─────────
+# turbo.cr serves one clip under two paths: /d/<id> is a bare download page
+# and /v/<id> is the watch page that embeds the player. Links arrive in the
+# /d/ form, which has no player in it. This lifts the real shipped method out
+# of main.py by ast and runs it, so the assertions below exercise the code
+# that ships rather than a copy of it.
+_T26_WANT = ['_sanitize_url', '_is_remote_url', '_unwrap_base64_hostname_media_url',
+             '_is_dood_host', '_canonicalize_remote_source_url_uncached']
+_t26_tree = ast.parse(open('main.py', encoding='utf-8').read())
+_t26_cls = next(n for n in ast.walk(_t26_tree)
+                if isinstance(n, ast.ClassDef) and n.name == 'VideoPlayer')
+_t26_m = {x.name: x for x in _t26_cls.body
+          if isinstance(x, ast.FunctionDef) and x.name in _T26_WANT}
+report(sorted(_t26_m) == sorted(_T26_WANT),
+       f'all five canonicalisation helpers were lifted from main.py (missing: '
+       f'{sorted(set(_T26_WANT) - set(_t26_m))})')
+_t26_stub = ast.ClassDef(name='_T26Stub', bases=[], keywords=[],
+                         body=[_t26_m[w] for w in _T26_WANT], decorator_list=[])
+_t26_mod = ast.Module(body=[_t26_stub], type_ignores=[])
+ast.fix_missing_locations(_t26_mod)
+_t26_ns = {'re': re, 'base64': base64, 'urlparse': urlparse,
+           'urlunparse': urlunparse, 'parse_qs': parse_qs}
+exec(compile(_t26_mod, '<main.py>', 'exec'), _t26_ns)
+_t26 = _t26_ns['_T26Stub']()
+
+for _src26, _want26 in [
+    ('https://turbo.cr/d/F2o26UhL9kk',  'https://turbo.cr/v/F2o26UhL9kk'),
+    ('https://turbo.cr/d/Tzyr96uVlhC',  'https://turbo.cr/v/Tzyr96uVlhC'),
+    ('https://turbo.cr/v/F2o26UhL9kk',  'https://turbo.cr/v/F2o26UhL9kk'),
+    ('https://turbo.cr/embed/abc123',   'https://turbo.cr/embed/abc123'),
+    ('https://beta.turbo.cr/d/abc123',  'https://beta.turbo.cr/v/abc123'),
+    ('https://noturbo.creep/d/abc123',  'https://noturbo.creep/d/abc123'),
+    ('https://turbo.cr/',               'https://turbo.cr/'),
+    # Regression guard for the rule sitting immediately above the new one.
+    ('https://dood.to/d/xyz789',        'https://dood.to/e/xyz789'),
+]:
+    _got26 = _t26._canonicalize_remote_source_url_uncached(_src26)
+    report(_got26 == _want26, f'{_src26} -> {_want26}   (got {_got26})')
 
 print()
 print('FAILURES:', FAILS)
