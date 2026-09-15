@@ -2165,6 +2165,62 @@ report(_o28.fetched == [_W27, _E27, _D27],
 report(bool(_r28) and _r28['playback_url'] == _REAL27,
        'and a link found only on the download page still resolves without a browser')
 
+# ── 29. the turbo.cr capture browser is never a visible window ───────────────
+# The signed URL is minted by JavaScript, so a browser IS required — the field
+# run proved the static path cannot find it. But it does not have to be a
+# window on the user's desktop: --headless-capture is a true no-window mode
+# (FamilyPornHD already uses it), and --headed-hidden only pushes a real
+# window off-screen, which still lands in the taskbar.
+_t29_cls = next(n for n in ast.walk(ast.parse(open('main.py', encoding='utf-8').read()))
+                if isinstance(n, ast.ClassDef) and n.name == 'VideoPlayer')
+_t29_fn = [x for x in _t29_cls.body
+           if isinstance(x, ast.FunctionDef) and x.name == '_resolve_stream_source']
+report(len(_t29_fn) == 1, '_resolve_stream_source was located exactly once')
+_t29_fn = _t29_fn[0]
+
+# The dispatch branch for turbo.cr, walking only its own body so the rest of
+# the elif chain cannot leak in.
+_t29_branch = [n for n in ast.walk(_t29_fn)
+               if isinstance(n, ast.If) and "endswith('.turbo.cr')" in ast.unparse(n.test)]
+report(len(_t29_branch) == 1, 'the turbo.cr dispatch branch exists once')
+_t29_body = _t29_branch[0]
+
+def _t29_calls(statements):
+    """(line, callee, kwargs) for capture calls in these statements only.
+
+    Walks the branch BODY, never the whole If node: an If's end_lineno spans
+    its orelse too, so walking the node would pull in every later elif in the
+    dispatch chain and make a count assertion meaningless.
+    """
+    out = []
+    for st in statements:
+        for child in ast.walk(st):
+            if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+                if child.func.attr in ('_resolve_turbo_cr_source',
+                                       '_resolve_stream_via_browser_click'):
+                    out.append((child.lineno, child.func.attr,
+                                {k.arg: ast.unparse(k.value) for k in child.keywords}))
+    return sorted(out)
+
+_t29_flat = _t29_calls(_t29_body.body)
+report([c[1] for c in _t29_flat][:1] == ['_resolve_turbo_cr_source'],
+       'the plain-HTTP attempt is still tried first')
+_t29_caps = [c for c in _t29_flat if c[1] == '_resolve_stream_via_browser_click']
+report(len(_t29_caps) == 2,
+       f'exactly two capture attempts in the turbo.cr branch, no more (got {len(_t29_caps)})')
+if len(_t29_caps) == 2:
+    report(_t29_caps[0][2].get('headless') == 'True',
+           'the first capture uses the true no-window mode, not an off-screen window')
+    report(_t29_caps[1][2].get('headed_hidden') == 'True',
+           'and only falls back to the off-screen headed engine if that fails')
+    report(_t29_caps[0][0] < _t29_caps[1][0], 'in that order')
+
+# And the generic fallthrough must not open a third one for the same link.
+_t29_generic = [n for n in ast.walk(_t29_fn)
+                if isinstance(n, ast.If) and "'turbo.cr' not in host" in ast.unparse(n.test)]
+report(len(_t29_generic) == 1,
+       "the generic capture path excludes turbo.cr so a failed headless try can't open another window")
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

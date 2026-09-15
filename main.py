@@ -40480,6 +40480,22 @@ try {
             # runs, so this cannot make the host worse than it was.
             if host == 'turbo.cr' or host.endswith('.turbo.cr'):
                 resolved = self._resolve_turbo_cr_source(source_url)
+                if resolved is None:
+                    # The signed URL is minted by JavaScript, so a browser is
+                    # genuinely required — but it does not have to be a VISIBLE
+                    # one. Try the explicit no-window mode first: that is what
+                    # FamilyPornHD uses so its capture "never creates a
+                    # Brave/Chrome window on the user's desktop". turbo.cr is
+                    # an ordinary HTML5 player behind Cloudflare, so this may
+                    # well pass, and if the fingerprint is rejected the
+                    # off-screen headed engine is still there as the fallback.
+                    resolved = self._resolve_stream_via_browser_click(
+                        source_url, headless=True,
+                        referer=self._embed_origin_referer(source_url))
+                if resolved is None:
+                    resolved = self._resolve_stream_via_browser_click(
+                        source_url, headed_hidden=True,
+                        referer=self._embed_origin_referer(source_url))
             elif 'pixeldrain.com' in host:
                 resolved = self._resolve_pixeldrain_source(source_url)
             elif host in _gofile_share_hosts:
@@ -40722,6 +40738,10 @@ try {
             and 'cyberdrop' not in host
             and 'cyberfile' not in host
             and 'eporner' not in host
+            # turbo.cr runs its own capture above (headless first, off-screen
+            # headed as the fallback). Letting it reach this path too would
+            # open a second browser for the same link when both of those fail.
+            and 'turbo.cr' not in host
         ):
             # R47 standing rule: a capture browser is NEVER shown on
             # screen. This path runs whenever every static resolver
