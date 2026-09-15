@@ -8462,6 +8462,11 @@ class VideoPlayer(QMainWindow):
         self.remote_loading_timer = QTimer(self)
         self.remote_loading_timer.setInterval(140)
         self.remote_loading_timer.timeout.connect(self._tick_remote_loading_indicator)
+        # The button is a permanent entry point, so put it up at once instead
+        # of waiting for the first capture to trigger a refresh. Deferred one
+        # tick so the rest of __init__ (hb_overlay and friends) is in place
+        # before it repositions itself.
+        QTimer.singleShot(0, self._update_remote_loading_indicator)
 
         self.manga_resume_prompt = QFrame(self)
         self.manga_resume_prompt.setObjectName("mangaResumePrompt")
@@ -9775,7 +9780,18 @@ class VideoPlayer(QMainWindow):
                 label.show()
         else:
             timer.stop()
-            label.hide()
+            # No links captured yet, but the button is still the way in — the
+            # popup says "No captured links yet" rather than failing — so it
+            # stays up as a permanent toggle. Only fullscreen hides it, same
+            # as the two branches above, since it belongs to the menu bar
+            # that fullscreen removes.
+            label.setText('≡')
+            label.adjustSize()
+            label.setToolTip('Captured links — click to show the list')
+            if in_fullscreen:
+                label.hide()
+            else:
+                label.show()
         self._reposition_hb_overlay()
 
     @pyqtSlot(int)
@@ -10776,7 +10792,6 @@ class VideoPlayer(QMainWindow):
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, \
             QPushButton, QTreeWidget, QTreeWidgetItem
         from PyQt6.QtWidgets import QHeaderView as _LFHeaderView
-        from PyQt6.QtWidgets import QSizeGrip as _LFSizeGrip
         dlg = QDialog(self)
         dlg.setWindowTitle('Captured links')
         # R45: extension-popup behavior by default — Qt.Popup closes the
@@ -10821,10 +10836,21 @@ class VideoPlayer(QMainWindow):
 
             def _edges_for(self, pos):
                 d = self._dialog
+                w, h = d.width(), d.height()
+                # A Qt.Popup grabs the mouse, so a click that lands OUTSIDE
+                # the frame is still delivered here with coordinates beyond
+                # the rect -- x=-50 satisfies "pos.x() <= MARGIN" and used to
+                # read as the left edge. That both started a resize from a
+                # click on the desktop and swallowed the press, so Qt never
+                # saw the outside click that closes a popup (it took a second
+                # click to dismiss). Only a position actually inside the
+                # frame, and within MARGIN of a side, is an edge.
+                if pos.x() < 0 or pos.y() < 0 or pos.x() > w or pos.y() > h:
+                    return (False, False, False, False)
                 return (pos.x() <= self.MARGIN,                    # left
-                        pos.x() >= d.width() - self.MARGIN,        # right
+                        pos.x() >= w - self.MARGIN,                # right
                         pos.y() <= self.MARGIN,                    # top
-                        pos.y() >= d.height() - self.MARGIN)       # bottom
+                        pos.y() >= h - self.MARGIN)                # bottom
 
             def _cursor_for(self, left, right, top, bottom):
                 if (left and top) or (right and bottom):
@@ -10889,6 +10915,55 @@ class VideoPlayer(QMainWindow):
                     event.accept()
                     return True
                 return False
+
+        class _BottomLeftGrip(QWidget):
+            """Resize handle for the frameless popup, at the bottom-LEFT.
+
+            QSizeGrip cannot simply be moved over there: it is hardcoded to
+            move the bottom-right corner while the top-left stays put, so a
+            grip drawn on the left would drag the opposite edge from the one
+            under the cursor. This keeps the top-RIGHT corner fixed instead —
+            dragging left widens the popup and moves its x with it, dragging
+            down grows the height — which is what a bottom-left handle has to
+            do. Same geometry the left+bottom case of _EdgeResizeFilter uses.
+            """
+
+            def __init__(self, dialog):
+                super().__init__(dialog)
+                self._dialog = dialog
+                self._drag = None  # (global press pos, start geometry)
+                self.setFixedSize(20, 20)
+                self.setToolTip('Drag to resize')
+                self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+                self.setStyleSheet('background: transparent;')
+
+            def mousePressEvent(self, event):
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._drag = (event.globalPosition().toPoint(),
+                                  QRect(self._dialog.geometry()))
+                    event.accept()
+                    return
+                super().mousePressEvent(event)
+
+            def mouseMoveEvent(self, event):
+                if self._drag is None:
+                    return
+                start_pos, start_geo = self._drag
+                d = self._dialog
+                delta = event.globalPosition().toPoint() - start_pos
+                new_w = start_geo.width() - delta.x()
+                if new_w < d.minimumWidth():
+                    new_w = d.minimumWidth()
+                # Right edge stays put, so x moves by however much the width
+                # changed rather than following the cursor.
+                x = start_geo.x() + start_geo.width() - new_w
+                h = max(d.minimumHeight(), start_geo.height() + delta.y())
+                d.setGeometry(x, start_geo.y(), new_w, h)
+                event.accept()
+
+            def mouseReleaseEvent(self, event):
+                self._drag = None
+                event.accept()
 
         resize_filter = _EdgeResizeFilter(dlg)
         dlg.installEventFilter(resize_filter)
@@ -10958,15 +11033,14 @@ class VideoPlayer(QMainWindow):
         # resizable even in frameless popup mode.
         bottom_row = QHBoxLayout()
         bottom_row.setContentsMargins(2, 0, 2, 0)
-        status_label = QLabel('No captured links yet')
-        bottom_row.addWidget(status_label, 1)
-        grip = _LFSizeGrip(dlg)
-        grip.setToolTip('Drag to resize')
-        grip.setFixedSize(20, 20)
-        grip.setStyleSheet('background: transparent;')
+        # Grip on the left, status text filling the rest. The grip has to come
+        # first in the box for AlignLeft to put it in the bottom-left corner.
+        grip = _BottomLeftGrip(dlg)
         bottom_row.addWidget(
             grip, 0,
-            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
+            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignLeft)
+        status_label = QLabel('No captured links yet')
+        bottom_row.addWidget(status_label, 1)
         lay.addLayout(bottom_row)
 
         dlg.setLayout(lay)
@@ -22599,6 +22673,27 @@ try {
                     )))
                     parsed = urlparse(raw)
                     host = (parsed.netloc or '').lower()
+            # turbo.cr serves one clip under two paths: /d/<id> is a bare
+            # download page and /v/<id> is the watch page that actually
+            # embeds the player. Links handed to us are usually the /d/ form
+            # (that is what the site's own "Download" button and BBCode
+            # share box emit), and a download page has no player in it. Fold
+            # the download path onto the watch path — same idea as the dood
+            # collapse above. Host is matched exactly rather than by
+            # substring so a lookalike such as noturbo.creep cannot match.
+            if host == 'turbo.cr' or host.endswith('.turbo.cr'):
+                match = re.match(r'^/d/([^/?#]+)', parsed.path or '', re.IGNORECASE)
+                if match:
+                    raw = self._sanitize_url(urlunparse((
+                        parsed.scheme or 'https',
+                        parsed.netloc,
+                        f"/v/{match.group(1)}",
+                        '',
+                        parsed.query,
+                        '',
+                    )))
+                    parsed = urlparse(raw)
+                    host = (parsed.netloc or '').lower()
             if 'beeg.com' in host:
                 match = re.search(r'/-0*(\d+)$', parsed.path or '')
                 if match:
@@ -24110,14 +24205,34 @@ try {
             print(f'[LINK_PANEL] mirror relabel failed: {exc}')
 
         if changed:
+            # The split helpers detach mirrors that are not really mirrors
+            # (a fileditch/pornhub row whose mirror list holds a DIFFERENT
+            # file) by inserting them into self.playlist — and they do not
+            # touch playlist_widget. That leaves the model longer than the
+            # view, so every later row index is off by the number of rows
+            # inserted: apply_playlist_filtering() below reads
+            # self.playlist[i] for widget row i and hides the wrong rows,
+            # and the inserted links stay invisible until something rebuilds
+            # the table (field: pasted links did not appear until the
+            # playlist was saved and reopened; a loaded playlist showed
+            # links that were never saved). Rebuild first, exactly like the
+            # user-triggered _split_mirrors_into_playlist does.
+            split_changed = False
             try:
-                self._split_conflicting_fileditch_mirrors()
+                split_changed = bool(
+                    self._split_conflicting_fileditch_mirrors()) or split_changed
             except Exception:
                 pass
             try:
-                self._split_conflicting_pornhub_mirrors()
+                split_changed = bool(
+                    self._split_conflicting_pornhub_mirrors()) or split_changed
             except Exception:
                 pass
+            if split_changed:
+                try:
+                    self.rebuild_playlist_table()
+                except Exception as exc:
+                    print(f'[PLAYLIST] rebuild after mirror split failed: {exc}')
             try:
                 self.apply_playlist_filtering()
                 self.playlist_widget.viewport().update()
@@ -27621,6 +27736,38 @@ try {
         except Exception:
             return False
 
+    def _cached_signed_playback_is_trustworthy(self, playback_url):
+        """True when a cached CDN URL states its own expiry and that expiry has
+        not passed, so throwing it away to mint an identical one is pure waste.
+
+        The playback entry point strips any cached playback_url that is neither
+        use_mpv_ytdl nor pre_resolved, on the theory that a CDN URL may have
+        died since it was captured. That is right for URLs carrying no expiry
+        marker at all — but a turbo.cr stream has exp=<epoch> in its own query
+        and _signed_url_expiry_epoch already reads it, so the expiry clause of
+        that same condition handles real expiry on its own. The blanket clause
+        fired anyway, because a browser_click result sets neither flag, and
+        every double-click re-opened a browser. One field run shows both
+        halves of it: one link reused its capture after 158 ms (its capture WAS
+        the playback resolve) while another re-captured 75 s later, minting
+        exp=1789504158 to replace an exp=1789504083 that was still valid.
+
+        Scoped to the turbo.cr CDN deliberately. The blanket rule also covers
+        hosters whose URLs expire without saying so, and that cannot be checked
+        for them from here — widening this needs field evidence per host.
+        """
+        try:
+            url = str(playback_url or '')
+            if not url:
+                return False
+            if 'turbocdn' not in (urlparse(url).netloc or '').lower():
+                return False
+            if self._signed_url_expiry_epoch(url) <= 0:
+                return False
+            return not self._signed_playback_url_is_expired(url, grace_seconds=90)
+        except Exception:
+            return False
+
     def _is_familypornhd_direct_video_url(self, target_url):
         """Return True for the signed FamilyPornHD/FAD delivery URL shape.
 
@@ -27641,13 +27788,268 @@ try {
                 or host == 'fad.com'
                 or host.endswith('.fad.com')
             )
+            # Two signed delivery shapes, both KVS/kt_player:
+            #   dev.familypornhd.com/get_file/0/<opaque>.mp4/?v-acctoken=…
+            #   srv1.familypornhd.com/remote_control.php?file=<b64>.mp4&acctoken=<b64>
+            # The second carries the token in the QUERY, so a path-only test
+            # misses it — and it is the form that actually plays. Its acctoken
+            # is plain base64 of "<md5>|<expiry>|0|<host>|0|<client IP>|<md5>",
+            # which is why a captured get_file URL dies after a few minutes and
+            # why we cannot mint a replacement: it is signed against the
+            # expiry, the host and the requesting IP.
+            query = (parsed.query or '').lower()
+            is_remote_control = (
+                path.endswith('/remote_control.php')
+                and 'file=' in query
+                and 'acctoken=' in query
+            )
             return bool(
                 is_delivery_host
-                and '/get_file/' in path
-                and re.search(r'\.mp4(?:/|$)', path)
+                and (
+                    ('/get_file/' in path and re.search(r'\.mp4(?:/|$)', path))
+                    or is_remote_control
+                )
             )
         except Exception:
             return False
+
+    @staticmethod
+    def _is_family_cdn_media_line(line):
+        """True for a capture line naming a watchstreamhd-family CDN file.
+
+        The watchstreamhd embed decrypts its ``master.txt`` in JavaScript and
+        then fires one plain request per rendition, all within a second or
+        two::
+
+            /cdn/hls/<id>/master.txt
+            /cdn/down/<id>/files/<slug>_und_360p.mp4?md5=...&expires=...
+            /cdn/down/<id>/files/<slug>_und_720p.mp4?md5=...&expires=...
+
+        The CDN hostname rotates (video-streams.com, bestvideostream.com,
+        mediaboxplayer.com and others have all been seen), so the path shape
+        is the stable signal.  Seeing it means the decrypted URLs are already
+        in the pipe and there is nothing left to wait for: the player is a
+        blob:/MediaSource element, so VERIFIED_MEDIA never fires and the
+        capture would otherwise sit out the whole ~135s deadline.
+        """
+        try:
+            raw = str(line or '')
+            if not raw.startswith('MEDIA_URL::'):
+                return False
+            candidate = raw.split('::', 1)[1].strip()
+            path = urlparse(candidate).path.lower()
+            return (
+                '/cdn/down/' in path
+                and '/files/' in path
+                and path.endswith(('.mp4', '.m4v', '.webm', '.mkv', '.mov'))
+            )
+        except Exception:
+            return False
+
+    @staticmethod
+    def _is_turbocdn_media_line(line):
+        """True for a capture line naming a turbo.cr signed media file.
+
+        The turbo.cr player mints one signed URL per video and requests it::
+
+            https://dl100.turbocdn.st/turbo/data/<id>.mp4?exp=<unix>&token=<64 hex>&fn=<name>
+
+        The dl<NN> prefix rotates per request, so only the /turbo/data/ shape
+        is matched and the host never is. A field run confirmed the URL is
+        built by JavaScript — a plain GET of /v/<id> and of /embed/<id> does
+        not contain it — which is why a browser is needed at all. But unlike
+        the watchstreamhd family there is exactly ONE file per video rather
+        than a set of renditions, so the moment this line appears the capture
+        holds everything it will ever get. What it then waits for is
+        VERIFIED_MEDIA, and on a large file over this CDN that means waiting
+        for the <video> to report a duration — tens of seconds to tell us
+        something the probe can measure itself.
+        """
+        try:
+            raw = str(line or '')
+            if not raw.startswith('MEDIA_URL::'):
+                return False
+            candidate = raw.split('::', 1)[1].strip()
+            parsed = urlparse(candidate)
+            path = (parsed.path or '').lower()
+            return (
+                'turbocdn' in (parsed.netloc or '').lower()
+                and '/turbo/data/' in path
+                and path.endswith(('.mp4', '.m4v', '.webm', '.mkv', '.mov'))
+            )
+        except Exception:
+            return False
+
+    # Hosts an article page loads for ads and analytics. These must still be
+    # thrown away when the page has no get_file stream of its own: the
+    # repeated playhubconnect MP4 is an advert, not the video. Everything
+    # else that looks like media is kept, because some FamilyPornHD articles
+    # are served by a different hoster entirely and that hoster's stream is
+    # the only real candidate on the page.
+    _FAMILYPORNHD_AD_HOST_TOKENS = (
+        'playhubconnect', 'playhub', 'a-ads.com', 'doubleclick',
+        'google-analytics', 'googlesyndication', 'popcash', 'popads',
+        'exoclick', 'juicyads', 'trafficjunky', 'adsterra', 'hilltopads',
+        'theporndude.com',
+    )
+
+    # A browser capture records EVERY URL the page touched: theme scripts,
+    # analytics, ad beacons, fonts. Two tests keep that list honest.
+    _PLAYABLE_MEDIA_SUFFIXES = (
+        '.m3u8', '.m3u', '.mpd', '.mp4', '.m4v', '.webm', '.mkv', '.ts',
+        '.flv', '.mov', '.avi',
+    )
+    _NON_MEDIA_URL_SUFFIXES = (
+        '.js', '.mjs', '.css', '.json', '.php', '.html', '.htm', '.xml',
+        '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp',
+        '.woff', '.woff2', '.ttf', '.eot', '.map',
+    )
+    _NON_MEDIA_HOST_TOKENS = (
+        'googletagmanager', 'google-analytics', 'gstatic', 'gravatar',
+        'cloudflareinsights', 'doubleclick', 'googlesyndication',
+        'googleadservices', 'connect.facebook.net', 'hotjar', 'clarity.ms',
+    )
+
+    def _capture_candidate_is_media(self, url):
+        """True when a captured URL can plausibly BE the video.
+
+        Deliberately strict: it decides which candidates earn a slot and
+        which may be promoted when every probe failed. A script or an
+        analytics beacon must never pass (field: googletagmanager's gtag/js
+        was handed to mpv as the FamilyPornHD stream and the load-failed
+        ladder looped on "unrecognized file format").
+        """
+        url = str(url or '').strip()
+        if not url.lower().startswith(('http://', 'https://', '//')):
+            return False
+        try:
+            path = (urlparse(url).path or '').lower()
+        except Exception:
+            return False
+        return any(path.endswith(suffix)
+                   for suffix in self._PLAYABLE_MEDIA_SUFFIXES)
+
+    def _capture_candidate_is_obfuscated_master(self, url):
+        """True for the embedded player's disguised HLS master.
+
+        watchstreamhd.com serves its playlist as .txt to slip past
+        adblockers: https://watchstreamhd.com/cdn/hls/<id>/master.txt
+
+        Its entries are NOT URLs. Each one is the literal scheme "\\m3\\"
+        followed by base64(base64(ciphertext)) — decoded from a field
+        capture, 224 bytes of high-entropy data in 14 AES blocks, the first
+        three blocks identical across the 360p and 720p renditions, which is
+        what fixed-IV ECB/CBC looks like over two plaintexts sharing a
+        prefix. The key sits in that player's cryptojs-aes bundle, so we
+        cannot decrypt it, and handing the master to mpv only produces
+        "No protocol handler found to open URL \\m3\\..." followed by
+        "unrecognized file format" — six attempts, six failures, in one
+        field log.
+
+        So this is a SIGNAL that the embedded player was reached (and
+        _familypornhd_player_page reads it as one), never a candidate to
+        play. The playable file is the /cdn/down/ MP4 the player fetches a
+        moment after decrypting.
+        """
+        url = str(url or '').strip().lower()
+        try:
+            path = urlparse(url).path or ''
+        except Exception:
+            return False
+        return path.endswith('.txt') and '/cdn/hls/' in path
+
+    def _capture_candidate_is_clearly_not_media(self, url):
+        """True only for captures that cannot possibly be a video.
+
+        The loose counterpart of _capture_candidate_is_media, for the
+        promote-an-unverified-capture fallbacks, where refusing an
+        extension-less stream would be worse than the disease: a real
+        stream can have no file extension, but a .js file, a stylesheet or
+        a Google tag endpoint never is one.
+        """
+        url = str(url or '').strip()
+        low = url.lower()
+        if any(token in low for token in self._NON_MEDIA_HOST_TOKENS):
+            return True
+        try:
+            path = (urlparse(url).path or '').lower()
+        except Exception:
+            return False
+        return (any(path.endswith(suffix)
+                    for suffix in self._NON_MEDIA_URL_SUFFIXES)
+                or path.endswith('/js')
+                or path.endswith('/css'))
+
+    def _familypornhd_player_page(self, candidates, source_url=''):
+        """The embedded player's page, to use as Referer for its CDN files.
+
+        A FamilyPornHD article that is not on the site's own player loads a
+        third-party one (watchstreamhd.com in the field, whose files come
+        from a rotating CDN — mediaboxplayer.com, mediaboxnow.com,
+        bestvideostream.com). The browser asks that CDN with the PLAYER as
+        Referer, not the article; the token check behind /cdn/down/ answers
+        500 to anything else. Nothing here names a host: the player is
+        whichever capture served a /video/ page or /player/ and /cdn/hls/
+        assets off a host that is not the article's.
+        """
+        try:
+            article_host = (urlparse(source_url).hostname or '').lower()
+        except Exception:
+            article_host = ''
+        player_origin = ''
+        for url in candidates or []:
+            url = str(url or '')
+            try:
+                parsed = urlparse(url)
+            except Exception:
+                continue
+            host = (parsed.hostname or '').lower()
+            if not host:
+                continue
+            # dev.familypornhd.com/embed/50 is the site's OWN player, not a
+            # third-party hoster, and the get_file path already works with
+            # the article as Referer — so leave it alone.
+            if (host == article_host
+                    or (article_host and (
+                        host.endswith('.' + article_host)
+                        or article_host.endswith('.' + host)))):
+                continue
+            path = (parsed.path or '').lower()
+            scheme = parsed.scheme or 'https'
+            if path.startswith(('/video/', '/embed', '/e/', '/d/')):
+                return url
+            if '/player/' in path or '/cdn/hls/' in path:
+                player_origin = f'{scheme}://{host}'
+        return player_origin
+
+    def _familypornhd_non_ad_media_candidates(self, candidates):
+        """Drop the ad network's URLs, keep anything that can be the video.
+
+        Used when a FamilyPornHD article has no get_file/...mp4 candidate.
+        The previous behaviour discarded EVERY candidate in that case, which
+        also discarded a different hoster's stream and left those articles
+        unplayable — the current method failing meant nothing was tried.
+        """
+        kept = []
+        for url in candidates or []:
+            url = str(url or '')
+            if not url:
+                continue
+            try:
+                host = (urlparse(url).hostname or '').lower()
+            except Exception:
+                host = ''
+            low = url.lower()
+            if any(token in host or token in low
+                   for token in self._FAMILYPORNHD_AD_HOST_TOKENS):
+                continue
+            if not self._capture_candidate_is_media(url):
+                continue
+            kept.append(url)
+        # Best quality first: watchstreamhd exposes the same film at several
+        # heights and the capture order is whatever the player asked for
+        # first, which was 360p.
+        return self._rank_real_media_candidates(kept, 'FAMILYPORNHD')
 
     def _familypornhd_capture_needs_refresh(self, source_url, stream_info, max_age_ms=45000):
         """Say whether a captured signed FamilyPornHD URL is old enough to refresh.
@@ -29071,6 +29473,115 @@ try {
         if merged_metadata.get('original_source_url') in (None, '', [], {}):
             merged_metadata['original_source_url'] = source_url
         return entry['source_url'], merged_metadata
+
+    def _turbo_cr_media_candidates(self, html):
+        """Signed turbocdn mp4 URLs out of a turbo.cr page, in document order.
+
+        The player loads
+            https://dl<NN>.turbocdn.st/turbo/data/<id>.mp4?exp=<unix>&token=<64 hex>&fn=<name>
+        The dl<NN> prefix rotates per request, so the CDN host is never matched
+        literally -- only the /turbo/data/ shape. exp/token is a signature that
+        cannot be re-minted, but it does not need to be: it is handed over in
+        the page and is passed through exactly as served.
+        """
+        if not html:
+            return []
+        # The URL is emitted from JS and from HTML attributes, so it can arrive
+        # as `\/` escapes or with `&amp;` entity-escaped query separators.
+        text = str(html).replace('\\/', '/').replace('&amp;', '&')
+        out = []
+        for match in re.finditer(
+            r'https?://[A-Za-z0-9][A-Za-z0-9.\-]*/turbo/data/[A-Za-z0-9_\-]+\.mp4[^\s"\'<>\\]*',
+            text,
+            re.IGNORECASE,
+        ):
+            url = match.group(0)
+            if url not in out:
+                out.append(url)
+        return out
+
+    def _turbo_cr_page_html(self, url, source_url):
+        """Fetch a turbo.cr page as plain HTML. curl_cffi first: turbo.cr sits
+        behind Cloudflare, and a bare `requests` GET tends to draw a challenge
+        page instead of the document."""
+        headers = self._stream_request_headers(source_url)
+        headers['Referer'] = source_url or 'https://turbo.cr/'
+        try:
+            import curl_cffi.requests as cfreq
+        except Exception:
+            cfreq = None
+        if cfreq is not None:
+            try:
+                response = cfreq.Session(impersonate='chrome131').get(
+                    url, headers=headers, timeout=20, allow_redirects=True)
+                if response is not None and response.ok and response.text:
+                    return response.text
+            except Exception:
+                pass
+        try:
+            import requests
+        except Exception:
+            return ''
+        try:
+            response = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
+            if response is not None and response.ok:
+                return response.text or ''
+        except Exception:
+            pass
+        return ''
+
+    def _resolve_turbo_cr_source(self, source_url):
+        """turbo.cr: read the signed mp4 off the page, without opening a browser.
+
+        A field capture showed the flow spending its entire browser window on
+        this host to read one URL -- /v/<id> embeds /embed/<id>, and that
+        player requests a single turbocdn mp4. This tries two plain GETs
+        (watch page, then embed page) and returns None when neither carries
+        the URL, in which case the existing browser capture still runs. The
+        static path is an optimisation, never the only path.
+        """
+        parsed = urlparse(source_url)
+        host = (parsed.netloc or '').lower()
+        if host != 'turbo.cr' and not host.endswith('.turbo.cr'):
+            return None
+        match = re.match(r'^/(?:v|d|watch|embed)/([^/?#]+)', parsed.path or '', re.IGNORECASE)
+        if not match:
+            return None
+        video_id = match.group(1)
+        base = f"{parsed.scheme or 'https'}://{parsed.netloc}"
+
+        # Three plain GETs, cheapest chance first: the watch page, the embed
+        # page it points at (that is what hosts the player), then the download
+        # page — a download page is the one place a host is most likely to
+        # server-render a direct link. A field run showed the first two do not
+        # carry the signed URL (it is minted by JavaScript), but the download
+        # page had not been tried, and one extra GET is far cheaper than the
+        # browser it can avoid.
+        pages = [source_url]
+        for _suffix in ('embed', 'd'):
+            _candidate_page = f"{base}/{_suffix}/{video_id}"
+            if _candidate_page not in pages:
+                pages.append(_candidate_page)
+
+        for page_url in pages:
+            html = self._turbo_cr_page_html(page_url, source_url)
+            if not html:
+                continue
+            candidates = self._turbo_cr_media_candidates(html)
+            if not candidates:
+                continue
+            # Prefer the candidate for this video id; fall back to the first.
+            candidates.sort(key=lambda u: 0 if f"/turbo/data/{video_id}.mp4" in u else 1)
+            print(f"[TURBO_CR] signed stream found in {page_url}: {candidates[0][:150]}")
+            resolved = self._probe_remote_media_candidate(
+                candidates[0], referer=page_url, title=None)
+            if resolved:
+                resolved['resolver_provider'] = 'turbo_cr_static'
+                resolved['source_url'] = source_url
+                return resolved
+            print(f"[TURBO_CR] probe rejected {candidates[0][:120]}, falling back to the capture")
+        print(f"[TURBO_CR] no signed stream in the page HTML for {source_url}, using the browser")
+        return None
 
     def _resolve_pixeldrain_source(self, source_url):
         parsed = urlparse(source_url)
@@ -37250,6 +37761,13 @@ try {
                 c for c in normalized_candidates
                 if not (0.1 <= _measured_duration(c) < 20 and c not in verified_normalized)
             ]
+            # ...and neither is a script: this branch promotes an
+            # UNVERIFIED capture, the one place a Google tag endpoint
+            # can be mistaken for a stream.
+            _non_ad = [
+                c for c in _non_ad
+                if not self._capture_candidate_is_clearly_not_media(c)
+            ]
             if _non_ad:
                 print(f"[MIXDROP_CLICK] probe rejected all {len(_non_ad)} candidate(s) for {page_url}; using best-scoring non-ad capture anyway")
                 result_dict = _mixdrop_browser_result(_non_ad[0])
@@ -38163,6 +38681,8 @@ try {
             _pw_html_at = None
             _pw_media_at = None
             _pw_m3u8_at = None
+            _pw_family_cdn_at = None
+            _pw_turbocdn_at = None
             _pw_child_dead_at = None
             while True:
                 _now = time.time()
@@ -38190,8 +38710,15 @@ try {
                         _pw_m3u8_at = time.time()
                         if _pw_media_at is None:
                             _pw_media_at = _pw_m3u8_at
-                    elif line.startswith('MEDIA_URL::') and _pw_media_at is None:
-                        _pw_media_at = time.time()
+                    elif line.startswith('MEDIA_URL::'):
+                        if _pw_media_at is None:
+                            _pw_media_at = time.time()
+                        if (_pw_family_cdn_at is None
+                                and self._is_family_cdn_media_line(line)):
+                            _pw_family_cdn_at = time.time()
+                        if (_pw_turbocdn_at is None
+                                and self._is_turbocdn_media_line(line)):
+                            _pw_turbocdn_at = time.time()
                     elif line.startswith('PAGE_HTML_B64::') and _pw_html_at is None:
                         _pw_html_at = time.time()
                     if line and not line.startswith(
@@ -38231,6 +38758,30 @@ try {
                         # don't wait out the rest of the window with the
                         # browser tab open.
                         _kill_pw_tree('file-host capture done, child stuck closing browser')
+                        break
+                    if (_pw_family_cdn_at is not None
+                            and _now - _pw_family_cdn_at > 8):
+                        # The decrypted renditions are already in the pipe.
+                        # Timed from the FIRST one and not reset by later
+                        # ones: the browser re-requests the chosen file for
+                        # range reads, and resetting would pin the capture
+                        # open for as long as the download runs.
+                        # The blob:/MediaSource player never raises
+                        # VERIFIED_MEDIA, so without this rung the capture
+                        # held a URL it had finished collecting for two
+                        # minutes before handing it over.
+                        _kill_pw_tree('family CDN renditions captured, closing browser')
+                        break
+                    if (_pw_turbocdn_at is not None
+                            and _now - _pw_turbocdn_at > 4):
+                        # turbo.cr serves exactly one signed file per video,
+                        # so the capture is done the moment that URL appears
+                        # in the pipe — there is no second rendition to wait
+                        # for, unlike the family CDN rung above. Four seconds
+                        # is slack for the probe headers, not for more media.
+                        # Timed from the first sighting and never reset: the
+                        # player re-requests the same file for range reads.
+                        _kill_pw_tree('turbo.cr signed stream captured, closing browser')
                         break
                     if (early_m3u8 and _pw_m3u8_at is not None
                             and _now - _pw_m3u8_at > 8):
@@ -38418,6 +38969,17 @@ try {
             clicked_title = self._jav_code_from_text(clicked_title) or ''
 
         if media_candidates:
+            # Only the first 12 captures are considered below, and a capture
+            # is every URL the page touched. A page that loads 50 scripts
+            # before its player pushes the real stream out of that window —
+            # on a FamilyPornHD article served by watchstreamhd.com the
+            # mediaboxplayer MP4s sat at position ~50 and never became
+            # candidates at all. Stable sort, so nothing is dropped: the
+            # order only decides who fits.
+            media_candidates = sorted(
+                media_candidates,
+                key=lambda u: 0 if self._capture_candidate_is_media(u) else 1,
+            )
             normalized_candidates = []
             seen_candidates = set()
             for raw_candidate in media_candidates[:12]:
@@ -38452,7 +39014,24 @@ try {
             def _is_family_direct_video(url):
                 return self._is_familypornhd_direct_video_url(url)
 
+            _family_referer = ''
             if _is_family_article:
+                # Resolve the embedded player's page from the FULL capture,
+                # not from normalized_candidates: that one is built from
+                # media_candidates[:12], and the player page is an HTML
+                # document, so it sorts into the non-media group and sits far
+                # outside the window behind ~40 theme scripts. Passing the
+                # truncated list found nothing, the Referer fell back to the
+                # article, and every /cdn/down/ request came back 500 — the
+                # "FamilyPornHD embedded player:" line simply stopped
+                # appearing. It only worked before by accident, because
+                # master.txt still counted as media then and carried
+                # /cdn/hls/ into the window.
+                _family_referer = self._familypornhd_player_page(
+                    media_candidates, source_url)
+                if _family_referer:
+                    print(f"[BROWSER_CLICK] FamilyPornHD embedded player: "
+                          f"{_family_referer[:140]}")
                 _family_direct_candidates = [
                     _candidate for _candidate in normalized_candidates
                     if _is_family_direct_video(_candidate)
@@ -38467,16 +39046,64 @@ try {
                             f"discarded {_discarded_count} non-Family media URL(s)"
                         )
                 else:
-                    # A different host's MP4 (for example the repeated
-                    # playhubconnect ad URL) must not be promoted as the
-                    # FamilyPornHD video when the page supplied no matching
-                    # get_file stream.
-                    if normalized_candidates:
+                    # No get_file stream on this page. A different host's MP4
+                    # (for example the repeated playhubconnect ad URL) must
+                    # not be promoted as the FamilyPornHD video — but some
+                    # articles are hosted elsewhere, and there the other
+                    # hoster's stream is the ONLY candidate, so discarding
+                    # everything left them unplayable. Drop the ad network
+                    # and keep whatever is left.
+                    _family_fallback = (
+                        self._familypornhd_non_ad_media_candidates(
+                            normalized_candidates)
+                    )
+                    if _family_fallback:
+                        _fallback_hosts = []
+                        for _c in _family_fallback:
+                            try:
+                                _h = (urlparse(_c).hostname or '').lower()
+                            except Exception:
+                                _h = ''
+                            if _h and _h not in _fallback_hosts:
+                                _fallback_hosts.append(_h)
                         print(
-                            "[BROWSER_CLICK] FamilyPornHD filter found no "
-                            "direct get_file video; ignoring non-Family media URLs"
+                            "[BROWSER_CLICK] FamilyPornHD page has no direct "
+                            f"get_file video; keeping "
+                            f"{len(_family_fallback)} non-ad candidate(s) from "
+                            f"{', '.join(_fallback_hosts[:3]) or '?'}"
                         )
-                    normalized_candidates = []
+                        normalized_candidates = _family_fallback
+                    else:
+                        _family_master = next(
+                            (_c for _c in normalized_candidates
+                             if self._capture_candidate_is_obfuscated_master(_c)),
+                            '',
+                        )
+                        if _family_master:
+                            # The player was reached but never fetched a
+                            # playable file inside the capture window. The
+                            # master itself is undecryptable ciphertext (see
+                            # _capture_candidate_is_obfuscated_master), so
+                            # queueing it just burns the whole load-failed
+                            # ladder. Say what happened instead.
+                            print(
+                                "[BROWSER_CLICK] FamilyPornHD captured only "
+                                "the player's obfuscated HLS master, which "
+                                f"cannot be played directly: {_family_master[:120]}"
+                            )
+                            print(
+                                "[BROWSER_CLICK] FamilyPornHD: the player did "
+                                "not fetch a /cdn/down/ file in time — open the "
+                                "article again; the decrypted MP4 usually "
+                                "appears a moment after the master"
+                            )
+                        elif normalized_candidates:
+                            print(
+                                "[BROWSER_CLICK] FamilyPornHD filter found no "
+                                "direct get_file video; ignoring non-Family "
+                                "media URLs"
+                            )
+                        normalized_candidates = []
 
             # Normalize the verified set the same way so the comparison
             # below matches (raw subprocess values vs normalized candidates).
@@ -38516,6 +39143,14 @@ try {
                     candidate_host = ''
                 if self._is_mixdrop_host(candidate_host):
                     score += 4
+                if self._is_turbocdn_media_line(f'MEDIA_URL::{url}'):
+                    # turbo.cr's only real media request. Leaving the capture
+                    # as soon as that URL appears means VERIFIED_MEDIA may
+                    # never fire for it, and that +6 is what normally beats a
+                    # pre-roll advert — so the known-good shape carries the
+                    # same weight on its own rather than relying on the
+                    # browser having finished measuring the <video>.
+                    score += 6
                 if '.m3u8' in lower_url:
                     score += 2
                 if re.search(r'[?&](s|token|sig|signature|expires?|exp|e)=', lower_url):
@@ -38623,7 +39258,7 @@ try {
                     probe_headers.setdefault('Origin', _origin)
                 resolved = self._probe_remote_media_candidate(
                     candidate,
-                    referer=source_url,
+                    referer=(_family_referer or source_url),
                     headers=probe_headers,
                     title=clicked_title,
                 )
@@ -38632,7 +39267,7 @@ try {
                     # Referer — mpv replays them on every segment request.
                     # Without the Referer these CDNs 403 the exact same URL
                     # that plays fine on its own page (and nowhere else).
-                    playback_headers = _with_browser_ua(self._media_playback_headers(source_url, candidate))
+                    playback_headers = _with_browser_ua(self._media_playback_headers((_family_referer or source_url), candidate))
                     resolved['headers'] = dict(playback_headers or resolved.get('headers') or {})
                     resolved['title'] = clicked_title or resolved.get('title')
                     resolved['source_url'] = source_url
@@ -38655,18 +39290,37 @@ try {
                 c for c in normalized_candidates
                 if not (0.1 <= _measured_duration(c) < 20 and c not in verified_normalized)
             ]
+            # ...and neither is a script: this branch promotes an
+            # UNVERIFIED capture, which is how gtag/js reached mpv and
+            # looped the whole load-failed ladder on an unrecognized
+            # file format.
+            _non_ad = [
+                c for c in _non_ad
+                if not self._capture_candidate_is_clearly_not_media(c)
+            ]
             if _non_ad:
                 best = _non_ad[0]
                 print(f"[BROWSER_CLICK] probe rejected all {len(normalized_candidates)} candidate(s) for {source_url}; using best-ranked capture anyway")
                 result_dict = {
                     'playback_url': best,
                     'download_url': best,
-                    'headers': _with_browser_ua(self._media_playback_headers(source_url, best)),
+                    'headers': _with_browser_ua(self._media_playback_headers((_family_referer or source_url), best)),
                     'title': clicked_title,
                     'source_url': source_url,
                     'embed_url': source_url,
                     'resolver_provider': 'browser_click',
                     'resolved_at_ms': int(time.time() * 1000),
+                    # The capture holds every rendition (…_eng_360p.mp4 and
+                    # …_eng_720p.mp4 arrive together). Only the best-ranked
+                    # one is played, but the others are the same film on the
+                    # same signed CDN, and the 720p routinely truncates —
+                    # "https: Stream ends prematurely at 468433764, should be
+                    # 470257707" then "moov atom not found", because a 448 MiB
+                    # file with its moov at the end needs the whole transfer.
+                    # The 360p is a fraction of the size and opens. Keeping
+                    # them costs nothing and gives the row somewhere to fall
+                    # back to.
+                    'alternate_urls': [c for c in _non_ad[1:] if c != best],
                 }
                 if subtitle_tracks:
                     result_dict['subtitle_tracks'] = subtitle_tracks
@@ -39024,6 +39678,322 @@ try {
             'resolver_provider': 'noodlemagazine',
             'resolved_at_ms': int(time.time() * 1000),
         }
+
+    # ── sxyprn ──────────────────────────────────────────────────────────────
+    # A sxyprn post page holds TWO things worth taking: the native stream, and
+    # (when the uploader added them) links to the same video on other hosters,
+    # written straight into the h1 title. yt-dlp dropped this site to
+    # unsupported.py, so the decode below follows the site's own player logic:
+    #   data-vnfo = {"720p": "/sd/1/…/<ts>/<hex>/<hex>/0.mp4", …}
+    #   parts[1] += "8/" + b64("<digitsum(parts[6])>-<host>-<digitsum(parts[7])>")
+    #   parts[5]  =  str(int(parts[5]) - (digitsum(parts[6]) + digitsum(parts[7])))
+    #   GET https://<host><path>  ->  302 Location: the real CDN file
+    #
+    # sxyprn rotates TLDs (sxyprn.com/.net/.io/.pro/…), so the host matcher
+    # compares the registrable second-level label exactly — the same rule the
+    # noodle family uses — and look-alikes (notsxyprn.com, sxyprn-clone.com)
+    # can never match.
+    _SXYPRN_TITLE_LINK_DENYLIST = (
+        # The site's own non-video properties + its ad network. These appear
+        # as links on the page but are never mirrors of the video.
+        'sxypix.com', 'myporn.club', 'yps.link', 'theporndude.com',
+        'zline0.com', 'trafficdeposit.com',
+    )
+    # A {marker} like this one starts a section of links to OTHER videos, so
+    # everything after it in the title is neither part of the name nor a
+    # mirror of this one. Observed on a real post:
+    #   ... After A Long Night FULL HD -> vidara.so/v/OzStT6iJG0R8v
+    #   {More scenes of this model} SCENE 1 -> vidara.so/v/6xm99e2D6kzUy ...
+    _SXYPRN_MIRROR_STOP_MARKERS = (
+        'more scene', 'scenes of', 'scene 1', 'scene1', 'other video',
+        'other scene', 'related', 'full video', 'complete video', 'part 2',
+    )
+
+    def _is_sxyprn_host(self, host):
+        host = str(host or '').lower().strip().strip('.')
+        if not host:
+            return False
+        if ':' in host and not host.startswith('['):
+            host = host.split(':', 1)[0]
+        if host.startswith('www.'):
+            host = host[4:]
+        labels = host.split('.')
+        return len(labels) >= 2 and labels[-2] == 'sxyprn'
+
+    @staticmethod
+    def _sxyprn_digit_sum(segment):
+        """Sum of the digits in a path segment (the site's ``ssut51``)."""
+        return sum(int(ch) for ch in str(segment or '') if ch.isdigit())
+
+    @staticmethod
+    def _sxyprn_cdn_token(ss, host, es, urlsafe=True):
+        """base64("<ss>-<host>-<es>") (the site's ``boo``).
+
+        The player then makes the token path-safe: '+'->'-', '/'->'_' and
+        '='->'.'. Plain base64 is kept as a fallback because a '/' in the
+        token would otherwise add a path segment.
+        """
+        raw = f'{ss}-{host}-{es}'
+        token = base64.b64encode(raw.encode('utf-8')).decode('ascii')
+        if urlsafe:
+            token = token.replace('+', '-').replace('/', '_').replace('=', '.')
+        return token
+
+    def _sxyprn_cdn_path(self, raw_path, host, urlsafe=True):
+        """Rewrite a data-vnfo relative path into the signed CDN path."""
+        parts = str(raw_path or '').split('/')
+        if len(parts) < 8:
+            return ''
+        ss = self._sxyprn_digit_sum(parts[6])
+        es = self._sxyprn_digit_sum(parts[7])
+        parts[1] = parts[1] + '8/' + self._sxyprn_cdn_token(ss, host, es, urlsafe)
+        # parts[5] is normally the expiry timestamp and is wound back by the
+        # same digit sums. When the layout puts something else there the
+        # signed path is still worth asking for, so only the rewind is
+        # skipped rather than the whole candidate.
+        if str(parts[5]).strip().lstrip('-').isdigit():
+            parts[5] = str(int(parts[5]) - (ss + es))
+        return '/'.join(parts)
+
+    @staticmethod
+    def _sxyprn_clean_title(text):
+        """Drop the hashtags / {markers} / hoster URLs out of a post title."""
+        text = str(text or '')
+        text = re.sub(r'https?://\S+', ' ', text)
+        text = re.sub(r'\{[^{}]*\}', ' ', text)
+        text = re.sub(r'#\w+', ' ', text)
+        text = text.replace('|', ' ')
+        text = re.sub(r'\s+', ' ', text).strip()
+        # A trailing quality marker the uploader typed ("FULL HD ->") is not
+        # part of the name. The arrow has to go first or the marker is not at
+        # the end of the string any more.
+        text = text.strip(' -|>:').strip()
+        text = re.sub(r'\s*\b(?:FULL\s*HD|FHD|UHD|4K|\d{3,4}p|HD)\s*$',
+                      '', text, flags=re.IGNORECASE).strip()
+        return text.strip(' -|>:')
+
+    def _sxyprn_scan_anchor(self, tag, page_host, mirrors, seen):
+        """Classify one <a> from the h1. Returns '' for a mirror (drop it, and
+        record it) or the original tag when the link is part of the title."""
+        href_match = re.search(r'href\s*=\s*["\']([^"\']+)["\']',
+                               tag, re.IGNORECASE)
+        if not href_match:
+            return tag
+        url = html_unescape(str(href_match.group(1) or '').strip())
+        if not url.lower().startswith(('http://', 'https://')):
+            return tag
+        try:
+            link_host = (urlparse(url).netloc or '').lower()
+        except Exception:
+            return tag
+        if (not link_host or link_host == page_host
+                or self._is_sxyprn_host(link_host)
+                or any(link_host == deny or link_host.endswith('.' + deny)
+                       for deny in self._SXYPRN_TITLE_LINK_DENYLIST)):
+            return tag          # model / hashtag link: keep its text
+        key = url.strip().lower()
+        if key not in seen:
+            seen.add(key)
+            mirrors.append(url)
+        return ''               # a mirror is not part of the title
+
+    def _sxyprn_title_and_mirrors(self, html, page_url=''):
+        """(title, mirror_urls) taken from the h1 of a sxyprn post page.
+
+        The uploader writes extra hosters into the title itself, e.g.
+
+            NEW Model Scene 2026 #Anal #POV
+              doodstream.com -> https://doodstream.com/e/qlb9nbe23jda
+              lulustream.com -> https://lulustream.com/e/iqxjl8h8yted
+
+        so every external link inside the h1 is a mirror. The hashtags, the
+        {NEW}-style markers and those URLs are all noise in the row name —
+        and so is the anchor TEXT of a mirror link, which is why a mirror
+        anchor is dropped whole instead of being flattened to "doodstream.com".
+
+        A {marker} that opens a section of OTHER videos ends the title: those
+        links are different scenes, not mirrors of this one.
+        """
+        html = html or ''
+        match = re.search(r'<h1\b[^>]*>(.*?)</h1>', html,
+                          re.IGNORECASE | re.DOTALL)
+        h1 = match.group(1) if match else ''
+        try:
+            page_host = (urlparse(page_url).netloc or '').lower()
+        except Exception:
+            page_host = ''
+        mirrors = []
+        seen = set()
+        # Walk the h1 in document order: plain text is kept, an internal
+        # anchor (model / hashtag) keeps its text, a mirror anchor is dropped
+        # whole, and a {marker} that opens an "other videos" section ends the
+        # title outright — everything after it belongs to a different video.
+        chunks = []
+        pos = 0
+        for token_match in re.finditer(r'\{[^{}]*\}|<a\b.*?</a>', h1,
+                                       re.IGNORECASE | re.DOTALL):
+            chunks.append(h1[pos:token_match.start()])
+            token = token_match.group(0)
+            pos = token_match.end()
+            if token.startswith('{'):
+                low = token.lower()
+                if any(marker in low
+                       for marker in self._SXYPRN_MIRROR_STOP_MARKERS):
+                    # Everything after this marker describes other videos.
+                    pos = len(h1)
+                    break
+                chunks.append(' ')
+                continue
+            chunks.append(self._sxyprn_scan_anchor(
+                token, page_host, mirrors, seen) or ' ')
+        chunks.append(h1[pos:])
+        text = ''.join(chunks)
+        title = self._sxyprn_clean_title(re.sub(r'<[^>]+>', ' ', text))
+        return title, mirrors
+
+
+    @staticmethod
+    def _sxyprn_vnfo_sources(html):
+        """[(label, relative_path)] from the player's data-vnfo attribute,
+        best quality first."""
+        match = re.search(r'data-vnfo\s*=\s*(["\'])(.*?)\1',
+                          str(html or ''), re.IGNORECASE | re.DOTALL)
+        if not match:
+            return []
+        try:
+            data = json.loads(html_unescape(match.group(2)))
+        except Exception:
+            return []
+        if not isinstance(data, dict):
+            return []
+        out = []
+        for label, path in data.items():
+            path = str(path or '').strip()
+            if not path or not str(path).startswith('/'):
+                continue
+            out.append((str(label or '').strip(), path))
+        return out
+
+    def _sxyprn_warm_up(self, session, html, page_url):
+        """Fire the player's cjs.php handshake before asking the CDN.
+
+        The site's own player POSTs pid/ut/cipid there first. Failure is not
+        fatal — the CDN answer below is what decides.
+        """
+        try:
+            pid = re.search(r"\bpid\s*:\s*'([^']+)'", html)
+            ut = re.search(r"\but\s*:\s*'([^']+)'", html)
+            cipid = re.search(r"\bcipid\s*:\s*'([^']+)'", html)
+            if not (pid and ut and cipid):
+                return
+            parsed = urlparse(page_url)
+            origin = (f'{parsed.scheme}://{parsed.netloc}'
+                      if parsed.scheme and parsed.netloc else '')
+            session.post(
+                urljoin(page_url, '/php/cjs.php'),
+                data={'pid': pid.group(1), 'ut': ut.group(1),
+                      'cipid': cipid.group(1)},
+                headers={'X-Requested-With': 'XMLHttpRequest',
+                         'Referer': page_url, 'Origin': origin},
+                timeout=8,
+            )
+        except Exception:
+            pass
+
+    def _resolve_sxyprn_source(self, source_url):
+        try:
+            import requests
+        except Exception:
+            return None
+        headers = self._stream_request_headers(source_url, {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        })
+        try:
+            session = requests.Session()
+        except Exception:
+            session = requests
+        try:
+            response = session.get(source_url, headers=headers, timeout=15,
+                                   allow_redirects=True)
+        except Exception as exc:
+            print(f"[SXYPRN] page failed: {exc}")
+            return None
+        if not getattr(response, 'ok', False):
+            print(f"[SXYPRN] page HTTP {getattr(response, 'status_code', '?')}")
+            return None
+        html = response.text or ''
+        page_url = response.url or source_url
+        host = (urlparse(page_url).netloc or '').lower() or 'sxyprn.com'
+        title, mirrors = self._sxyprn_title_and_mirrors(html, page_url)
+        sources = self._sxyprn_vnfo_sources(html)
+        if not sources:
+            print(f"[SXYPRN] no data-vnfo on {page_url[:120]}"
+                  f" ({len(mirrors)} mirror(s) in title)")
+            return None
+        sources.sort(key=lambda item: self._media_url_height_hint(item[0]),
+                     reverse=True)
+        self._sxyprn_warm_up(session, html, page_url)
+        for label, raw_path in sources[:4]:
+            height = self._media_url_height_hint(label)
+            for urlsafe in (True, False):
+                path = self._sxyprn_cdn_path(raw_path, host, urlsafe)
+                if not path:
+                    break
+                cdn_url = f'https://{host}{path}'
+                media_headers = self._media_playback_headers(page_url, cdn_url)
+                try:
+                    probe = session.get(cdn_url, headers=media_headers,
+                                        timeout=15, allow_redirects=False,
+                                        stream=True)
+                except Exception as exc:
+                    print(f"[SXYPRN] cdn probe failed: {exc}")
+                    continue
+                try:
+                    location = str(
+                        probe.headers.get('Location')
+                        or probe.headers.get('location') or '').strip()
+                    status = probe.status_code
+                    content_type = str(
+                        probe.headers.get('Content-Type') or '').lower()
+                finally:
+                    try:
+                        probe.close()
+                    except Exception:
+                        pass
+                if location:
+                    final = urljoin(cdn_url, html_unescape(location))
+                    print(f"[SXYPRN] {len(sources)} source(s) in data-vnfo; "
+                          f"chose {label or 'best'} -> {final[:140]}"
+                          f" ({len(mirrors)} title mirror(s))")
+                    return {
+                        'playback_url': final,
+                        'headers': self._media_playback_headers(page_url, final),
+                        'title': title,
+                        'height': height,
+                        'mirrors': mirrors,
+                        'resolver_provider': 'sxyprn',
+                        'resolved_at_ms': int(time.time() * 1000),
+                    }
+                if status == 200 and (
+                    content_type.startswith('video/')
+                    or path.lower().endswith(('.mp4', '.m4v', '.webm'))
+                ):
+                    print(f"[SXYPRN] {len(sources)} source(s) in data-vnfo; "
+                          f"chose {label or 'best'} direct -> {cdn_url[:140]}"
+                          f" ({len(mirrors)} title mirror(s))")
+                    return {
+                        'playback_url': cdn_url,
+                        'headers': media_headers,
+                        'title': title,
+                        'height': height,
+                        'mirrors': mirrors,
+                        'resolver_provider': 'sxyprn',
+                        'resolved_at_ms': int(time.time() * 1000),
+                    }
+        print(f"[SXYPRN] data-vnfo present but no CDN file answered for "
+              f"{page_url[:120]}")
+        return None
 
     # VOE / pvvstream publish a short teaser as tr_<height>p.mp4 alongside
     # the real <height>p.mp4 renditions, and the teaser sorts first.
@@ -39409,9 +40379,10 @@ try {
             # The playlist stores the browser-captured delivery URL so a fresh
             # result can be played immediately.  Once a batch has been sitting
             # long enough for that signed URL to age out, refresh from the
-            # article page before asking mpv to open it.  This is a lightweight
-            # static page refresh; the existing browser/cookie fallback remains
-            # below when the page does not expose a usable replacement.
+            # article page before asking mpv to open it.  The refresh goes
+            # through the KVS embed page, because that is the only page that
+            # carries a video URL; the browser/cookie fallback remains below
+            # when neither page exposes a usable replacement.
             _family_origin_page = str(_family_cached_entry.get('origin_page') or '').strip()
             if (
                 _family_origin_page
@@ -39419,14 +40390,49 @@ try {
                 and self._is_remote_url(_family_origin_page)
             ):
                 print(
-                    f"[FAMILYPORNHD] refreshing aged captured URL from article page "
-                    f"({source_url[:120]})"
+                    f"[FAMILYPORNHD] refreshing aged captured URL via the KVS "
+                    f"embed page ({source_url[:120]})"
                 )
+                _family_fresh = None
                 try:
-                    _family_fresh = self._resolve_stream_from_html(_family_origin_page)
+                    # The article page holds no video URL at all, only an
+                    # <iframe src=".../embed/<id>">, so a generic HTML pass
+                    # over it was guaranteed to come back empty.  The KVS
+                    # embed page is where the signed get_file URLs are minted,
+                    # and it is plain server-rendered HTML, so re-reading it
+                    # yields a genuinely fresh token for every rendition.
+                    from familypornhd_grab import fetch_and_extract as _kvs_fetch
+
+                    _kvs_page = _kvs_fetch(_family_origin_page)
+                    _kvs_links = [
+                        str(_kvs_link).strip()
+                        for _kvs_link in (_kvs_page.get('links') or [])
+                        if str(_kvs_link).strip()
+                    ]
+                    if _kvs_page.get('kvs_embed') and _kvs_links:
+                        _family_fresh = {
+                            'playback_url': _kvs_links[0],
+                            'alternate_urls': _kvs_links[1:],
+                            'title': _kvs_page.get('title') or '',
+                            'headers': dict(_kvs_page.get('headers') or {}),
+                            'resolver_provider': 'familypornhd_kvs_embed',
+                        }
+                        print(
+                            f"[FAMILYPORNHD] re-read KVS embed page, "
+                            f"{len(_kvs_links)} fresh rendition(s) available"
+                        )
                 except Exception as _family_refresh_exc:
                     print(f"[FAMILYPORNHD] aged URL refresh failed: {_family_refresh_exc}")
                     _family_fresh = None
+                if _family_fresh is None:
+                    try:
+                        _family_fresh = self._resolve_stream_from_html(_family_origin_page)
+                    except Exception as _family_refresh_exc:
+                        print(
+                            f"[FAMILYPORNHD] aged URL refresh fallback failed: "
+                            f"{_family_refresh_exc}"
+                        )
+                        _family_fresh = None
                 if isinstance(_family_fresh, dict) and _family_fresh.get('playback_url'):
                     _family_fresh = dict(_family_fresh)
                     _family_fresh['origin_page'] = _family_origin_page
@@ -39452,10 +40458,13 @@ try {
                     )
                     return self._merge_stream_info(source_url, _family_fresh)
             # Keep the captured URL as the fallback when the article is
-            # blocked or does not expose a replacement. Applying it lets the
-            # existing mpv load-failure ladder perform its cookie/browser
-            # refresh and remote_control.php recovery instead of turning a
-            # refresh miss into a hard resolution failure.
+            # blocked or does not expose a replacement, so the mpv
+            # load-failure ladder can still try its cookie/browser refresh
+            # instead of turning a refresh miss into a hard resolution
+            # failure. NOTE: that ladder has no remote_control.php recovery
+            # step — an earlier version of this comment claimed one, and no
+            # such code has ever existed here. _is_familypornhd_direct_video_url
+            # recognises the shape; nothing reconstructs one.
             print('[FAMILYPORNHD] retaining aged captured URL for existing playback fallback')
             return _family_cached_entry
 
@@ -39570,7 +40579,30 @@ try {
         # normal direct-download host, not a share page needing resolution.
         _gofile_share_hosts = {'gofile.io', 'gofile.to', 'www.gofile.io', 'www.gofile.to'}
         if resolved is None:
-            if 'pixeldrain.com' in host:
+            # R64: turbo.cr is static-first (same reasoning as R49
+            # turtleviplay) — a field capture spent its whole browser window
+            # reading one turbocdn URL out of the embed page. Returns None
+            # when the page does not carry it, and the capture below still
+            # runs, so this cannot make the host worse than it was.
+            if host == 'turbo.cr' or host.endswith('.turbo.cr'):
+                resolved = self._resolve_turbo_cr_source(source_url)
+                if resolved is None:
+                    # The signed URL is minted by JavaScript, so a browser is
+                    # genuinely required — but it does not have to be a VISIBLE
+                    # one. Try the explicit no-window mode first: that is what
+                    # FamilyPornHD uses so its capture "never creates a
+                    # Brave/Chrome window on the user's desktop". turbo.cr is
+                    # an ordinary HTML5 player behind Cloudflare, so this may
+                    # well pass, and if the fingerprint is rejected the
+                    # off-screen headed engine is still there as the fallback.
+                    resolved = self._resolve_stream_via_browser_click(
+                        source_url, headless=True,
+                        referer=self._embed_origin_referer(source_url))
+                if resolved is None:
+                    resolved = self._resolve_stream_via_browser_click(
+                        source_url, headed_hidden=True,
+                        referer=self._embed_origin_referer(source_url))
+            elif 'pixeldrain.com' in host:
                 resolved = self._resolve_pixeldrain_source(source_url)
             elif host in _gofile_share_hosts:
                 resolved = self._resolve_gofile_source(source_url)
@@ -39613,6 +40645,13 @@ try {
                 resolved = self._resolve_cyberfile_source(source_url)
             elif self._is_mega_host(host):
                 resolved = self._resolve_mega_source(source_url)
+            elif self._is_sxyprn_host(host):
+                # The stream is not on the page: data-vnfo carries a relative
+                # path that has to be signed (digit sums + base64 token) and
+                # then followed through a 302 to the CDN file. The uploader
+                # also writes other hosters into the h1 title, which become
+                # this row's mirrors.
+                resolved = self._resolve_sxyprn_source(source_url)
             elif self._is_noodle_family_host(host):
                 # Must run before the VOE auto-detect at the end of this
                 # ladder: these pages ARE VOE-format, so _detect_voe_and_resolve
@@ -39805,6 +40844,10 @@ try {
             and 'cyberdrop' not in host
             and 'cyberfile' not in host
             and 'eporner' not in host
+            # turbo.cr runs its own capture above (headless first, off-screen
+            # headed as the fallback). Letting it reach this path too would
+            # open a second browser for the same link when both of those fail.
+            and 'turbo.cr' not in host
         ):
             # R47 standing rule: a capture browser is NEVER shown on
             # screen. This path runs whenever every static resolver
@@ -44820,10 +45863,22 @@ try {
                     # use_mpv_ytdl sites (eporner etc.) let MPV handle everything
                     # via its built-in yt-dlp; playback_url == source_url and never
                     # expires, so skip the cache-clear and re-resolve from cache.
+                    # A turbo.cr capture carries exp=<epoch> in the URL itself,
+                    # so the expiry test below already covers it; the blanket
+                    # clause after it would otherwise re-capture a link that is
+                    # still valid, because a browser_click result sets neither
+                    # use_mpv_ytdl nor pre_resolved_playback_url.
+                    _signed_still_fresh = self._cached_signed_playback_is_trustworthy(
+                        _cached_entry.get('playback_url'))
                     if (
-                        self._signed_playback_url_is_expired(_cached_entry.get('playback_url'), grace_seconds=90)
-                        or _family_capture_stale
-                        or (not _cached_entry.get('use_mpv_ytdl') and not _cached_entry.get('pre_resolved_playback_url'))
+                        _family_capture_stale
+                        or (
+                            not _signed_still_fresh
+                            and (
+                                self._signed_playback_url_is_expired(_cached_entry.get('playback_url'), grace_seconds=90)
+                                or (not _cached_entry.get('use_mpv_ytdl') and not _cached_entry.get('pre_resolved_playback_url'))
+                            )
+                        )
                     ):
                         # CDN-backed URLs: saved playback_url may have expired.
                         # Strip transport keys; keep display data so the row stays

@@ -11,6 +11,7 @@ USAGE:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -252,33 +253,444 @@ def _extract_title(html: str, fallback_url: str) -> str:
     return re.sub(r"\s+", " ", html_unescape(match.group(1))).strip() if match else ""
 
 
-def fetch_and_extract(url: str, session=None) -> dict:
-    """Fetch one page and return its extracted links plus playback headers."""
+# ── KVS player embed page ────────────────────────────────────────────────────
+#
+# FamilyPornHD is a KVS (Kernel Video Sharing) install.  The watch page only
+# carries an <iframe src=".../embed/<video_id>">, so fetching the article
+# finds no media at all.  The embed page is the one that matters: it is plain
+# server-rendered HTML holding the whole player config, with a freshly minted
+# ``v-acctoken`` on every rendition::
+#
+#     video_url:      'https://dev.familypornhd.com/get_file/0/<id>.mp4/?v-acctoken=...&embed=true',
+#     video_url_text: '480p',
+#     video_alt_url:  '.../get_file/0/<id>.mp4/?v-acctoken=...',
+#     video_alt_url_text: '720p',
+#     video_alt_url2: '.../get_file/0/<id>.mp4/?v-acctoken=...',
+#     video_alt_url2_text: '1080p',
+#
+# The token is minted server-side at render time and carries no expiry field
+# (it decodes to "<n>|<embed>|<n>|<md5>" plus a 16-char hex suffix), so a URL
+# read off a freshly fetched embed page is ready to hand to mpv immediately.
+# This is what makes the whole browser capture unnecessary for these videos:
+# two HTTP requests replace a 90-second Playwright session, and there is no
+# window in which the token can go stale.
+#
+# ``event_reporting2`` also holds a get_file URL, but it is the stats beacon
+# and must never be treated as a rendition, so only the video_* keys are read.
+
+_KVS_URL_KEY_RE = re.compile(
+    r"\b(video_url|video_alt_url\d*)\s*:\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
+_KVS_TEXT_KEY_RE = re.compile(
+    r"\b(video_url_text|video_alt_url\d*_text)\s*:\s*[\"']([^\"']+)[\"']",
+    re.IGNORECASE)
+_KVS_EMBED_RE = re.compile(r"(https?://[a-z0-9.\-]+/embed/\d+)", re.IGNORECASE)
+_KVS_EMBED_REL_RE = re.compile(r'''["']/?((?:embed|player)/\d+)["']''', re.IGNORECASE)
+_KVS_HEIGHT_RE = re.compile(r"(\d{3,4})\s*p(?![0-9a-z])", re.IGNORECASE)
+
+
+def _kvs_quality_rank(key: str, label: str) -> tuple:
+    """Sort key for one KVS rendition, best first.
+
+    Prefer the explicit ``_text`` label (``1080p``); fall back to the key's
+    numeric suffix, because KVS numbers its renditions in ascending quality
+    (``video_url`` < ``video_alt_url`` < ``video_alt_url2``).
+    """
+    match = _KVS_HEIGHT_RE.search(label or "")
+    height = int(match.group(1)) if match else 0
+    suffix = re.search(r"(\d+)$", key or "")
+    if suffix:
+        order = int(suffix.group(1))
+    else:
+        # An unnumbered key is still ordered by KVS: plain ``video_url`` is the
+        # lowest rendition and ``video_alt_url`` sits between it and
+        # ``video_alt_url2``, so it must not tie with ``video_url`` at 0.
+        order = 1 if str(key or "").startswith("video_alt_url") else 0
+    return (height, order)
+
+
+def _extract_kvs_player_streams(html: str, base_url: str) -> list:
+    """Pull every rendition out of a KVS player config, best quality first."""
+    text = html or ""
+    if "video_url" not in text:
+        return []
+    labels = {}
+    for match in _KVS_TEXT_KEY_RE.finditer(text):
+        labels[match.group(1).lower()] = match.group(2).strip()
+
+    found, seen = [], set()
+    for match in _KVS_URL_KEY_RE.finditer(text):
+        key = match.group(1).lower()
+        url = _normalise_candidate(match.group(2), base_url)
+        if not url or url in seen or not _looks_like_media_url(url):
+            continue
+        seen.add(url)
+        label = labels.get(key + "_text", "")
+        found.append((_kvs_quality_rank(key, label), label, url))
+
+    found.sort(key=lambda item: item[0], reverse=True)
+    if found:
+        best = found[0]
+        print(
+            f"[FAMILYPORNHD] KVS player config offers {len(found)} rendition(s), "
+            f"best is {best[1] or 'unlabelled'}: {best[2][:120]}"
+        )
+    return [url for _rank, _label, url in found]
+
+
+def _find_kvs_embed_url(html: str, base_url: str) -> str:
+    """Return the KVS ``/embed/<id>`` page URL referenced by a watch page."""
+    text = html or ""
+    match = _KVS_EMBED_RE.search(text)
+    if match:
+        return match.group(1)
+    match = _KVS_EMBED_REL_RE.search(text)
+    if match:
+        return urljoin(base_url, "/" + match.group(1))
+    return ""
+
+
+# ── FirePlayer (watchstreamhd) ───────────────────────────────────────────────
+#
+# The articles that are NOT hosted by the site's own KVS player embed
+# ``watchstreamhd.com/video/<32-hex>``, which runs FirePlayer.  Its source is
+# fetched by an XHR whose shape is fixed and readable straight out of
+# ``/player/assets/scripts.php``::
+#
+#     $.ajax({ type:"POST", url:"/player/index.php?data="+ID+"&do=getVideo",
+#              data:{hash:ID, r:document.referrer},
+#              success: function(data){ var jData = JSON.parse(data); ... } })
+#
+# and then either ``jwSettings.file = jData.videoSource`` (hls) or
+# ``jwSettings.sources = jData.videoSources``.  The site blocks DevTools -- the
+# player will not even start while it is open -- so the response is read here
+# instead of in a browser, and printed so its shape is visible in the console.
+#
+# The three articles that DO resolve show the player requesting plain
+# ``/cdn/down/<id>/files/<slug>_und_720p.mp4?md5=...&expires=...`` URLs a
+# second after the encrypted ``master.txt``, which is what those MP4s look
+# like when the decryption succeeds.
+
+_WATCHSTREAM_EMBED_RE = re.compile(
+    r"(https?://[a-z0-9.\-]+/video/([0-9a-f]{16,40}))", re.IGNORECASE)
+
+
+def _http_post(url: str, data: dict, referer: str = "", timeout: int = 20) -> tuple:
+    """POST *data* and return ``(final_url, text)``, preferring curl_cffi."""
+    headers = {
+        "User-Agent": _UA,
+        "Referer": referer or "https://familypornhd.com/",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "X-Requested-With": "XMLHttpRequest",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Origin": referer.rsplit("/", 1)[0] if referer else "",
+    }
+    errors = []
+    try:
+        import curl_cffi.requests as cfreq
+
+        response = cfreq.post(url, data=data, headers=headers,
+                              impersonate="chrome131", timeout=timeout,
+                              allow_redirects=True)
+        if getattr(response, "status_code", 200) < 400:
+            return (str(getattr(response, "url", "") or url),
+                    str(response.text or ""))
+        errors.append(f"curl_cffi HTTP {response.status_code}")
+    except ImportError:
+        errors.append("curl_cffi not installed")
+    except Exception as exc:
+        errors.append(f"curl_cffi {type(exc).__name__}: {exc}")
+
     if requests is None:
-        raise RuntimeError("requests is required for familypornhd extraction (pip install requests)")
-
-    if session is None:
-        session = requests.Session()
-    session.headers.update({"User-Agent": _UA, "Referer": "https://familypornhd.com/"})
-
-    response = session.get(url, timeout=20, allow_redirects=True)
+        raise RuntimeError("; ".join(errors) or "no HTTP transport available")
+    response = requests.post(url, data=data, headers=headers, timeout=timeout,
+                             allow_redirects=True)
     response.raise_for_status()
-    page_url = response.url or url
-    html = response.text or ""
-    links = extract_video_urls_from_html(html, page_url)
+    return (str(response.url or url), str(response.text or ""))
+
+
+# The same endpoint answers a plain GET with the rendered player page, and
+# that page's Download menu carries the direct MP4s in cleartext -- the AES
+# blobs in the POST response are only how the download button is dressed up.
+# Verified against /video/b20bb95ab626d93fd976af958fbc61ba, which served
+#   [ENG] 360p -> https://bestvideostream.com/cdn/down/<id>/files/…_eng_360p.mp4?md5=…&expires=…
+#   [ENG] 720p -> …_eng_720p.mp4?md5=…&expires=…
+# The CDN host rotates between requests (video-streams.com and
+# bestvideostream.com in two back-to-back fetches), so it is never assumed.
+
+_MEDIA_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
+
+
+def _is_hls_master_url(url: str) -> bool:
+    """Whether *url* is an HLS playlist rather than a progressive file."""
+    return str(url or "").split("?", 1)[0].lower().endswith((".m3u8", ".m3u"))
+
+
+def _is_absolute_http_url(url: str) -> bool:
+    """Whether *url* is an absolute http(s) URL, as opposed to a blob or a blob
+    of ciphertext.
+
+    The FirePlayer POST puts AES ciphertext in ``downloadLinks[].file`` -- a
+    bare ``{"ct":…,"iv":…,"s":…}`` string -- and that shape was being handed to
+    the playlist as if it were a stream.  ``_looks_like_media_url`` alone would
+    already reject it, but the scheme is checked separately so the two rules
+    stay independently readable.
+    """
+    return str(url or "").strip().lower().startswith(("http://", "https://"))
+
+
+def _fireplayer_download_links(page_url: str) -> list:
+    """Scrape the cleartext Download menu off a FirePlayer player page."""
+    try:
+        _final, text = _http_get(page_url)
+    except Exception as exc:
+        print(f"[FAMILYPORNHD] FirePlayer page fetch failed: {exc}")
+        return []
+
+    found, seen = [], set()
+    for url in _MEDIA_URL_RE.findall(text or ""):
+        url = html_unescape(url)
+        if url in seen or "/cdn/down/" not in url:
+            continue
+        if not _is_absolute_http_url(url) or not _looks_like_media_url(url):
+            continue
+        seen.add(url)
+        match = _KVS_HEIGHT_RE.search(url)
+        found.append((int(match.group(1)) if match else 0, len(found), url))
+
+    found.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
+    if found:
+        print(f"[FAMILYPORNHD] FirePlayer download menu offers "
+              f"{len(found)} direct URL(s), best {found[0][2][:120]}")
+    return [url for _height, _order, url in found]
+
+
+def _fireplayer_pick_best(payload: dict) -> list:
+    """Pull playable URLs out of a FirePlayer getVideo payload, best first.
+
+    Handled defensively because the site blocks DevTools and the exact key
+    layout has never been observed: JW Player takes ``sources`` as objects
+    with a ``file``, FirePlayer's own download list uses ``downloadLinks``,
+    and a bare ``videoSource`` string is the HLS fallback.
+    """
+    if not isinstance(payload, dict):
+        return []
+
+    found, seen = [], set()
+
+    def _add(url, label):
+        url = str(url or "").strip()
+        if (not url or url in seen or not _is_absolute_http_url(url)
+                or not _looks_like_media_url(url)):
+            return
+        seen.add(url)
+        match = _KVS_HEIGHT_RE.search(str(label or "")) or _KVS_HEIGHT_RE.search(url)
+        height = int(match.group(1)) if match else 0
+        found.append((height, len(found), url))
+
+    for key in ("videoSources", "sources", "downloadLinks", "attachmentLinks"):
+        for item in payload.get(key) or []:
+            if isinstance(item, dict):
+                _add(item.get("file") or item.get("src") or item.get("url")
+                     or item.get("href") or item.get("link"),
+                     item.get("label") or item.get("title") or "")
+            else:
+                _add(item, "")
+
+    found.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
+    return [url for _height, _order, url in found]
+
+
+def _extract_fireplayer_streams(html: str, base_url: str) -> tuple:
+    """Resolve a watchstreamhd/FirePlayer embed.
+
+    Returns ``(links, downloads_absent)``.  ``downloads_absent`` is True when
+    the getVideo response carried no ``downloadLinks`` at all; the caller uses
+    it only to label the capture method, since either way the signed master is
+    what gets played (see the note in the Qt worker).
+    """
+    match = _WATCHSTREAM_EMBED_RE.search(html or "")
+    if not match:
+        return [], False
+    page_url, video_id = match.group(1), match.group(2)
+    parsed = urlparse(page_url)
+    if not (parsed.scheme and parsed.netloc):
+        return [], False
+
+    links = _fireplayer_download_links(page_url)
+    if links:
+        return links, False
+
+    api = f"{parsed.scheme}://{parsed.netloc}/player/index.php?data={video_id}&do=getVideo"
+    print(f"[FAMILYPORNHD] FirePlayer embed {page_url} -> POST {api}")
+    try:
+        _final, text = _http_post(api, {"hash": video_id, "r": base_url},
+                                  referer=base_url)
+    except Exception as exc:
+        print(f"[FAMILYPORNHD] FirePlayer getVideo failed: {exc}")
+        return [], False
+
+    # The endpoint answers plain text when it refuses ("Video not found."),
+    # so JSON is the only success signal -- same test the player itself uses.
+    try:
+        payload = json.loads(text)
+    except Exception:
+        print(f"[FAMILYPORNHD] FirePlayer getVideo was not JSON: {str(text)[:200]!r}")
+        return [], False
+
+    if isinstance(payload, dict):
+        print(
+            "[FAMILYPORNHD] FirePlayer getVideo keys: "
+            f"{sorted(payload.keys())} hls={payload.get('hls')!r}"
+        )
+        # Printed deliberately: DevTools is blocked on this site, so this is
+        # the only way the real payload shape ever reaches us. Truncated
+        # because it can carry a long encrypted playlist.
+        print(f"[FAMILYPORNHD] FirePlayer getVideo raw: {str(text)[:1200]}")
+
+    links = _fireplayer_pick_best(payload if isinstance(payload, dict) else {})
+    if links:
+        print(f"[FAMILYPORNHD] FirePlayer yielded {len(links)} URL(s), "
+              f"best {links[0][:160]}")
+        return links, False
+
+    # No progressive MP4 to be had: for hls videos downloadLinks[].file is AES
+    # ciphertext, and some videos carry no download variants at all.  The
+    # response still names a signed HLS master in cleartext --
+    #   "securedLink":"https://watchstreamhd.com/cdn/hls/<id>/master.m3u8?md5=…&expires=…"
+    # -- which is the same playlist the in-page player streams, and mpv reads
+    # it directly.  It needs no Referer trick and no decryption, so it is what
+    # the videos with an empty downloadLinks fall back to.
+    secured = str(payload.get("securedLink") or "").strip() if isinstance(payload, dict) else ""
+    if _is_absolute_http_url(secured):
+        _has_downloads = bool(isinstance(payload, dict) and (payload.get("downloadLinks") or []))
+        print(
+            f"[FAMILYPORNHD] FirePlayer signed HLS master: {secured[:150]}"
+            + ("" if _has_downloads else
+               " (no download variants offered, skipping the browser capture)")
+        )
+        return [secured], not _has_downloads
+    return links, False
+
+
+def _http_get(url: str, referer: str = "", timeout: int = 20) -> tuple:
+    """Fetch *url* and return ``(final_url, text)``.
+
+    Prefers curl_cffi so the TLS/JA3 fingerprint looks like a real browser --
+    the site is behind Cloudflare (its embed page loads rocket-loader) and a
+    bare ``requests`` GET can be challenged.  Falls back to ``requests`` when
+    curl_cffi is missing or errors, and raises only if both fail.
+    """
+    headers = {
+        "User-Agent": _UA,
+        "Referer": referer or "https://familypornhd.com/",
+        "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+                   "image/avif,image/webp,*/*;q=0.8"),
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    errors = []
+    try:
+        import curl_cffi.requests as cfreq
+
+        response = cfreq.get(url, headers=headers, impersonate="chrome131",
+                             timeout=timeout, allow_redirects=True)
+        if getattr(response, "status_code", 200) < 400:
+            return (str(getattr(response, "url", "") or url),
+                    str(response.text or ""))
+        errors.append(f"curl_cffi HTTP {response.status_code}")
+    except ImportError:
+        errors.append("curl_cffi not installed")
+    except Exception as exc:
+        errors.append(f"curl_cffi {type(exc).__name__}: {exc}")
+
+    if requests is None:
+        raise RuntimeError("; ".join(errors) or "no HTTP transport available")
+    response = requests.get(url, headers=headers, timeout=timeout,
+                            allow_redirects=True)
+    response.raise_for_status()
+    return (str(response.url or url), str(response.text or ""))
+
+
+def fetch_and_extract(url: str, session=None) -> dict:
+    """Fetch one page and return its extracted links plus playback headers.
+
+    The KVS embed page is tried first because it is the only place the signed
+    ``get_file`` URLs actually appear.  The generic HTML sweep stays as a
+    fallback for pages that do not use the KVS player.
+    """
+    del session  # each hop now uses its own browser-impersonating request
+
+    page_url, html = _http_get(url)
+    title = _extract_title(html, page_url)
+
+    links = _extract_kvs_player_streams(html, page_url)
+    kvs_embed = bool(links)
+    # The player page the request should look like it came from.  KVS rejects
+    # (or redirects away from) a get_file request with an empty Referer, hence
+    # ``empty_referer_redirect`` in the config, so this is not optional.
+    referer = page_url
+
+    if not links:
+        embed_url = _find_kvs_embed_url(html, page_url)
+        if embed_url and embed_url != page_url:
+            print(f"[FAMILYPORNHD] watch page points at KVS embed: {embed_url}")
+            try:
+                embed_page_url, embed_html = _http_get(embed_url, referer=page_url)
+            except Exception as exc:
+                print(f"[FAMILYPORNHD] embed page fetch failed for {embed_url}: {exc}")
+            else:
+                links = _extract_kvs_player_streams(embed_html, embed_page_url)
+                kvs_embed = bool(links)
+                referer = embed_page_url
+                if not title:
+                    title = _extract_title(embed_html, embed_page_url)
+
+    fireplayer = False
+    fireplayer_hls = False
+    if not links:
+        # Articles whose video is externally hosted embed FirePlayer instead
+        # of the KVS player. The player page's Download menu carries the
+        # direct MP4s in cleartext, so no browser is needed and the encrypted
+        # master.txt the player streams from is never touched.
+        links, _fp_no_downloads = _extract_fireplayer_streams(html, page_url)
+        if links:
+            _embed22 = _WATCHSTREAM_EMBED_RE.search(html or "")
+            referer = _embed22.group(1) if _embed22 else page_url
+            # With download variants on offer the browser capture ends early on
+            # the progressive MP4, which is better to seek in than HLS -- so
+            # only that case withholds the short-circuit.  Without them the
+            # capture has nothing to find and would idle to its deadline.
+            if _is_hls_master_url(links[0]) and not _fp_no_downloads:
+                fireplayer_hls = True
+            else:
+                fireplayer = True
+
+    if not links:
+        links = extract_video_urls_from_html(html, page_url)
     if not links:
         links = extract_m3u8_from_packed_js(html, page_url)
 
-    parsed = urlparse(page_url)
+    parsed = urlparse(referer)
     origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
-    headers = {"User-Agent": _UA, "Referer": page_url}
+    headers = {"User-Agent": _UA, "Referer": referer}
     if origin:
         headers["Origin"] = origin
     return {
         "source_url": page_url,
-        "title": _extract_title(html, page_url),
+        "title": title,
         "links": links,
         "headers": headers,
+        # True only when these links were read out of a KVS player config,
+        # i.e. they are signed get_file URLs minted moments ago rather than
+        # whatever the generic HTML sweep happened to find.
+        "kvs_embed": kvs_embed,
+        # True when the links came from a FirePlayer Download menu. Like
+        # ``kvs_embed`` this marks them as minted on purpose, so the caller
+        # can skip the browser capture.
+        "fireplayer": fireplayer,
+        # True when the only thing FirePlayer offered was a signed HLS master.
+        # Deliberately does not short-circuit the browser capture.
+        "fireplayer_hls": fireplayer_hls,
     }
 
 
@@ -289,7 +701,8 @@ def grab_all(url: str, play_first: bool = True) -> dict:
     playlist autoplay is handled by the Qt integration, not by this module.
     """
     del play_first
-    result = {"source_url": url, "title": "", "links": [], "headers": {}}
+    result = {"source_url": url, "title": "", "links": [], "headers": {},
+              "kvs_embed": False, "fireplayer": False, "fireplayer_hls": False}
     try:
         result = fetch_and_extract(url)
         links = result["links"]

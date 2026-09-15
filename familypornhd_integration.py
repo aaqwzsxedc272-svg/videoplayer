@@ -111,6 +111,54 @@ def _vp_launch_familypornhd_grab(self, source_url: str, play_first: bool = True)
                     ]
                     static_result["links"] = static_links
 
+                    # The KVS embed page hands over signed get_file URLs that
+                    # were minted seconds ago, for every rendition at once.
+                    # Using them directly is strictly better than the browser
+                    # capture below: the capture spends up to 90 seconds
+                    # driving a player before mpv ever sees the URL, and that
+                    # is precisely the window in which the token expires
+                    # (age_ms=171266 -> InvalidMedia in the field logs).  Only
+                    # fall through to the browser when the page is not a KVS
+                    # embed, i.e. when there is nothing static to trust.
+                    #
+                    # The same holds for a FirePlayer signed HLS master. It was
+                    # originally left to the capture on the theory that the
+                    # progressive MP4 the capture finds is nicer to seek in,
+                    # but a 24-link field run showed the opposite: the three
+                    # slowest links were exactly the three browser-captured
+                    # 720p MP4s, at 448.47 MB and 436.65 MB, whose transfers the
+                    # CDN closed short ("Stream ends prematurely at 468433764,
+                    # should be 470257707"). Their moov atom sits at the end of
+                    # the file, so a short read has no index and mpv has to
+                    # download the whole thing again -- three or four times,
+                    # 18-22 s each. The master from the same response streamed
+                    # first time on all twelve rows that used it.
+                    _static_kind = (
+                        "kvs_embed_static" if static_result.get("kvs_embed")
+                        else "fireplayer_static" if static_result.get("fireplayer")
+                        else "fireplayer_hls_static" if static_result.get("fireplayer_hls")
+                        else ""
+                    )
+                    if static_links and _static_kind:
+                        result = {
+                            "source_url": src_url,
+                            "title": static_result.get("title") or "",
+                            "links": static_links,
+                            "headers": static_result.get("headers") or {},
+                            "resolved_info": dict(static_result),
+                            "capture_method": _static_kind,
+                        }
+                        print(
+                            f"[FAMILYPORNHD] using {_static_kind.replace('_static', '')} "
+                            f"renditions directly "
+                            f"({len(static_links)} link(s), skipping browser capture): "
+                            f"{static_links[0][:180]}"
+                        )
+                        self.familypornhd_capture_ready.emit(
+                            src_url, result, bool(p_first)
+                        )
+                        continue
+
                     # A URL in the initial HTML can be a pre-roll/ad asset.
                     # Visit the page in the same headed Playwright capture
                     # used by the main resolver and let it click Play, wait
@@ -147,7 +195,7 @@ def _vp_launch_familypornhd_grab(self, source_url: str, play_first: bool = True)
                         handoff_result = {
                             "source_url": src_url,
                             "title": resolved_payload.get("title") or static_result.get("title") or "",
-                            "links": [handoff_url],
+                            "links": _familypornhd_capture_links(handoff_url, resolved_payload),
                             "headers": resolved_payload.get("headers") or static_result.get("headers") or {},
                             "resolved_info": dict(resolved_payload),
                             "capture_method": "browser_duration_verified",
@@ -243,7 +291,7 @@ def _vp_launch_familypornhd_grab(self, source_url: str, play_first: bool = True)
                             result = {
                                 "source_url": src_url,
                                 "title": resolved_result.get("title") or static_result.get("title") or "",
-                                "links": [browser_url],
+                                "links": _familypornhd_capture_links(browser_url, resolved_result),
                                 "headers": resolved_result.get("headers") or static_result.get("headers") or {},
                                 "resolved_info": resolved_result,
                                 "capture_method": "browser_duration_verified",
@@ -284,6 +332,28 @@ def _vp_launch_familypornhd_grab(self, source_url: str, play_first: bool = True)
 
 
 # ── UI-thread result handlers ─────────────────────────────────────────────────
+
+def _familypornhd_capture_links(primary_url, resolved_payload):
+    """The captured stream followed by its other renditions, best first.
+
+    The browser capture sees every rendition of the same film at once
+    (…_eng_360p.mp4 and …_eng_720p.mp4 arrive back to back off the same
+    signed CDN). Only the best-ranked one is handed to mpv, but the 720p
+    routinely truncates mid-transfer on these ~450 MiB files — "Stream ends
+    prematurely" then "moov atom not found", because the moov sits at the end
+    of a non-faststart MP4. The 360p is a fraction of the size and opens.
+
+    The caller turns links[0] into the playlist row and links[1:] into that
+    row's mirrors, so a film stays one row no matter how many renditions the
+    player exposed.
+    """
+    links = [str(primary_url or "").strip()]
+    for raw in (resolved_payload or {}).get("alternate_urls") or []:
+        value = str(raw or "").strip()
+        if value and value not in links:
+            links.append(value)
+    return [link for link in links if link]
+
 
 def _familypornhd_stream_info(
     page_url: str,
