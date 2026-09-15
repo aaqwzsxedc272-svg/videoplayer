@@ -13,6 +13,7 @@ import base64
 import json
 import os
 import re
+import time
 from html import unescape as html_unescape
 from urllib.parse import urlparse, unquote, urljoin, urlunparse, parse_qs
 
@@ -2220,6 +2221,60 @@ _t29_generic = [n for n in ast.walk(_t29_fn)
                 if isinstance(n, ast.If) and "'turbo.cr' not in host" in ast.unparse(n.test)]
 report(len(_t29_generic) == 1,
        "the generic capture path excludes turbo.cr so a failed headless try can't open another window")
+
+# ── 30. a still-valid turbo.cr capture is not thrown away on double-click ────
+# The playback path strips any cached playback_url that is neither
+# use_mpv_ytdl nor pre_resolved. A browser_click result sets neither, so every
+# double-click re-opened a browser to mint an identical URL. One field run
+# shows both halves: one link reused its capture after 158 ms, another
+# re-captured 75 s later, replacing exp=1789504083 with exp=1789504158 while
+# the first was still valid.
+_T30_WANT = ['_signed_url_expiry_epoch', '_signed_playback_url_is_expired',
+             '_cached_signed_playback_is_trustworthy']
+_t30_cls = next(n for n in ast.walk(ast.parse(open('main.py', encoding='utf-8').read()))
+                if isinstance(n, ast.ClassDef) and n.name == 'VideoPlayer')
+_t30_m = {x.name: x for x in _t30_cls.body
+          if isinstance(x, ast.FunctionDef) and x.name in _T30_WANT}
+report(sorted(_t30_m) == sorted(_T30_WANT),
+       f'all three expiry helpers were lifted from main.py (missing: '
+       f'{sorted(set(_T30_WANT) - set(_t30_m))})')
+_t30_stub = ast.ClassDef(name='_T30Stub', bases=[], keywords=[],
+                         body=[_t30_m[w] for w in _T30_WANT], decorator_list=[])
+_t30_mod = ast.Module(body=[_t30_stub], type_ignores=[])
+ast.fix_missing_locations(_t30_mod)
+_t30_ns = {'re': re, 'time': time, 'urlparse': urlparse, 'parse_qs': parse_qs}
+exec(compile(_t30_mod, '<main.py>', 'exec'), _t30_ns)
+_t30 = _t30_ns['_T30Stub']()
+
+# exp values taken verbatim from the field log, plus offsets around `now`.
+_NOW30 = int(time.time())
+_FRESH30 = f'https://dl100.turbocdn.st/turbo/data/Zr2uqa61FxPgp.mp4?exp={_NOW30 + 3600}&token=4d404bdfea95'
+for _label30, _url30, _want30 in [
+    ('fresh turbocdn url',            _FRESH30, True),
+    ('the log\'s own exp, still ahead', 'https://dl100.turbocdn.st/turbo/data/Zr2uqa61FxPgp.mp4?exp=1789504079&token=4d404bdfea95', True),
+    ('inside the 90 s grace window',  f'https://dl100.turbocdn.st/turbo/data/x.mp4?exp={_NOW30 + 30}&token=ab', False),
+    ('already expired',               f'https://dl100.turbocdn.st/turbo/data/x.mp4?exp={_NOW30 - 600}&token=ab', False),
+    ('turbocdn but no exp at all',    'https://dl100.turbocdn.st/turbo/data/x.mp4?token=ab', False),
+    # The scope guard: widening this to other hosters needs field evidence
+    # per host, so a foreign host must keep the old behaviour.
+    ('fresh but not turbocdn',        f'https://cdn.example.net/turbo/data/x.mp4?exp={_NOW30 + 3600}&token=ab', False),
+    ('rotated dl prefix',             f'https://dl3.turbocdn.st/turbo/data/x.mp4?exp={_NOW30 + 3600}&token=ab', True),
+    ('empty',                         '', False),
+    ('None',                          None, False),
+]:
+    report(_t30._cached_signed_playback_is_trustworthy(_url30) is _want30,
+           f'trustworthy? {_label30} -> {_want30}')
+
+# The playback condition itself must now be gated on that helper, and the
+# pre-existing clauses must survive untouched.
+_t30_src = open('main.py', encoding='utf-8').read()
+report('_signed_still_fresh = self._cached_signed_playback_is_trustworthy(' in _t30_src,
+       'the playback path consults the helper before stripping the cached url')
+report('not _cached_entry.get(\'use_mpv_ytdl\') and not _cached_entry.get(\'pre_resolved_playback_url\')'
+       in _t30_src,
+       'the blanket clause is still there for every other host')
+report('_family_capture_stale\n' in _t30_src or '_family_capture_stale' in _t30_src,
+       'and the FamilyPornHD staleness clause is preserved')
 
 print()
 print('FAILURES:', FAILS)

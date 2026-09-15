@@ -27662,6 +27662,38 @@ try {
         except Exception:
             return False
 
+    def _cached_signed_playback_is_trustworthy(self, playback_url):
+        """True when a cached CDN URL states its own expiry and that expiry has
+        not passed, so throwing it away to mint an identical one is pure waste.
+
+        The playback entry point strips any cached playback_url that is neither
+        use_mpv_ytdl nor pre_resolved, on the theory that a CDN URL may have
+        died since it was captured. That is right for URLs carrying no expiry
+        marker at all — but a turbo.cr stream has exp=<epoch> in its own query
+        and _signed_url_expiry_epoch already reads it, so the expiry clause of
+        that same condition handles real expiry on its own. The blanket clause
+        fired anyway, because a browser_click result sets neither flag, and
+        every double-click re-opened a browser. One field run shows both
+        halves of it: one link reused its capture after 158 ms (its capture WAS
+        the playback resolve) while another re-captured 75 s later, minting
+        exp=1789504158 to replace an exp=1789504083 that was still valid.
+
+        Scoped to the turbo.cr CDN deliberately. The blanket rule also covers
+        hosters whose URLs expire without saying so, and that cannot be checked
+        for them from here — widening this needs field evidence per host.
+        """
+        try:
+            url = str(playback_url or '')
+            if not url:
+                return False
+            if 'turbocdn' not in (urlparse(url).netloc or '').lower():
+                return False
+            if self._signed_url_expiry_epoch(url) <= 0:
+                return False
+            return not self._signed_playback_url_is_expired(url, grace_seconds=90)
+        except Exception:
+            return False
+
     def _is_familypornhd_direct_video_url(self, target_url):
         """Return True for the signed FamilyPornHD/FAD delivery URL shape.
 
@@ -45757,10 +45789,22 @@ try {
                     # use_mpv_ytdl sites (eporner etc.) let MPV handle everything
                     # via its built-in yt-dlp; playback_url == source_url and never
                     # expires, so skip the cache-clear and re-resolve from cache.
+                    # A turbo.cr capture carries exp=<epoch> in the URL itself,
+                    # so the expiry test below already covers it; the blanket
+                    # clause after it would otherwise re-capture a link that is
+                    # still valid, because a browser_click result sets neither
+                    # use_mpv_ytdl nor pre_resolved_playback_url.
+                    _signed_still_fresh = self._cached_signed_playback_is_trustworthy(
+                        _cached_entry.get('playback_url'))
                     if (
-                        self._signed_playback_url_is_expired(_cached_entry.get('playback_url'), grace_seconds=90)
-                        or _family_capture_stale
-                        or (not _cached_entry.get('use_mpv_ytdl') and not _cached_entry.get('pre_resolved_playback_url'))
+                        _family_capture_stale
+                        or (
+                            not _signed_still_fresh
+                            and (
+                                self._signed_playback_url_is_expired(_cached_entry.get('playback_url'), grace_seconds=90)
+                                or (not _cached_entry.get('use_mpv_ytdl') and not _cached_entry.get('pre_resolved_playback_url'))
+                            )
+                        )
                     ):
                         # CDN-backed URLs: saved playback_url may have expired.
                         # Strip transport keys; keep display data so the row stays
