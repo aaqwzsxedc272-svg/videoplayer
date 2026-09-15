@@ -2113,6 +2113,58 @@ _r27f = _o27f._resolve_turbo_cr_source(_W27)
 report(_r27f and _r27f['playback_url'] == _REAL27,
        'the candidate matching the video id beats an unrelated one')
 
+# ── 28. turbo.cr capture exits as soon as the signed file appears ────────────
+# A field run confirmed the signed URL is minted by JavaScript: a plain GET of
+# /v/<id> and of /embed/<id> does not contain it, so a browser IS needed. But
+# the URL appears early in the capture and the browser then waits on
+# VERIFIED_MEDIA — a <video> duration measurement that the probe can take
+# itself. Leaving on the first turbocdn line is what makes the host fast.
+_T28 = next(x for x in _t27_cls.body
+            if isinstance(x, ast.FunctionDef) and x.name == '_is_turbocdn_media_line')
+report(_T28 is not None and [ast.unparse(d) for d in _T28.decorator_list] == ['staticmethod'],
+       '_is_turbocdn_media_line is defined once, as a staticmethod')
+_t28_stub = ast.ClassDef(name='_T28Stub', bases=[], keywords=[], body=[_T28], decorator_list=[])
+_t28_mod = ast.Module(body=[_t28_stub], type_ignores=[])
+ast.fix_missing_locations(_t28_mod)
+_t28_ns = {'urlparse': urlparse}
+exec(compile(_t28_mod, '<main.py>', 'exec'), _t28_ns)
+_t28 = _t28_ns['_T28Stub']()
+
+_T28_TRUE = ("MEDIA_URL::https://dl100.turbocdn.st/turbo/data/Zr2uqa61FxPgp.mp4"
+             "?exp=1789444585&token=916c938bd0d859daa52010e571089ed62c180282a59025c890333ad3ee7d4301"
+             "&fn=%5B07-09-26%5D+%5BPornHub+with+Ads%5D.mp4")
+for _label28, _line28, _want28 in [
+    ('the signed file',      _T28_TRUE, True),
+    ('rotated dl3 prefix',   _T28_TRUE.replace('dl100', 'dl3'), True),
+    ('the embed tag',        'MEDIA_URL::https://turbo.cr/embed/Zr2uqa61FxPgp', False),
+    ('the player library',   'MEDIA_URL::https://cdn.plyr.io/3.7.8/plyr.js', False),
+    ('protocol-relative ad', 'MEDIA_URL:://bucklechemistdensity.com/on.js', False),
+    ('ad beacon',            'MEDIA_URL::https://holahupa.com/aas/r45d/vki/2075904/tghr.js', False),
+    ('analytics',            'MEDIA_URL::https://northstar.cr/js/s.js', False),
+    ('bare cdn host',        'MEDIA_URL::https://cdn.tailwindcss.com', False),
+    # The host check is what stops an unrelated site serving the same path
+    # shape from arming the early exit.
+    ('foreign host, same path', 'MEDIA_URL::https://evil.example/turbo/data/x.mp4?exp=1', False),
+    ('not a MEDIA_URL line', _T28_TRUE.replace('MEDIA_URL::', 'VERIFIED_MEDIA::'), False),
+    ('empty',                '', False),
+]:
+    report(_t28._is_turbocdn_media_line(_line28) is _want28, f'line detector {_label28} -> {_want28}')
+
+# The candidate ranking must prefer the turbocdn shape on its own, because an
+# early exit means VERIFIED_MEDIA (worth +6) may never fire for it.
+report("self._is_turbocdn_media_line(f'MEDIA_URL::{url}')" in open('main.py', encoding='utf-8').read(),
+       'the candidate scorer gives the turbocdn shape the same +6 the browser verification would')
+
+# The download page is now part of the static walk, so a host that
+# server-renders the link there is served without a browser at all.
+_D27 = 'https://turbo.cr/d/QsCF7fNEp6Lhp'
+_o28 = _T27Pages({_D27: f'src="{_REAL27}"'})
+_r28 = _o28._resolve_turbo_cr_source(_W27)
+report(_o28.fetched == [_W27, _E27, _D27],
+       f'the walk tries watch, embed then download (got {[u.rsplit("/", 2)[-2] for u in _o28.fetched]})')
+report(bool(_r28) and _r28['playback_url'] == _REAL27,
+       'and a link found only on the download page still resolves without a browser')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

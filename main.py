@@ -27740,6 +27740,40 @@ try {
         except Exception:
             return False
 
+    @staticmethod
+    def _is_turbocdn_media_line(line):
+        """True for a capture line naming a turbo.cr signed media file.
+
+        The turbo.cr player mints one signed URL per video and requests it::
+
+            https://dl100.turbocdn.st/turbo/data/<id>.mp4?exp=<unix>&token=<64 hex>&fn=<name>
+
+        The dl<NN> prefix rotates per request, so only the /turbo/data/ shape
+        is matched and the host never is. A field run confirmed the URL is
+        built by JavaScript — a plain GET of /v/<id> and of /embed/<id> does
+        not contain it — which is why a browser is needed at all. But unlike
+        the watchstreamhd family there is exactly ONE file per video rather
+        than a set of renditions, so the moment this line appears the capture
+        holds everything it will ever get. What it then waits for is
+        VERIFIED_MEDIA, and on a large file over this CDN that means waiting
+        for the <video> to report a duration — tens of seconds to tell us
+        something the probe can measure itself.
+        """
+        try:
+            raw = str(line or '')
+            if not raw.startswith('MEDIA_URL::'):
+                return False
+            candidate = raw.split('::', 1)[1].strip()
+            parsed = urlparse(candidate)
+            path = (parsed.path or '').lower()
+            return (
+                'turbocdn' in (parsed.netloc or '').lower()
+                and '/turbo/data/' in path
+                and path.endswith(('.mp4', '.m4v', '.webm', '.mkv', '.mov'))
+            )
+        except Exception:
+            return False
+
     # Hosts an article page loads for ads and analytics. These must still be
     # thrown away when the page has no get_file stream of its own: the
     # repeated playhubconnect MP4 is an advert, not the video. Everything
@@ -29410,13 +29444,18 @@ try {
         video_id = match.group(1)
         base = f"{parsed.scheme or 'https'}://{parsed.netloc}"
 
-        # The watch page is tried first, then the embed page it points at. The
-        # embed page is what actually hosts the player, so if the signed URL
-        # is server-rendered anywhere it is most likely there.
+        # Three plain GETs, cheapest chance first: the watch page, the embed
+        # page it points at (that is what hosts the player), then the download
+        # page — a download page is the one place a host is most likely to
+        # server-render a direct link. A field run showed the first two do not
+        # carry the signed URL (it is minted by JavaScript), but the download
+        # page had not been tried, and one extra GET is far cheaper than the
+        # browser it can avoid.
         pages = [source_url]
-        embed_url = f"{base}/embed/{video_id}"
-        if embed_url not in pages:
-            pages.append(embed_url)
+        for _suffix in ('embed', 'd'):
+            _candidate_page = f"{base}/{_suffix}/{video_id}"
+            if _candidate_page not in pages:
+                pages.append(_candidate_page)
 
         for page_url in pages:
             html = self._turbo_cr_page_html(page_url, source_url)
@@ -38537,6 +38576,7 @@ try {
             _pw_media_at = None
             _pw_m3u8_at = None
             _pw_family_cdn_at = None
+            _pw_turbocdn_at = None
             _pw_child_dead_at = None
             while True:
                 _now = time.time()
@@ -38570,6 +38610,9 @@ try {
                         if (_pw_family_cdn_at is None
                                 and self._is_family_cdn_media_line(line)):
                             _pw_family_cdn_at = time.time()
+                        if (_pw_turbocdn_at is None
+                                and self._is_turbocdn_media_line(line)):
+                            _pw_turbocdn_at = time.time()
                     elif line.startswith('PAGE_HTML_B64::') and _pw_html_at is None:
                         _pw_html_at = time.time()
                     if line and not line.startswith(
@@ -38622,6 +38665,17 @@ try {
                         # held a URL it had finished collecting for two
                         # minutes before handing it over.
                         _kill_pw_tree('family CDN renditions captured, closing browser')
+                        break
+                    if (_pw_turbocdn_at is not None
+                            and _now - _pw_turbocdn_at > 4):
+                        # turbo.cr serves exactly one signed file per video,
+                        # so the capture is done the moment that URL appears
+                        # in the pipe — there is no second rendition to wait
+                        # for, unlike the family CDN rung above. Four seconds
+                        # is slack for the probe headers, not for more media.
+                        # Timed from the first sighting and never reset: the
+                        # player re-requests the same file for range reads.
+                        _kill_pw_tree('turbo.cr signed stream captured, closing browser')
                         break
                     if (early_m3u8 and _pw_m3u8_at is not None
                             and _now - _pw_m3u8_at > 8):
@@ -38983,6 +39037,14 @@ try {
                     candidate_host = ''
                 if self._is_mixdrop_host(candidate_host):
                     score += 4
+                if self._is_turbocdn_media_line(f'MEDIA_URL::{url}'):
+                    # turbo.cr's only real media request. Leaving the capture
+                    # as soon as that URL appears means VERIFIED_MEDIA may
+                    # never fire for it, and that +6 is what normally beats a
+                    # pre-roll advert — so the known-good shape carries the
+                    # same weight on its own rather than relying on the
+                    # browser having finished measuring the <video>.
+                    score += 6
                 if '.m3u8' in lower_url:
                     score += 2
                 if re.search(r'[?&](s|token|sig|signature|expires?|exp|e)=', lower_url):
