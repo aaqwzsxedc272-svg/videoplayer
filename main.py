@@ -10837,10 +10837,21 @@ class VideoPlayer(QMainWindow):
 
             def _edges_for(self, pos):
                 d = self._dialog
+                w, h = d.width(), d.height()
+                # A Qt.Popup grabs the mouse, so a click that lands OUTSIDE
+                # the frame is still delivered here with coordinates beyond
+                # the rect -- x=-50 satisfies "pos.x() <= MARGIN" and used to
+                # read as the left edge. That both started a resize from a
+                # click on the desktop and swallowed the press, so Qt never
+                # saw the outside click that closes a popup (it took a second
+                # click to dismiss). Only a position actually inside the
+                # frame, and within MARGIN of a side, is an edge.
+                if pos.x() < 0 or pos.y() < 0 or pos.x() > w or pos.y() > h:
+                    return (False, False, False, False)
                 return (pos.x() <= self.MARGIN,                    # left
-                        pos.x() >= d.width() - self.MARGIN,        # right
+                        pos.x() >= w - self.MARGIN,                # right
                         pos.y() <= self.MARGIN,                    # top
-                        pos.y() >= d.height() - self.MARGIN)       # bottom
+                        pos.y() >= h - self.MARGIN)                # bottom
 
             def _cursor_for(self, left, right, top, bottom):
                 if (left and top) or (right and bottom):

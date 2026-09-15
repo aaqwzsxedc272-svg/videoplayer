@@ -2347,6 +2347,142 @@ report('QTimer.singleShot(0, self._update_remote_loading_indicator)'
 report('self.remote_loading_label.hide()' in open('main.py', encoding='utf-8').read(),
        'entering fullscreen still hides it explicitly')
 
+# ── 32. the captured-links popup resizes from its borders only ───────────────
+# It is a Qt.Popup, which grabs the mouse, so a click on the desktop outside
+# the frame is still delivered to the edge-resize filter with coordinates
+# beyond the rect. "pos.x() <= MARGIN" is satisfied by x=-50, so an outside
+# click read as the left edge: it started a resize AND swallowed the press,
+# which is why the popup took two clicks to dismiss.
+_t32_host = next(n for n in ast.walk(ast.parse(open('main.py', encoding='utf-8').read()))
+                 if isinstance(n, ast.ClassDef) and n.name == 'VideoPlayer')
+_t32_m = [x for x in _t32_host.body
+          if isinstance(x, ast.FunctionDef) and x.name == '_ensure_link_flow_panel'][0]
+_t32_cls = [n for n in ast.walk(_t32_m)
+            if isinstance(n, ast.ClassDef) and n.name == '_EdgeResizeFilter']
+report(len(_t32_cls) == 1, '_EdgeResizeFilter was lifted out of _ensure_link_flow_panel')
+_t32_mod = ast.Module(body=_t32_cls, type_ignores=[])
+ast.fix_missing_locations(_t32_mod)
+
+class _T32Pt:
+    def __init__(self, x, y): self._x, self._y = x, y
+    def x(self): return self._x
+    def y(self): return self._y
+    def __sub__(self, o): return _T32Pt(self._x - o._x, self._y - o._y)
+
+class _T32Pos:
+    def __init__(self, x, y): self._p = _T32Pt(x, y)
+    def toPoint(self): return self._p
+
+class _T32Rect:
+    def __init__(self, g=None):
+        # The filter copies with QRect(d.geometry()), i.e. from another Rect.
+        if isinstance(g, _T32Rect):
+            self._g = tuple(g._g)
+        else:
+            self._g = tuple(g or (0, 0, 860, 460))
+    def x(self): return self._g[0]
+    def y(self): return self._g[1]
+    def width(self): return self._g[2]
+    def height(self): return self._g[3]
+
+class _T32Event:
+    def __init__(self, et, x=0, y=0, gx=0, gy=0):
+        self._et = et
+        self._pos, self._gpos = _T32Pos(x, y), _T32Pos(gx, gy)
+    def type(self): return self._et
+    # Must be the enum, not a bare 'left': the filter compares
+    # event.button() == Qt.MouseButton.LeftButton and a str never equals it.
+    def button(self): return _T32Qt.MouseButton.LeftButton
+    def position(self): return self._pos
+    def globalPosition(self): return self._gpos
+    def accept(self): pass
+
+class _T32Dialog:
+    def __init__(self, w=860, h=460):
+        self._geo = [0, 0, w, h]; self.cursor = 'unset'
+    def width(self): return self._geo[2]
+    def height(self): return self._geo[3]
+    def minimumWidth(self): return 480
+    def minimumHeight(self): return 240
+    def geometry(self): return _T32Rect(self._geo)
+    def setGeometry(self, x, y, w, h): self._geo = [x, y, w, h]
+    def setCursor(self, c): self.cursor = c
+    def unsetCursor(self): self.cursor = 'unset'
+
+class _T32QObject:
+    def __init__(self, *a): pass
+
+class _T32Enum:
+    def __init__(self, name): self._n = name
+    def __eq__(self, o): return isinstance(o, _T32Enum) and o._n == self._n
+    def __hash__(self): return hash(self._n)
+
+class _T32Qt:
+    class MouseButton: LeftButton = _T32Enum('left')
+    class CursorShape:
+        SizeFDiagCursor = _T32Enum('fdiag'); SizeBDiagCursor = _T32Enum('bdiag')
+        SizeHorCursor = _T32Enum('hor'); SizeVerCursor = _T32Enum('ver')
+
+class _T32QEvent:
+    class Type:
+        MouseButtonPress = _T32Enum('press')
+        MouseMove = _T32Enum('move')
+        MouseButtonRelease = _T32Enum('release')
+
+_t32_ns = {'QObject': _T32QObject, 'QRect': _T32Rect, 'Qt': _T32Qt,
+           'QEvent': _T32QEvent}
+exec(compile(_t32_mod, '<main.py>', 'exec'), _t32_ns)
+
+_P32, _M32, _R32 = _T32QEvent.Type.MouseButtonPress, _T32QEvent.Type.MouseMove, _T32QEvent.Type.MouseButtonRelease
+
+def _t32_new():
+    d = _T32Dialog()
+    return d, _t32_ns['_EdgeResizeFilter'](d)
+
+# A press OUTSIDE the frame must not be treated as an edge, and must not be
+# consumed -- swallowing it is what stopped the popup closing on one click.
+for _label32, _x32, _y32 in [
+    ('far left of the frame',   -50, 100),
+    ('far above the frame',     100, -50),
+    ('far right of the frame',  910, 100),
+    ('far below the frame',     100, 510),
+    ('outside bottom-right',    910, 510),
+]:
+    _d32, _f32 = _t32_new()
+    _consumed32 = _f32.eventFilter(_d32, _T32Event(_P32, _x32, _y32, _x32, _y32))
+    report(_consumed32 is not True, f'press {_label32} is NOT consumed by the resize filter')
+    report(_f32._drag is None, f'press {_label32} does NOT start a resize')
+    _geo_before32 = list(_d32._geo)
+    _f32.eventFilter(_d32, _T32Event(_M32, _x32 - 200, _y32 - 200, _x32 - 200, _y32 - 200))
+    report(_d32._geo == _geo_before32, f'dragging after a press {_label32} leaves the size alone')
+
+# Genuine edges inside the frame must still resize.
+for _label32, _x32, _y32, _want32 in [
+    ('left edge',    3,   230, 'fdiag-or-hor'),
+    ('right edge',   857, 230, 'fdiag-or-hor'),
+    ('top edge',     430, 3,   'ver'),
+    ('bottom edge',  430, 457, 'ver'),
+    ('bottom-right', 857, 457, 'diag'),
+]:
+    _d32, _f32 = _t32_new()
+    report(_f32.eventFilter(_d32, _T32Event(_P32, _x32, _y32, _x32, _y32)) is True,
+           f'press on the {_label32} starts a resize')
+    report(_f32._drag is not None, f'press on the {_label32} records the drag')
+
+# And the drag itself still moves the geometry, then releases cleanly.
+_d32, _f32 = _t32_new()
+_f32.eventFilter(_d32, _T32Event(_P32, 857, 457, 857, 457))
+_f32.eventFilter(_d32, _T32Event(_M32, 900, 500, 900, 500))
+report(_d32._geo[2] > 860 and _d32._geo[3] > 460,
+       f'dragging the bottom-right corner grows it (geo={_d32._geo})')
+_f32.eventFilter(_d32, _T32Event(_R32, 900, 500, 900, 500))
+report(_f32._drag is None, 'release clears the drag')
+
+# The middle of the popup is not an edge either.
+_d32, _f32 = _t32_new()
+report(_f32.eventFilter(_d32, _T32Event(_P32, 430, 230, 430, 230)) is not True,
+       'a press in the middle of the popup is left alone')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
