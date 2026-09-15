@@ -2251,7 +2251,10 @@ _NOW30 = int(time.time())
 _FRESH30 = f'https://dl100.turbocdn.st/turbo/data/Zr2uqa61FxPgp.mp4?exp={_NOW30 + 3600}&token=4d404bdfea95'
 for _label30, _url30, _want30 in [
     ('fresh turbocdn url',            _FRESH30, True),
-    ('the log\'s own exp, still ahead', 'https://dl100.turbocdn.st/turbo/data/Zr2uqa61FxPgp.mp4?exp=1789504079&token=4d404bdfea95', True),
+    # NB: do NOT pin a literal epoch here. An earlier version reused the
+    # exp=1789504079 from the field log and quietly started failing once the
+    # clock passed 2026-09-15T20:27:59Z. Same shape, anchored to now.
+    ('a real exp an hour out',     f'https://dl100.turbocdn.st/turbo/data/Zr2uqa61FxPgp.mp4?exp={_NOW30 + 3600}&token=4d404bdfea95', True),
     ('inside the 90 s grace window',  f'https://dl100.turbocdn.st/turbo/data/x.mp4?exp={_NOW30 + 30}&token=ab', False),
     ('already expired',               f'https://dl100.turbocdn.st/turbo/data/x.mp4?exp={_NOW30 - 600}&token=ab', False),
     ('turbocdn but no exp at all',    'https://dl100.turbocdn.st/turbo/data/x.mp4?token=ab', False),
@@ -2482,6 +2485,83 @@ report(_f32._drag is None, 'release clears the drag')
 _d32, _f32 = _t32_new()
 report(_f32.eventFilter(_d32, _T32Event(_P32, 430, 230, 430, 230)) is not True,
        'a press in the middle of the popup is left alone')
+
+# ── 33. the resize handle sits in the bottom-LEFT corner ─────────────────────
+# QSizeGrip is hardcoded to move the bottom-right corner with the top-left
+# pinned, so it cannot just be moved to the left -- it would drag the edge
+# opposite the cursor. The replacement keeps the top-RIGHT corner fixed.
+_t33_cls = [n for n in ast.walk(_t32_m)
+            if isinstance(n, ast.ClassDef) and n.name == '_BottomLeftGrip']
+report(len(_t33_cls) == 1, '_BottomLeftGrip was lifted out of _ensure_link_flow_panel')
+_t33_main = open('main.py', encoding='utf-8').read()
+report('QSizeGrip as _LFSizeGrip' not in _t33_main and '_LFSizeGrip(' not in _t33_main,
+       'the bottom-right-only QSizeGrip is no longer imported or instantiated')
+_t33_mod = ast.Module(body=_t33_cls, type_ignores=[])
+ast.fix_missing_locations(_t33_mod)
+
+class _T33Widget:
+    def __init__(self, *a): self.fixed = None; self.tip = ''; self.cur = None; self.sheet = ''
+    def setFixedSize(self, w, h): self.fixed = (w, h)
+    def setToolTip(self, t): self.tip = t
+    def setCursor(self, c): self.cur = c
+    def setStyleSheet(self, s): self.sheet = s
+    def mousePressEvent(self, e): pass
+
+class _T33Dialog:
+    def __init__(self, x=100, y=80, w=860, h=460):
+        self._geo = [x, y, w, h]
+    def width(self): return self._geo[2]
+    def height(self): return self._geo[3]
+    def minimumWidth(self): return 480
+    def minimumHeight(self): return 240
+    def geometry(self): return _T32Rect(self._geo)
+    def setGeometry(self, x, y, w, h): self._geo = [x, y, w, h]
+
+_t33_ns = {'QWidget': _T33Widget, 'QRect': _T32Rect, 'Qt': _T32Qt}
+exec(compile(_t33_mod, '<main.py>', 'exec'), _t33_ns)
+
+def _t33_drag(dx, dy, start=(100, 80, 860, 460)):
+    d = _T33Dialog(*start)
+    g = _t33_ns['_BottomLeftGrip'](d)
+    g.mousePressEvent(_T32Event(_P32, 5, 455, 105, 535))
+    g.mouseMoveEvent(_T32Event(_M32, 5 + dx, 455 + dy, 105 + dx, 535 + dy))
+    return d, g
+
+# Dragging LEFT widens the popup and the right edge must not move.
+_d33, _g33 = _t33_drag(-200, 0)
+report(_d33._geo[2] == 1060, f'drag 200 left -> width 1060 (got {_d33._geo[2]})')
+report(_d33._geo[0] == -100, f'and x moves to -100 (got {_d33._geo[0]})')
+report(_d33._geo[0] + _d33._geo[2] == 960,
+       f'the right edge stays put at 960 (got {_d33._geo[0] + _d33._geo[2]})')
+report(_d33._geo[1] == 80, 'the top edge does not move')
+
+# Dragging DOWN grows the height; the top stays pinned.
+_d33, _g33 = _t33_drag(0, 140)
+report(_d33._geo[3] == 600, f'drag 140 down -> height 600 (got {_d33._geo[3]})')
+report(_d33._geo[1] == 80, 'height grows downward only')
+
+# Both at once, which is what a corner drag actually is.
+_d33, _g33 = _t33_drag(-100, 100)
+report(_d33._geo == [0, 80, 960, 560], f'corner drag -> [0, 80, 960, 560] (got {_d33._geo})')
+
+# Clamping at the minimums.
+_d33, _g33 = _t33_drag(2000, 0)
+report(_d33._geo[2] == 480, f'width clamps at the 480 minimum (got {_d33._geo[2]})')
+report(_d33._geo[0] == 480, f'and x follows so the right edge holds (got {_d33._geo[0]})')
+_d33, _g33 = _t33_drag(0, -2000)
+report(_d33._geo[3] == 240, f'height clamps at the 240 minimum (got {_d33._geo[3]})')
+
+# Release ends the drag; a move with no press is inert.
+_d33, _g33 = _t33_drag(-50, 50)
+_g33.mouseReleaseEvent(_T32Event(_T32QEvent.Type.MouseButtonRelease, 0, 0, 0, 0))
+report(_g33._drag is None, 'release clears the drag')
+_before33 = list(_d33._geo)
+_g33.mouseMoveEvent(_T32Event(_M32, 400, 400, 900, 900))
+report(_d33._geo == _before33, 'a move after release changes nothing')
+_d33b = _T33Dialog()
+_g33b = _t33_ns['_BottomLeftGrip'](_d33b)
+_g33b.mouseMoveEvent(_T32Event(_M32, 300, 300, 700, 700))
+report(_d33b._geo == [100, 80, 860, 460], 'a move with no press changes nothing')
 
 print()
 print('FAILURES:', FAILS)

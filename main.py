@@ -10792,7 +10792,6 @@ class VideoPlayer(QMainWindow):
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, \
             QPushButton, QTreeWidget, QTreeWidgetItem
         from PyQt6.QtWidgets import QHeaderView as _LFHeaderView
-        from PyQt6.QtWidgets import QSizeGrip as _LFSizeGrip
         dlg = QDialog(self)
         dlg.setWindowTitle('Captured links')
         # R45: extension-popup behavior by default — Qt.Popup closes the
@@ -10917,6 +10916,55 @@ class VideoPlayer(QMainWindow):
                     return True
                 return False
 
+        class _BottomLeftGrip(QWidget):
+            """Resize handle for the frameless popup, at the bottom-LEFT.
+
+            QSizeGrip cannot simply be moved over there: it is hardcoded to
+            move the bottom-right corner while the top-left stays put, so a
+            grip drawn on the left would drag the opposite edge from the one
+            under the cursor. This keeps the top-RIGHT corner fixed instead —
+            dragging left widens the popup and moves its x with it, dragging
+            down grows the height — which is what a bottom-left handle has to
+            do. Same geometry the left+bottom case of _EdgeResizeFilter uses.
+            """
+
+            def __init__(self, dialog):
+                super().__init__(dialog)
+                self._dialog = dialog
+                self._drag = None  # (global press pos, start geometry)
+                self.setFixedSize(20, 20)
+                self.setToolTip('Drag to resize')
+                self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+                self.setStyleSheet('background: transparent;')
+
+            def mousePressEvent(self, event):
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._drag = (event.globalPosition().toPoint(),
+                                  QRect(self._dialog.geometry()))
+                    event.accept()
+                    return
+                super().mousePressEvent(event)
+
+            def mouseMoveEvent(self, event):
+                if self._drag is None:
+                    return
+                start_pos, start_geo = self._drag
+                d = self._dialog
+                delta = event.globalPosition().toPoint() - start_pos
+                new_w = start_geo.width() - delta.x()
+                if new_w < d.minimumWidth():
+                    new_w = d.minimumWidth()
+                # Right edge stays put, so x moves by however much the width
+                # changed rather than following the cursor.
+                x = start_geo.x() + start_geo.width() - new_w
+                h = max(d.minimumHeight(), start_geo.height() + delta.y())
+                d.setGeometry(x, start_geo.y(), new_w, h)
+                event.accept()
+
+            def mouseReleaseEvent(self, event):
+                self._drag = None
+                event.accept()
+
         resize_filter = _EdgeResizeFilter(dlg)
         dlg.installEventFilter(resize_filter)
         self._link_flow_resize_filter = resize_filter  # keep Python ref alive
@@ -10985,15 +11033,14 @@ class VideoPlayer(QMainWindow):
         # resizable even in frameless popup mode.
         bottom_row = QHBoxLayout()
         bottom_row.setContentsMargins(2, 0, 2, 0)
-        status_label = QLabel('No captured links yet')
-        bottom_row.addWidget(status_label, 1)
-        grip = _LFSizeGrip(dlg)
-        grip.setToolTip('Drag to resize')
-        grip.setFixedSize(20, 20)
-        grip.setStyleSheet('background: transparent;')
+        # Grip on the left, status text filling the rest. The grip has to come
+        # first in the box for AlignLeft to put it in the bottom-left corner.
+        grip = _BottomLeftGrip(dlg)
         bottom_row.addWidget(
             grip, 0,
-            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
+            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignLeft)
+        status_label = QLabel('No captured links yet')
+        bottom_row.addWidget(status_label, 1)
         lay.addLayout(bottom_row)
 
         dlg.setLayout(lay)
