@@ -34,7 +34,11 @@ AD_HOST_TOKENS = ('z5g022gc', 'trailerhg', 'googlesyndication', 'doubleclick',
 
 # Ad networks serve the creative from a "spot" endpoint, so the path gives it
 # away even when the hostname is a random throwaway .xyz.
-AD_PATH_TOKENS = ('/api/spots/', '/spots/', '/banner', '/popunder', '/pop.js')
+AD_PATH_TOKENS = ('/api/spots/', '/spots/', '/banner', '/popunder', '/pop.js',
+                  # The episode API answers https://sextb.net/not-found when
+                  # the request carries no solved Turnstile token, and that
+                  # 404 page was reaching the playlist as a "stream".
+                  '/not-found', '/404')
 
 # Player hosts, mirroring generic_jav_grab.EMBED_HOST_TOKENS. sextb is the
 # same kind of aggregator as jav.guru / roshy / javgg: the buttons resolve to
@@ -115,6 +119,29 @@ def _nested_player_iframes(page_html: str) -> list:
         if _looks_like_player(cand) and not _is_trailer_iframe(cand) and cand not in out:
             out.append(cand)
     return out
+
+
+def _resolve_streams(streams, url, session) -> list:
+    """Turn a list of player pages into playable media where possible.
+
+    A page that yields no media is kept rather than dropped: a real player
+    page is still better than an empty row, and _resolve_embed_page has
+    already logged what it held.
+    """
+    resolved = []
+    for cand in streams or []:
+        if _is_media_url(cand):
+            if cand not in resolved:
+                resolved.append(cand)
+            continue
+        found = _resolve_embed_page(cand, url, session)
+        if found:
+            for u in found:
+                if u not in resolved:
+                    resolved.append(u)
+        elif cand not in resolved:
+            resolved.append(cand)
+    return resolved
 
 
 def _resolve_embed_page(embed_url: str, referer: str, session, depth: int = 0) -> list:
@@ -379,8 +406,13 @@ def _fetch_episode_stream(source_id: str, epid: str, referer: str, session) -> s
                     data.get('embed') or data.get('iframe') or
                     data.get('link') or data.get('stream')
                 )
+                # Gate it: without a solved Turnstile token the API answers
+                # {"src": "https://sextb.net/not-found"} and that 404 page was
+                # going straight into the playlist.
+                if src and _looks_like_player(unescape(str(src))):
+                    return unescape(str(src))
                 if src:
-                    return src
+                    print(f"    [API] {api_url} -> rejected src={str(src)[:70]!r}")
                 body = data.get('html') or data.get('content') or body
         # Not JSON -- or JSON with none of the keys above. Once curl_cffi got
         # past the 403 the response stopped parsing as JSON entirely
@@ -462,20 +494,7 @@ def grab_all_static(url: str) -> dict:
     # HTML document and mpv has nothing to play. A page that yields no media is
     # kept rather than dropped: a real player page is still better than an
     # empty row, and the log above says what it held.
-    resolved = []
-    for cand in result['streams']:
-        if _is_media_url(cand):
-            if cand not in resolved:
-                resolved.append(cand)
-            continue
-        found = _resolve_embed_page(cand, url, session)
-        if found:
-            for u in found:
-                if u not in resolved:
-                    resolved.append(u)
-        elif cand not in resolved:
-            resolved.append(cand)
-    result['streams'] = resolved
+    result['streams'] = _resolve_streams(result['streams'], url, session)
 
     return result
 
@@ -565,6 +584,14 @@ def grab_all_playwright(url: str, visible: bool = False) -> dict:
         print(f"  Found {len(btn_info)} stream buttons: {[b['label'] for b in btn_info]}")
 
         seen = set()
+        # The page opens with one hoster already loaded (TB on jul-509-rm);
+        # record it so the click-through only collects the ones that differ.
+        prev_src = _extract_inline_player(html, url)
+        if prev_src:
+            seen.add(prev_src)
+            result['streams'].append(prev_src)
+            print(f"  [+] initial player: {prev_src[:80]}")
+
         for btn in btn_info:
             label = btn['label']
             epid  = btn['epid']
@@ -622,23 +649,22 @@ def grab_all_playwright(url: str, visible: bool = False) -> dict:
                     except Exception:
                         break
 
+                    # Scope to #sextb-player. The page also carries the
+                    # trailer and its own embed box, and both pass a naive
+                    # "first acceptable iframe" scan.
+                    #
+                    # A click only counts when the player actually CHANGED:
+                    # TB is already loaded when the page opens, so reading the
+                    # iframe without comparing would record TB again for every
+                    # button and the other hosters would never be collected.
                     src_found = None
-                    # Scan entire HTML for any iframe that's not an ad
-                    # After clicking, the player iframe is usually the only non-ad iframe present
-                    # Try the early snapshot first (captures doodstream before redirect)
                     for html_check in ([early_html, html_now] if early_html else [html_now]):
-                        if not html_check:
-                            continue
-                        for m in re.finditer(r'<iframe[^>]+src=["\']([^"\']+)["\']', html_check, re.IGNORECASE):
-                            # iframe src attributes arrive HTML-escaped, so a
-                            # query separator shows up as &amp; and would
-                            # corrupt the URL if passed on as-is.
-                            candidate = unescape(m.group(1).strip())
-                            if _looks_like_player(candidate):
-                                src_found = candidate
-                                break
-                        if src_found:
+                        cand = _extract_inline_player(html_check, url)
+                        if cand and cand != prev_src:
+                            src_found = cand
                             break
+                    if src_found:
+                        prev_src = src_found
 
                     if src_found and src_found not in seen:
                         seen.add(src_found)
@@ -662,17 +688,52 @@ def grab_all_playwright(url: str, visible: bool = False) -> dict:
 
 
 def grab_all(url: str, visible: bool = False) -> dict:
-    """Try static API first, then Playwright as fallback."""
+    """Read the page statically, then click through the hosters in a browser.
+
+    The static read gets the hoster the page opens with. The episode API is
+    gated by Cloudflare Turnstile and answers "sextb.net/not-found" without a
+    solved token, so the other hosters -- SW, PM, DD, FL, US, PP -- are only
+    reachable by clicking their buttons, exactly as on jav.guru / roshy /
+    javgg. The browser runs headless, so no window appears.
+    """
     print(f"[sextb] Fetching: {url}")
-    
-    # First attempt: static API call (fast, no browser needed)
+
     result = grab_all_static(url)
-    if result.get('streams'):
-        print(f"  [OK] Static grab found {len(result['streams'])} stream(s)")
-        return result
-    
-    print("  [!] Static grab failed, trying Playwright...")
-    result = grab_all_playwright(url, visible=visible)
+    static_streams = list(result.get('streams') or [])
+    if static_streams:
+        print(f"  [OK] Static grab found {len(static_streams)} stream(s)")
+    else:
+        print("  [!] Static grab found nothing")
+
+    try:
+        pw = grab_all_playwright(url, visible=visible)
+    except Exception as e:
+        print(f"  [!] Click-through failed: {e}")
+        pw = {}
+
+    extra = [u for u in (pw.get('streams') or []) if u not in static_streams]
+    if extra:
+        # The click-through yields player pages, so take the same second hop.
+        try:
+            session, _kind = _make_session()
+        except Exception:
+            session = None
+        if session is not None:
+            extra = _resolve_streams(extra, url, session)
+        print(f"  [+] Click-through added {len(extra)} hoster(s)")
+
+    merged = list(static_streams)
+    for u in extra:
+        if u not in merged:
+            merged.append(u)
+    if merged:
+        result['streams'] = merged
+    elif pw.get('streams'):
+        result = pw
+    if not result.get('title'):
+        result['title'] = pw.get('title') or ''
+    result.pop('error', None) if merged else None
+    print(f"  [OK] sextb: {len(result.get('streams') or [])} stream(s) total")
     return result
 
 

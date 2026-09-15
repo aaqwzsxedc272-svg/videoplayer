@@ -2598,12 +2598,13 @@ for _label34, _url34, _want34 in [
     report(sg34._is_ad_iframe(_url34) is _want34, f'ad filter {_label34} -> {_want34}')
 
 _sg34_src = open('sextb_grab.py', encoding='utf-8').read()
-# Superseded by section 35: the acceptance site now requires a positive match
-# (_looks_like_player, which itself still consults _is_ad_iframe) rather than
-# merely "not a known ad".
-report('if _looks_like_player(candidate):' in _sg34_src,
-       'the iframe acceptance site requires a positive player match')
-report('candidate = unescape(m.group(1).strip())' in _sg34_src,
+# Superseded twice. The click-through no longer scans for "the first iframe
+# that is not a known ad"; it reads #sextb-player through _extract_inline_player,
+# which unescapes the src, requires a positive player match and excludes the
+# trailer and the page's own embed. Those behaviours live there now.
+report('_extract_inline_player(html_check, url)' in _sg34_src,
+       'the click-through reads #sextb-player, not the first iframe')
+report('cand = unescape(im.group(1).strip())' in _sg34_src,
        'and the entity-escaped iframe src is unescaped before use')
 report('AD_HOSTS' not in _sg34_src, 'the old host-only list is gone')
 # The 403s on every /api/episode/ call are a TLS fingerprint rejection, so the
@@ -2876,6 +2877,70 @@ report(_res38b['streams'] == [_WANT_PLAYER],
        f"no media on the embed -> the player page is kept (got {_res38b['streams'][:1]})")
 report(not any('duq8bcrl' in u or 'dtscout' in u for u in _res38b['streams']),
        'no ad ever reaches the playlist')
+
+# ── 39. sextb: the other hosters, and the API's not-found answer ─────────────
+# The episode API is Turnstile-gated. Without a solved token it answers
+# {"src": "https://sextb.net/not-found"} -- a 404 page that reached the
+# playlist as a stream. The other hosters (SW/PM/DD/FL/US/PP) are therefore
+# only reachable by clicking their buttons, so grab_all always runs the
+# click-through and merges it with the static result.
+report(not sg34._looks_like_player('https://sextb.net/not-found'),
+       'sextb.net/not-found is not accepted as a player')
+report(sg34._looks_like_player('https://sextb.net/e/jul-509-rm'),
+       'a real sextb embed still is')
+
+for _label39, _body39, _want39 in [
+    ('the API\'s not-found answer', {'src': 'https://sextb.net/not-found'}, None),
+    ('a real player src',           {'src': 'https://doodstream.com/e/abc'}, 'https://doodstream.com/e/abc'),
+    ('an ad src',                   {'src': 'https://t.dtscout.com/idg/?su=zz'}, None),
+    ('an escaped real src',         {'src': 'https://doodstream.com/e/a?a=1&amp;b=2'},
+                                    'https://doodstream.com/e/a?a=1&b=2'),
+]:
+    _g39 = sg34._fetch_episode_stream('16934905', '4124790', 'https://sextb.net/jul-509-rm',
+                                      _T35Session(_T35Resp(ctype='application/json', json_data=_body39)))
+    report(_g39 == _want39, f'api src {_label39} -> {_want39!r} (got {_g39!r})')
+
+# grab_all must merge both halves, dedupe, and resolve the player pages the
+# click-through brings back.
+_real_static = sg34.grab_all_static
+_real_pw     = sg34.grab_all_playwright
+_real_sess   = sg34._make_session
+_T39_MEDIA = {
+    'https://turboplays.click/t/AAA': '<script>f:"https://cdn.example.net/a/index.m3u8";</script>',
+    'https://doodstream.com/e/BBB':   '<script>f:"https://cdn.example.net/b/index.m3u8";</script>',
+    'https://streamwish.com/e/CCC':   '<script>f:"https://cdn.example.net/c/index.m3u8";</script>',
+}
+try:
+    sg34.grab_all_static = lambda u: {
+        'title': 'JUL-509-RM', 'streams': ['https://cdn.example.net/a/index.m3u8']}
+    sg34.grab_all_playwright = lambda u, visible=False: {
+        'title': 'JUL-509-RM',
+        'streams': ['https://turboplays.click/t/AAA',      # the initial player, again
+                    'https://doodstream.com/e/BBB',        # DD
+                    'https://streamwish.com/e/CCC']}       # SW
+    sg34._make_session = lambda: (_T37Session(_T39_MEDIA), 'test-stub')
+    _r39 = sg34.grab_all('https://sextb.net/jul-509-rm')
+finally:
+    sg34.grab_all_static = _real_static
+    sg34.grab_all_playwright = _real_pw
+    sg34._make_session = _real_sess
+
+report(_r39['streams'] == ['https://cdn.example.net/a/index.m3u8',
+                           'https://cdn.example.net/b/index.m3u8',
+                           'https://cdn.example.net/c/index.m3u8'],
+       f'grab_all merges the static hit with the clicked hosters (got {_r39["streams"]})')
+report(_r39['title'] == 'JUL-509-RM', 'grab_all keeps the title')
+
+# A dead click-through must not lose the static result.
+try:
+    sg34.grab_all_static = lambda u: {'title': 'T', 'streams': ['https://cdn.example.net/a/index.m3u8']}
+    sg34.grab_all_playwright = lambda u, visible=False: (_ for _ in ()).throw(RuntimeError('no browser'))
+    _r39b = sg34.grab_all('https://sextb.net/jul-509-rm')
+finally:
+    sg34.grab_all_static = _real_static
+    sg34.grab_all_playwright = _real_pw
+report(_r39b['streams'] == ['https://cdn.example.net/a/index.m3u8'],
+       f'a failed click-through still returns the static stream (got {_r39b["streams"]})')
 
 print()
 print('FAILURES:', FAILS)
