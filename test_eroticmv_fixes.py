@@ -2585,6 +2585,15 @@ for _label34, _url34, _want34 in [
     ('a real protocol-relative cdn', '//cdn.example.net/hls/x/master.m3u8', False),
     ('a real embed',               'https://emturbovid.com/t/abc123', False),
     ('empty',                      '', True),
+    # Placeholder srcs the player leaves in the DOM. Field: every button on
+    # bank-096-rm and aldn-072-rm yielded `javascript:false`, and because both
+    # pages produced the identical string the second video was dropped as a
+    # DUPLICATE -- which is why only one row reached the playlist.
+    ('javascript: placeholder',    'javascript:false', True),
+    ('about:blank',                'about:blank', True),
+    ('blob: source',               'blob:https://player.example/x', True),
+    ('data: uri',                  'data:text/html,x', True),
+    ('bare fragment',              '#', True),
 ]:
     report(sg34._is_ad_iframe(_url34) is _want34, f'ad filter {_label34} -> {_want34}')
 
@@ -2594,6 +2603,16 @@ report('not _is_ad_iframe(candidate)' in _sg34_src,
 report('candidate = unescape(m.group(1).strip())' in _sg34_src,
        'and the entity-escaped iframe src is unescaped before use')
 report('AD_HOSTS' not in _sg34_src, 'the old host-only list is gone')
+# The 403s on every /api/episode/ call are a TLS fingerprint rejection, so the
+# session has to impersonate a browser. Order matters: curl_cffi first.
+report('def _make_session(' in _sg34_src, '_make_session exists')
+report(_sg34_src.index("cfreq.Session(impersonate='chrome131')")
+       < _sg34_src.index('cloudscraper.create_scraper'),
+       'curl_cffi is preferred over cloudscraper, which is preferred over requests')
+report('session.get(url, headers=headers, timeout=30)' in _sg34_src,
+       'the page fetch goes through that session rather than a bare requests one')
+report('session={session_kind}' in _sg34_src,
+       'and the log says which session was used')
 
 # The protocol-relative half, against the real _sanitize_url.
 _t34 = next(x for x in _t29_cls.body if isinstance(x, ast.FunctionDef) and x.name == '_sanitize_url')

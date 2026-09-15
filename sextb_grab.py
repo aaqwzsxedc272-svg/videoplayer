@@ -40,11 +40,18 @@ _AD_MACRO_RE = re.compile(r'%[A-Za-z_][A-Za-z0-9_]*%')
 
 
 def _is_ad_iframe(candidate: str) -> bool:
-    """True when an iframe src is an advert rather than the episode player."""
+    """True when an iframe src is an advert, or otherwise not a usable stream."""
     text = (candidate or '').strip()
     if not text:
         return True
     low = text.lower()
+    # Placeholder srcs the player leaves in the DOM before a real source
+    # loads. Field: every button on bank-096-rm and aldn-072-rm yielded
+    # `javascript:false`, which is not a URL at all — and because both pages
+    # produced the identical string, the second video was then dropped as a
+    # DUPLICATE and only one row reached the playlist.
+    if low.startswith(('javascript:', 'about:', 'data:', 'blob:', 'vbscript:', '#')):
+        return True
     if any(t in low for t in AD_HOST_TOKENS):
         return True
     if any(t in low for t in AD_PATH_TOKENS):
@@ -95,6 +102,32 @@ def _extract_buttons(html: str) -> list[dict]:
                     'epid': m.group(2),
                 })
     return buttons
+
+
+def _make_session():
+    """Build the most Cloudflare-capable session available.
+
+    Plain requests gets a hard 403 from the sextb episode API — every one of
+    the six /api/episode/ calls on bank-096-rm and on aldn-072-rm came back
+    403 in the field, while the HTML page itself loaded fine. Cloudflare
+    fingerprints the TLS handshake, not just the headers, so no amount of
+    header tuning fixes it. curl_cffi impersonates a real Chrome and is what
+    main.py already uses for exactly this reason; the others are fallbacks so
+    the script still runs where it is not installed.
+    """
+    try:
+        import curl_cffi.requests as cfreq
+        return cfreq.Session(impersonate='chrome131'), 'curl_cffi'
+    except Exception:
+        pass
+    try:
+        import cloudscraper
+        return cloudscraper.create_scraper(
+            browser={'browser': 'chrome', 'platform': 'windows'}), 'cloudscraper'
+    except Exception:
+        pass
+    import requests
+    return requests.Session(), 'requests'
 
 
 def _fetch_episode_stream(source_id: str, epid: str, referer: str, session) -> str | None:
@@ -153,36 +186,28 @@ def grab_all_static(url: str) -> dict:
     result = {'title': '', 'streams': []}
     
     try:
-        import requests
-    except ImportError:
-        result['error'] = 'requests not installed'
+        session, session_kind = _make_session()
+    except Exception as e:
+        result['error'] = f'no HTTP session available: {e}'
         return result
-    
-    session = requests.Session()
+
     headers = {
         'User-Agent': _UA,
         'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
         'Referer': 'https://sextb.net/',
     }
-    
+
     try:
-        # Try cloudscraper first if available (bypasses Cloudflare)
-        try:
-            import cloudscraper
-            cs = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows'})
-            resp = cs.get(url, timeout=30)
-            html = resp.text
-        except ImportError:
-            resp = session.get(url, headers=headers, timeout=30)
-            html = resp.text
+        resp = session.get(url, headers=headers, timeout=30)
+        html = resp.text
     except Exception as e:
         result['error'] = f'Page fetch failed: {e}'
         return result
     
     result['title'] = _extract_title(html)
     buttons = _extract_buttons(html)
-    print(f"  Found {len(buttons)} episode buttons: {[b['label'] for b in buttons]}")
+    print(f"  Found {len(buttons)} episode buttons: {[b['label'] for b in buttons]} (session={session_kind})")
     
     seen = set()
     for btn in buttons:
