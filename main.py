@@ -14251,6 +14251,16 @@ try {
         match = re.search(r'https?://[^\s<>"]+', cleaned, re.IGNORECASE)
         if match:
             cleaned = match.group(0).strip()
+        # A protocol-relative URL — what an iframe src almost always carries —
+        # is recognised by nothing downstream: _is_remote_url returns False, so
+        # the playlist treats the value as a local file and Windows renders
+        # `\\cdn.example\x.mp4` as a UNC path, which is how an advert iframe
+        # from sextb.net showed up as a USB/network file. A leading `//` is
+        # never a Windows path (those use backslashes), so this is unambiguous.
+        # Done after the http(s) extraction above so a string that already
+        # contains a full URL is not touched.
+        if cleaned.startswith('//') and len(cleaned) > 2 and cleaned[2] not in '/ \\':
+            cleaned = 'https:' + cleaned
         # Also trim any leftover one-sided wrapper characters. This covers URLs
         # copied from chat/code formatting where only one edge survives token
         # extraction, e.g. https://host/video.m3u8`

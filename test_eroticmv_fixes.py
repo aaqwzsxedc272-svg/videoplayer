@@ -2563,6 +2563,61 @@ _g33b = _t33_ns['_BottomLeftGrip'](_d33b)
 _g33b.mouseMoveEvent(_T32Event(_M32, 300, 300, 700, 700))
 report(_d33b._geo == [100, 80, 860, 460], 'a move with no press changes nothing')
 
+# ── 34. sextb: an ad iframe is not a stream, and //host/path is not a file ──
+# Pasting https://sextb.net/nima-081-sub put one row in the playlist that
+# looked like a USB/network file. Two separate defects made that happen:
+#   * the Playwright fallback captured //duq8bcrl.xyz/api/spots/346725?p=1&
+#     s1=%subid1%&kw= -- an ad creative on a throwaway .xyz, which the old
+#     AD_HOSTS list did not mention;
+#   * that value is protocol-relative, _is_remote_url returns False for it, so
+#     the playlist treated it as a local file and Windows rendered
+#     \\duq8bcrl.xyz\api\spots\... as a UNC path.
+import sextb_grab as sg34
+
+_AD34 = '//duq8bcrl.xyz/api/spots/346725?p=1&amp;s1=%subid1%&amp;kw='
+for _label34, _url34, _want34 in [
+    ('the captured ad',            _AD34, True),
+    ('ad spot on a plain host',    'https://cdn.example.net/api/spots/99?p=1', True),
+    ('unexpanded macro only',      'https://player.example.net/e/x?kw=%keyword%', True),
+    ('known ad host',              'https://trailerhg.xyz/e/abc', True),
+    ('googlesyndication',          'https://googlesyndication.com/x', True),
+    ('a real doodstream player',   'https://doodstream.com/e/qlb9nbe23jda', False),
+    ('a real protocol-relative cdn', '//cdn.example.net/hls/x/master.m3u8', False),
+    ('a real embed',               'https://emturbovid.com/t/abc123', False),
+    ('empty',                      '', True),
+]:
+    report(sg34._is_ad_iframe(_url34) is _want34, f'ad filter {_label34} -> {_want34}')
+
+_sg34_src = open('sextb_grab.py', encoding='utf-8').read()
+report('not _is_ad_iframe(candidate)' in _sg34_src,
+       'the iframe acceptance site goes through the ad filter')
+report('candidate = unescape(m.group(1).strip())' in _sg34_src,
+       'and the entity-escaped iframe src is unescaped before use')
+report('AD_HOSTS' not in _sg34_src, 'the old host-only list is gone')
+
+# The protocol-relative half, against the real _sanitize_url.
+_t34 = next(x for x in _t29_cls.body if isinstance(x, ast.FunctionDef) and x.name == '_sanitize_url')
+_t34_stub = ast.ClassDef(name='_T34Stub', bases=[], keywords=[], body=[_t34], decorator_list=[])
+_t34_mod = ast.Module(body=[_t34_stub], type_ignores=[])
+ast.fix_missing_locations(_t34_mod)
+_t34_ns = {'re': re}
+exec(compile(_t34_mod, '<main.py>', 'exec'), _t34_ns)
+_t34 = _t34_ns['_T34Stub']()
+
+for _label34, _in34, _want34 in [
+    ('protocol-relative', '//cdn.example.net/hls/x/master.m3u8', 'https://cdn.example.net/hls/x/master.m3u8'),
+    ('the captured ad',   _AD34, 'https:' + _AD34),
+    ('padded',            '  //turbo.cr/x.mp4  ', 'https://turbo.cr/x.mp4'),
+    ('already absolute',  'https://doodstream.com/e/abc', 'https://doodstream.com/e/abc'),
+    ('windows path',      'C:\\Videos\\movie.mp4', 'C:\\Videos\\movie.mp4'),
+    ('posix path',        '/home/user/movie.mp4', '/home/user/movie.mp4'),
+    ('UNC path',          '\\\\NAS\\share\\movie.mp4', '\\\\NAS\\share\\movie.mp4'),
+    ('triple slash is not a host', '///weird', '///weird'),
+    ('empty',             '', ''),
+]:
+    _got34 = _t34._sanitize_url(_in34)
+    report(_got34 == _want34, f'sanitize {_label34}: {_want34!r} (got {_got34!r})')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

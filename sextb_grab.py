@@ -24,6 +24,36 @@ WAIT_PAGE_SETTLE   = 3_000
 WAIT_AFTER_CLICK   = 3_500
 
 
+# Hosts whose iframes are advertising rather than a player.
+AD_HOST_TOKENS = ('z5g022gc', 'trailerhg', 'googlesyndication', 'doubleclick',
+                  'adsbygoogle', 'asg-interstitial', 'ads.', '/ads/')
+
+# Ad networks serve the creative from a "spot" endpoint, so the path gives it
+# away even when the hostname is a random throwaway .xyz.
+AD_PATH_TOKENS = ('/api/spots/', '/spots/', '/banner', '/popunder', '/pop.js')
+
+# An unexpanded tracking macro. A real player URL never carries one, but an ad
+# tag rendered outside its own loader does: the field report captured
+#     //duq8bcrl.xyz/api/spots/346725?p=1&s1=%subid1%&kw=
+# which sailed past the host list and was added to the playlist as a stream.
+_AD_MACRO_RE = re.compile(r'%[A-Za-z_][A-Za-z0-9_]*%')
+
+
+def _is_ad_iframe(candidate: str) -> bool:
+    """True when an iframe src is an advert rather than the episode player."""
+    text = (candidate or '').strip()
+    if not text:
+        return True
+    low = text.lower()
+    if any(t in low for t in AD_HOST_TOKENS):
+        return True
+    if any(t in low for t in AD_PATH_TOKENS):
+        return True
+    if _AD_MACRO_RE.search(text):
+        return True
+    return False
+
+
 def _extract_title(html: str) -> str:
     m = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
     if m:
@@ -308,15 +338,16 @@ def grab_all_playwright(url: str, visible: bool = False) -> dict:
                     src_found = None
                     # Scan entire HTML for any iframe that's not an ad
                     # After clicking, the player iframe is usually the only non-ad iframe present
-                    AD_HOSTS = ('z5g022gc', 'trailerhg', 'googlesyndication', 'doubleclick',
-                                'adsbygoogle', 'asg-interstitial', 'ads.', '/ads/')
                     # Try the early snapshot first (captures doodstream before redirect)
                     for html_check in ([early_html, html_now] if early_html else [html_now]):
                         if not html_check:
                             continue
                         for m in re.finditer(r'<iframe[^>]+src=["\']([^"\']+)["\']', html_check, re.IGNORECASE):
-                            candidate = m.group(1).strip()
-                            if candidate and not any(h in candidate for h in AD_HOSTS):
+                            # iframe src attributes arrive HTML-escaped, so a
+                            # query separator shows up as &amp; and would
+                            # corrupt the URL if passed on as-is.
+                            candidate = unescape(m.group(1).strip())
+                            if candidate and not _is_ad_iframe(candidate):
                                 src_found = candidate
                                 break
                         if src_found:
