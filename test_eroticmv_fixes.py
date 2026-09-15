@@ -2020,6 +2020,99 @@ for _src26, _want26 in [
     _got26 = _t26._canonicalize_remote_source_url_uncached(_src26)
     report(_got26 == _want26, f'{_src26} -> {_want26}   (got {_got26})')
 
+# ── 27. turbo.cr resolves from the page HTML, no browser ─────────────────────
+# A field capture opened a full browser window on this host purely to read one
+# URL: /v/<id> embeds /embed/<id>, and that player requests a single signed
+# turbocdn mp4. The resolver below tries two plain GETs and returns None when
+# neither page carries the URL, so the capture still runs as a fallback.
+_REAL27 = ("https://dl100.turbocdn.st/turbo/data/QsCF7fNEp6Lhp.mp4?exp=1789441508"
+           "&token=60420cf4d38a0e4694beae70adbfb41fe1663852c34304cd978bbaf78529d087"
+           "&fn=Ryder+Rey+%26+Vivienne+Vo")
+
+_T27_WANT = ['_turbo_cr_media_candidates', '_resolve_turbo_cr_source']
+_t27_tree = ast.parse(open('main.py', encoding='utf-8').read())
+_t27_cls = next(n for n in ast.walk(_t27_tree)
+                if isinstance(n, ast.ClassDef) and n.name == 'VideoPlayer')
+_t27_m = {x.name: x for x in _t27_cls.body
+          if isinstance(x, ast.FunctionDef) and x.name in _T27_WANT}
+report(sorted(_t27_m) == sorted(_T27_WANT),
+       f'both turbo.cr methods were lifted from main.py (missing: '
+       f'{sorted(set(_T27_WANT) - set(_t27_m))})')
+_t27_stub = ast.ClassDef(name='_T27Stub', bases=[], keywords=[],
+                         body=[_t27_m[w] for w in _T27_WANT], decorator_list=[])
+_t27_mod = ast.Module(body=[_t27_stub], type_ignores=[])
+ast.fix_missing_locations(_t27_mod)
+_t27_ns = {'re': re, 'urlparse': urlparse}
+exec(compile(_t27_mod, '<main.py>', 'exec'), _t27_ns)
+
+# The extractor against the shapes the URL actually arrives in.
+_t27 = _t27_ns['_T27Stub']()
+_ROT27 = _REAL27.replace('dl100', 'dl3')
+for _label27, _html27, _want27 in [
+    # third field is (expected url, html): the dl prefix rotates per request,
+    # so the rotated case must come back as the rotated host, untouched.
+    ('as captured',        f'<script src="{_REAL27}"></script>', (_REAL27, 1)),
+    ('entity-escaped',     _REAL27.replace('&', '&amp;'),        (_REAL27, 1)),
+    ('js-escaped slashes', _REAL27.replace('/', chr(92) + '/'),  (_REAL27, 1)),
+    ('rotated dl prefix',  _ROT27,                               (_ROT27,  1)),
+    ('ad noise only',      '<script src="//bucklechemistdensity.com/on.js">'
+                           '</script><script src="https://holahupa.com/tghr.js"></script>', ('', 0)),
+    ('the embed tag itself', '<script src="https://turbo.cr/embed/QsCF7fNEp6Lhp"></script>', ('', 0)),
+    ('empty page',         '',                                   ('', 0)),
+]:
+    _exp_url27, _want27 = _want27
+    _got27 = _t27._turbo_cr_media_candidates(_html27)
+    report(len(_got27) == _want27, f'extractor {_label27}: {_want27} url(s), got {len(_got27)}')
+    if _want27 == 1 and _got27:
+        report(_got27[0] == _exp_url27,
+               f'extractor {_label27}: url survives byte-for-byte')
+
+# The resolver's page walk, with the fetch and the probe stubbed.
+class _T27Pages(_t27_ns['_T27Stub']):
+    def __init__(self, pages, probe_ok=True, probe_url=None):
+        self._pages, self._probe_ok = pages, probe_ok
+        self.probed, self.fetched = [], []
+    def _turbo_cr_page_html(self, url, source_url):
+        self.fetched.append(url)
+        return self._pages.get(url, '')
+    def _probe_remote_media_candidate(self, target_url, referer=None, title=None):
+        self.probed.append(target_url)
+        if not self._probe_ok:
+            return None
+        return {'playback_url': target_url, 'headers': {}}
+
+_W27 = 'https://turbo.cr/v/QsCF7fNEp6Lhp'
+_E27 = 'https://turbo.cr/embed/QsCF7fNEp6Lhp'
+
+_o27 = _T27Pages({_E27: f'src="{_REAL27}"'})
+_r27 = _o27._resolve_turbo_cr_source(_W27)
+report(_o27.fetched == [_W27, _E27], f'walks the watch page then the embed page (got {_o27.fetched})')
+report(bool(_r27) and _r27['playback_url'] == _REAL27, 'returns the signed mp4 without a browser')
+report(_r27 and _r27.get('resolver_provider') == 'turbo_cr_static', 'and labels the provider so the log shows which path won')
+
+_o27b = _T27Pages({_W27: f'src="{_REAL27}"'})
+report(bool(_o27b._resolve_turbo_cr_source(_W27)) and _o27b.fetched == [_W27],
+       'stops at the watch page when it already carries the url')
+
+_o27c = _T27Pages({})
+report(_o27c._resolve_turbo_cr_source(_W27) is None,
+       'returns None when neither page has it, so the browser capture still runs')
+
+_o27d = _T27Pages({_E27: f'src="{_REAL27}"'}, probe_ok=False)
+report(_o27d._resolve_turbo_cr_source(_W27) is None,
+       'and returns None when the probe rejects the url')
+
+_o27e = _T27Pages({_E27: f'src="{_REAL27}"'})
+report(_o27e._resolve_turbo_cr_source('https://turbo.cr/') is None,
+       'a turbo.cr url with no video id resolves to nothing')
+
+# Two candidates: the one for this video must win over an unrelated one.
+_OTHER27 = _REAL27.replace('QsCF7fNEp6Lhp', 'Zr2uqa61FxPgp')
+_o27f = _T27Pages({_E27: f'src="{_OTHER27}" src="{_REAL27}"'})
+_r27f = _o27f._resolve_turbo_cr_source(_W27)
+report(_r27f and _r27f['playback_url'] == _REAL27,
+       'the candidate matching the video id beats an unrelated one')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

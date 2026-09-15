@@ -29334,6 +29334,110 @@ try {
             merged_metadata['original_source_url'] = source_url
         return entry['source_url'], merged_metadata
 
+    def _turbo_cr_media_candidates(self, html):
+        """Signed turbocdn mp4 URLs out of a turbo.cr page, in document order.
+
+        The player loads
+            https://dl<NN>.turbocdn.st/turbo/data/<id>.mp4?exp=<unix>&token=<64 hex>&fn=<name>
+        The dl<NN> prefix rotates per request, so the CDN host is never matched
+        literally -- only the /turbo/data/ shape. exp/token is a signature that
+        cannot be re-minted, but it does not need to be: it is handed over in
+        the page and is passed through exactly as served.
+        """
+        if not html:
+            return []
+        # The URL is emitted from JS and from HTML attributes, so it can arrive
+        # as `\/` escapes or with `&amp;` entity-escaped query separators.
+        text = str(html).replace('\\/', '/').replace('&amp;', '&')
+        out = []
+        for match in re.finditer(
+            r'https?://[A-Za-z0-9][A-Za-z0-9.\-]*/turbo/data/[A-Za-z0-9_\-]+\.mp4[^\s"\'<>\\]*',
+            text,
+            re.IGNORECASE,
+        ):
+            url = match.group(0)
+            if url not in out:
+                out.append(url)
+        return out
+
+    def _turbo_cr_page_html(self, url, source_url):
+        """Fetch a turbo.cr page as plain HTML. curl_cffi first: turbo.cr sits
+        behind Cloudflare, and a bare `requests` GET tends to draw a challenge
+        page instead of the document."""
+        headers = self._stream_request_headers(source_url)
+        headers['Referer'] = source_url or 'https://turbo.cr/'
+        try:
+            import curl_cffi.requests as cfreq
+        except Exception:
+            cfreq = None
+        if cfreq is not None:
+            try:
+                response = cfreq.Session(impersonate='chrome131').get(
+                    url, headers=headers, timeout=20, allow_redirects=True)
+                if response is not None and response.ok and response.text:
+                    return response.text
+            except Exception:
+                pass
+        try:
+            import requests
+        except Exception:
+            return ''
+        try:
+            response = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
+            if response is not None and response.ok:
+                return response.text or ''
+        except Exception:
+            pass
+        return ''
+
+    def _resolve_turbo_cr_source(self, source_url):
+        """turbo.cr: read the signed mp4 off the page, without opening a browser.
+
+        A field capture showed the flow spending its entire browser window on
+        this host to read one URL -- /v/<id> embeds /embed/<id>, and that
+        player requests a single turbocdn mp4. This tries two plain GETs
+        (watch page, then embed page) and returns None when neither carries
+        the URL, in which case the existing browser capture still runs. The
+        static path is an optimisation, never the only path.
+        """
+        parsed = urlparse(source_url)
+        host = (parsed.netloc or '').lower()
+        if host != 'turbo.cr' and not host.endswith('.turbo.cr'):
+            return None
+        match = re.match(r'^/(?:v|d|watch|embed)/([^/?#]+)', parsed.path or '', re.IGNORECASE)
+        if not match:
+            return None
+        video_id = match.group(1)
+        base = f"{parsed.scheme or 'https'}://{parsed.netloc}"
+
+        # The watch page is tried first, then the embed page it points at. The
+        # embed page is what actually hosts the player, so if the signed URL
+        # is server-rendered anywhere it is most likely there.
+        pages = [source_url]
+        embed_url = f"{base}/embed/{video_id}"
+        if embed_url not in pages:
+            pages.append(embed_url)
+
+        for page_url in pages:
+            html = self._turbo_cr_page_html(page_url, source_url)
+            if not html:
+                continue
+            candidates = self._turbo_cr_media_candidates(html)
+            if not candidates:
+                continue
+            # Prefer the candidate for this video id; fall back to the first.
+            candidates.sort(key=lambda u: 0 if f"/turbo/data/{video_id}.mp4" in u else 1)
+            print(f"[TURBO_CR] signed stream found in {page_url}: {candidates[0][:150]}")
+            resolved = self._probe_remote_media_candidate(
+                candidates[0], referer=page_url, title=None)
+            if resolved:
+                resolved['resolver_provider'] = 'turbo_cr_static'
+                resolved['source_url'] = source_url
+                return resolved
+            print(f"[TURBO_CR] probe rejected {candidates[0][:120]}, falling back to the capture")
+        print(f"[TURBO_CR] no signed stream in the page HTML for {source_url}, using the browser")
+        return None
+
     def _resolve_pixeldrain_source(self, source_url):
         parsed = urlparse(source_url)
         if 'pixeldrain.com' not in (parsed.netloc or '').lower():
@@ -40307,7 +40411,14 @@ try {
         # normal direct-download host, not a share page needing resolution.
         _gofile_share_hosts = {'gofile.io', 'gofile.to', 'www.gofile.io', 'www.gofile.to'}
         if resolved is None:
-            if 'pixeldrain.com' in host:
+            # R64: turbo.cr is static-first (same reasoning as R49
+            # turtleviplay) — a field capture spent its whole browser window
+            # reading one turbocdn URL out of the embed page. Returns None
+            # when the page does not carry it, and the capture below still
+            # runs, so this cannot make the host worse than it was.
+            if host == 'turbo.cr' or host.endswith('.turbo.cr'):
+                resolved = self._resolve_turbo_cr_source(source_url)
+            elif 'pixeldrain.com' in host:
                 resolved = self._resolve_pixeldrain_source(source_url)
             elif host in _gofile_share_hosts:
                 resolved = self._resolve_gofile_source(source_url)
