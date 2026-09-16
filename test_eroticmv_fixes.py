@@ -475,6 +475,10 @@ def unwrap(fn):
 class HtmlResolveStub:
     _PREVIEW_MEDIA_URL_TOKENS = lift_attr(
         'VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
+    _SITE_PROMO_STEM_TOKENS = lift_attr(
+        'VideoPlayer', '_SITE_PROMO_STEM_TOKENS')
+    _media_url_is_site_promo = lift(
+        'VideoPlayer', '_media_url_is_site_promo')
     _media_url_looks_like_preview = lift(
         'VideoPlayer', '_media_url_looks_like_preview')
     _hls_playlist_total_seconds = staticmethod(unwrap(
@@ -635,7 +639,9 @@ report(nd._noodle_sources_from_playlist(None) == [],
 # ── 9. VOE/pvvstream must not resolve to the tr_ teaser ──────────────────────
 class VoeStub:
     _PREVIEW_MEDIA_URL_TOKENS = lift_attr('VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
+    _SITE_PROMO_STEM_TOKENS = lift_attr('VideoPlayer', '_SITE_PROMO_STEM_TOKENS')
     _media_url_looks_like_preview = lift('VideoPlayer', '_media_url_looks_like_preview')
+    _media_url_is_site_promo = lift('VideoPlayer', '_media_url_is_site_promo')
     _media_url_is_trailer = staticmethod(
         unwrap(lift('VideoPlayer', '_media_url_is_trailer')))
     _media_url_height_hint = staticmethod(
@@ -1089,6 +1095,10 @@ class FamilyStub:
         lift('VideoPlayer', '_media_url_height_hint'))
     _PREVIEW_MEDIA_URL_TOKENS = lift_attr(
         'VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
+    _SITE_PROMO_STEM_TOKENS = lift_attr(
+        'VideoPlayer', '_SITE_PROMO_STEM_TOKENS')
+    _media_url_is_site_promo = lift(
+        'VideoPlayer', '_media_url_is_site_promo')
 
 
 fam = FamilyStub()
@@ -1142,6 +1152,10 @@ class CaptureStub:
         lift('VideoPlayer', '_media_url_height_hint'))
     _PREVIEW_MEDIA_URL_TOKENS = lift_attr(
         'VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
+    _SITE_PROMO_STEM_TOKENS = lift_attr(
+        'VideoPlayer', '_SITE_PROMO_STEM_TOKENS')
+    _media_url_is_site_promo = lift(
+        'VideoPlayer', '_media_url_is_site_promo')
     _familypornhd_player_page = lift(
         'VideoPlayer', '_familypornhd_player_page')
     _capture_candidate_is_obfuscated_master = lift(
@@ -3469,6 +3483,281 @@ report(_src46.count('score += 6') >= 4 and 'self._is_disguised_hls_manifest(url)
        'both rankers score the disguised master')
 report("if '/cdn/hls/' in path:" in _src46,
        "watchstreamhd's encrypted master is carved out")
+
+# ── 47. sextb.net/fns-257: PNG-wrapped HLS, the site promo, the ad fallback ──
+# A field log on https://sextb.net/fns-257 showed three separate failures:
+#   * hglink resolved cleanly to
+#     https://audinifer.com/stream/…/74605270/master.m3u8 and mpv opened it,
+#     but reported "codec=PNG (Portable Network Graphics)" at 0x0 and then
+#     sat on that single frame for the playlist's whole claim until
+#     "[PLAYBACK] end-of-stream stall watchdog fired (7208240/7208240 ms,
+#     no EOF) - advancing playlist". The same log shows the turbo CDN
+#     serving exactly this disguise (…origin.image segments unwrapped by the
+#     proxy) - the stream was applied DIRECT, so nothing stripped it.
+#     Reported by the user as "hglink stuck at the end".
+#   * player.upn.one's headless capture never started the player, so every
+#     candidate was a script or an ad endpoint; the promote-unverified
+#     fallback picked https://vd.ambotalaing.com/r19XC1eW9QAwPN/147054,
+#     costing two "unrecognized file format" loads and an anti-bot decoy
+#     round trip. Reported as "takes too long but doesnt work".
+#   * the ladder then decoded the sextb page's OWN preview,
+#     https://cdn.faleno.net/top/wp-content/uploads/2026/08/FNS-257_PR.mp4,
+#     and played it as the film. Reported as "played a 2 minute trailer".
+report(sorted(v._SITE_PROMO_STEM_TOKENS)[0] == 'pr',
+       f'the promo token table lifted from main.py: {sorted(v._SITE_PROMO_STEM_TOKENS)}')
+
+# 47a. the exact promo URL from the log, plus the false positives it must not hit
+for _u47, _w47 in [
+    ('https://cdn.faleno.net/top/wp-content/uploads/2026/08/FNS-257_PR.mp4', True),
+    ('https://cdn.faleno.net/top/wp-content/uploads/2026/08/FNS-257_PR_720p.mp4', True),
+    ('https://cdn.faleno.net/x/FNS-257-pr.mp4', True),
+    ('https://cdn.faleno.net/x/FNS-257_trailer.mp4', True),
+    ('https://cdn.faleno.net/x/ure-078_preview.mp4', True),
+    ('https://cdn.faleno.net/x/ure-078_TEASER_1080p.mp4', True),
+    # real product codes: a promo token must END the stem, not sit inside it
+    ('https://cdn.example.net/v/SOD-PR123.mp4', False),
+    ('https://cdn.example.net/v/APR-001.mp4', False),
+    ('https://cdn.example.net/v/MIDV-789_1080p.mp4', False),
+    ('https://cdn.example.net/v/movie.mp4', False),
+    ('https://cdn.example.net/v/480p_v2.mp4', False),
+    ('https://cdn.example.net/v/index-v1-a1.m3u8', False),
+    ('https://audinifer.com/stream/a/b/1789619971/74605270/master.m3u8', False),
+    ('', False),
+]:
+    report(v._media_url_is_site_promo(_u47) is _w47,
+           f'site promo? {os.path.basename(urlparse(_u47).path) or _u47!r} -> {_w47}')
+
+# 47b. a promo is dropped for good; a teaser RENDITION keeps its fallback
+_FALENO47 = 'https://cdn.faleno.net/top/wp-content/uploads/2026/08/FNS-257_PR.mp4'
+report(v._rank_real_media_candidates([_FALENO47], 'VOE-mirror') == [],
+       'a page whose only candidate is the site promo yields nothing to play')
+_mixed47 = v._rank_real_media_candidates(
+    [_FALENO47, 'https://cdn.example.net/v/720p.mp4', 'https://cdn.example.net/v/1080p.mp4'],
+    'VOE-mirror')
+report(_FALENO47 not in _mixed47 and _mixed47[0].endswith('1080p.mp4'),
+       f'promo dropped, best real rendition first: {[os.path.basename(u) for u in _mixed47]}')
+_teaser47 = v._rank_real_media_candidates(
+    ['https://cdn2.pvvstream.pro/x/tr_240p.mp4', 'https://cdn2.pvvstream.pro/x/tr_720p.mp4'],
+    'VOE-mirror')
+report([os.path.basename(u) for u in _teaser47] == ['tr_720p.mp4', 'tr_240p.mp4'],
+       f'a teaser-only page still plays one (fallback preserved): '
+       f'{[os.path.basename(u) for u in _teaser47]}')
+
+# 47c. the promote-unverified fallback needs a media SHAPE, not a blocklist
+_lift47, _fn47 = {}, {}
+for _node47 in _ast44.walk(_main44):
+    if isinstance(_node47, _ast44.Assign):
+        for _t47 in _node47.targets:
+            if isinstance(_t47, _ast44.Name) and _t47.id in (
+                    'VIDEO_EXTENSIONS', 'AUDIO_EXTENSIONS'):
+                _lift47[_t47.id] = _ast44.literal_eval(_node47.value)
+    if isinstance(_node47, _ast44.FunctionDef) and _node47.name in (
+            '_capture_candidate_has_media_shape', '_is_disguised_hls_manifest',
+            '_is_hls_stream_url'):
+        _fn47[_node47.name] = _node47
+report(sorted(_fn47) == ['_capture_candidate_has_media_shape',
+                         '_is_disguised_hls_manifest', '_is_hls_stream_url'],
+       f'found the three lifted methods (got {sorted(_fn47)})')
+_g47 = {'urlparse': urlparse, 'unquote': unquote, 're': re, 'os': os,
+        'urljoin': urljoin,
+        'VIDEO_EXTENSIONS': _lift47['VIDEO_EXTENSIONS'],
+        'AUDIO_EXTENSIONS': _lift47['AUDIO_EXTENSIONS']}
+exec(compile(_ast44.Module(body=[_fn47['_is_disguised_hls_manifest'],
+                                 _fn47['_is_hls_stream_url'],
+                                 _fn47['_capture_candidate_has_media_shape']],
+                           type_ignores=[]), '<lifted47>', 'exec'), _g47)
+
+
+class _T47Stub:
+    _PLAYABLE_MEDIA_SUFFIXES = lift_attr('VideoPlayer', '_PLAYABLE_MEDIA_SUFFIXES')
+    VIDEO_EXTENSIONS = _lift47['VIDEO_EXTENSIONS']
+    AUDIO_EXTENSIONS = _lift47['AUDIO_EXTENSIONS']
+
+
+for _n47 in ('_is_disguised_hls_manifest', '_is_hls_stream_url',
+             '_capture_candidate_has_media_shape'):
+    setattr(_T47Stub, _n47, staticmethod(_g47[_n47])
+            if _n47 == '_is_disguised_hls_manifest' else _g47[_n47])
+_s47 = _T47Stub()
+
+for _u47, _w47 in [
+    # the ad endpoint the field log actually promoted: no extension, no query
+    ('https://vd.ambotalaing.com/r19XC1eW9QAwPN/147054', False),
+    ('//excavatenearbywand.com/on.js', False),
+    ('javascript:false', False),
+    ('blob:https://playmate.to/9f1c-4d0e', False),
+    # a protocol-relative capture is judged on its path, not thrown away
+    ('//cdn.example.net/v/movie_720p.mp4', True),
+    ('https://c.adsco.re/', False),
+    ('https://displayvertising.com/O/z/rjquery.fn.gantt.min.js', False),
+    # real shapes that MUST survive the same filter
+    ('https://audinifer.com/stream/a/b/1789619971/74605270/master.m3u8', True),
+    ('https://cdn1.turboviplay.com/data1/6aa5b7d3efb53/6aa5b7d3efb53.m3u8', True),
+    ('https://uio1105mk.cloudatacdn.com/abc/k2xybd3hxr~B0OPg12FPJ'
+     '?token=vst1053l3qx7pdi1ee8q9n79&expiry=1789534923', True),
+    ('https://x.auronetworkdesign.space/a/hls3/01/14959/x/master.txt', True),
+    ('https://cdn.faleno.net/top/wp-content/uploads/2026/08/FNS-257_PR.mp4', True),
+    ('https://www.porn00.org/get_file/3/4c682e0f/5000/5665/5665_720p.mp4/', True),
+    ('', False),
+]:
+    report(_s47._capture_candidate_has_media_shape(_u47) is _w47,
+           f'media shape? {_u47[:58]!r} -> {_w47}')
+
+# 47d. PNG-wrapped HLS is detected through a master playlist, one hop down.
+#      The chain mirrors the log: the turbo CDN served exactly these
+#      …origin.image segments and the proxy unwrapped them; audinifer's
+#      master was applied direct and mpv decoded the wrapper as codec=PNG.
+_MASTER47 = ('#EXTM3U\n#EXT-X-VERSION:6\n'
+             '#EXT-X-STREAM-INF:BANDWIDTH=1200000,RESOLUTION=854x480\n'
+             'index-v1-a1.m3u8\n')
+_PNG_VARIANT47 = ('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n'
+                  '#EXTINF:10.0,\n'
+                  '202609125d0d05dbf1a8b8014630839b_tplv-d5opwmad15-ttam-origin.image\n'
+                  '#EXTINF:10.0,\n'
+                  '202609125d0db3ed33baf0634ea3a034_tplv-d5opwmad15-ttam-origin.image\n'
+                  '#EXT-X-ENDLIST\n')
+_TS_VARIANT47 = ('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n'
+                 '#EXTINF:10.0,\nseg-1-v1-a1.ts\n'
+                 '#EXTINF:10.0,\nseg-2-v1-a1.ts\n#EXT-X-ENDLIST\n')
+_TS_MASTER47 = ('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=900000\nindex-v1-a1.m3u8\n')
+_MEDIA47 = {'/png/master.m3u8': _MASTER47,
+            '/png/index-v1-a1.m3u8': _PNG_VARIANT47,
+            '/ts/master.m3u8': _TS_MASTER47,
+            '/ts/index-v1-a1.m3u8': _TS_VARIANT47,
+            '/flat/index-v1-a1.m3u8': _TS_VARIANT47,
+            '/png/master.txt': _MASTER47.replace('index-v1-a1.m3u8', 'index.txt'),
+            '/png/index.txt': _PNG_VARIANT47}
+
+
+class _Resp47:
+    def __init__(self, url, body, status=200):
+        self.url, self.status_code = url, status
+        self._body = body
+
+    def iter_content(self, n):
+        yield self._body
+
+    def close(self):
+        pass
+
+
+class _FakeRequests47:
+    calls = []
+
+    def get(self, url, headers=None, stream=False, timeout=None,
+            allow_redirects=True, **kw):
+        _FakeRequests47.calls.append(url)
+        body = _MEDIA47.get(urlparse(str(url)).path)
+        if body is None:
+            return _Resp47(url, b'', status=404)
+        return _Resp47(url, body.encode('utf-8'))
+
+
+class _T47FetchStub:
+    _is_disguised_hls_manifest = staticmethod(_g47['_is_disguised_hls_manifest'])
+    _is_hls_stream_url = _g47['_is_hls_stream_url']
+
+    @staticmethod
+    def _stream_request_headers(referer=None, extra=None):
+        h = {'User-Agent': 'test'}
+        if referer:
+            h['Referer'] = referer
+        return h
+
+
+_g47f = {'urlparse': urlparse, 'unquote': unquote, 're': re, 'os': os,
+         'urljoin': urljoin}
+for _n47 in ('_hls_playlist_looks_like_decoy', '_hls_best_variant_url'):
+    _node47b = next(n for n in _ast44.walk(_main44)
+                    if isinstance(n, _ast44.FunctionDef) and n.name == _n47)
+    exec(compile(_ast44.Module(body=[_node47b], type_ignores=[]),
+                 f'<lifted-{_n47}>', 'exec'), _g47f)
+    setattr(_T47FetchStub, _n47,
+            staticmethod(_g47f[_n47]) if _n47 == '_hls_best_variant_url'
+            else _g47f[_n47])
+for _n47 in ('_fetch_hls_playlist_text',
+             '_hls_manifest_ships_png_wrapped_segments',
+             '_flag_png_wrapped_hls_for_proxy'):
+    _node47c = next(n for n in _ast44.walk(_main44)
+                    if isinstance(n, _ast44.FunctionDef) and n.name == _n47)
+    exec(compile(_ast44.Module(body=[_node47c], type_ignores=[]),
+                 f'<lifted-{_n47}>', 'exec'), _g47f)
+    setattr(_T47FetchStub, _n47, _g47f[_n47])
+
+import sys as _sys47
+_saved_requests47 = _sys47.modules.get('requests')
+_sys47.modules['requests'] = _FakeRequests47()
+try:
+    _f47 = _T47FetchStub()
+    report(_f47._hls_playlist_looks_like_decoy(_PNG_VARIANT47) is True,
+           'the real decoy test does flag the .image segment playlist')
+    report(_f47._hls_playlist_looks_like_decoy(_TS_VARIANT47) is False,
+           'the real decoy test does not flag a plain .ts playlist')
+    _AUDINIFER47 = 'https://audinifer.com/png/master.m3u8'
+    report(_f47._hls_manifest_ships_png_wrapped_segments(_AUDINIFER47) is True,
+           'a MASTER whose variant ships PNG-wrapped segments is detected one hop down')
+    _FakeRequests47.calls = []
+    report(_f47._hls_manifest_ships_png_wrapped_segments(
+        'https://x/ts/master.m3u8') is False,
+        'a MASTER with ordinary .ts segments is left alone')
+    report(_f47._hls_manifest_ships_png_wrapped_segments(
+        'https://x/flat/index-v1-a1.m3u8') is False,
+        'a flat .ts media playlist is left alone')
+    report(_f47._hls_manifest_ships_png_wrapped_segments(
+        'https://x/png/master.txt') is True,
+        'the .txt-disguised master is followed too')
+    report(_f47._hls_manifest_ships_png_wrapped_segments(
+        'https://x/missing/master.m3u8') is False,
+        'an unreachable manifest is reported as "not PNG-wrapped", not as an error')
+    report(_f47._hls_manifest_ships_png_wrapped_segments('') is False,
+        'an empty URL is safe')
+
+    # 47e. the resolved-stream flag the apply path reads
+    _info47 = {'playback_url': _AUDINIFER47,
+               'content_type': 'application/vnd.apple.mpegurl',
+               'source_url': 'https://sextb.net/fns-257'}
+    _f47._flag_png_wrapped_hls_for_proxy(_info47)
+    report(_info47.get('route_local_proxy') is True,
+           'route_local_proxy set on a PNG-wrapped HLS result')
+    _mp4_47 = {'playback_url': 'https://cdn.faleno.net/x/FNS-257_PR.mp4'}
+    _f47._flag_png_wrapped_hls_for_proxy(_mp4_47)
+    report('route_local_proxy' not in _mp4_47,
+           'a plain MP4 result is never routed through the HLS proxy')
+    _tsinfo47 = {'playback_url': 'https://x/ts/master.m3u8'}
+    _f47._flag_png_wrapped_hls_for_proxy(_tsinfo47)
+    report('route_local_proxy' not in _tsinfo47,
+           'ordinary HLS is still played direct (no behaviour change)')
+    report(_f47._flag_png_wrapped_hls_for_proxy(None) is None,
+           'a non-dict result passes through untouched')
+finally:
+    if _saved_requests47 is None:
+        _sys47.modules.pop('requests', None)
+    else:
+        _sys47.modules['requests'] = _saved_requests47
+
+# 47f. the wiring: every one of these is a string only the fix produces
+report("""                or (provider == 'browser_click'
+                    and stream_info.get('route_local_proxy'))""" in _src46,
+       'the apply path routes a flagged browser_click HLS through the proxy')
+report("""                    else 'PNGHLS_PROXY'
+                    if (provider == 'browser_click'
+                        and stream_info.get('route_local_proxy'))""" in _src46,
+       "and labels it PNGHLS_PROXY so the field log shows why")
+report("""                try:
+                    self._flag_png_wrapped_hls_for_proxy(value)
+                except Exception:
+                    pass
+            return value""" in _src46,
+       'every browser_click result passes the PNG-wrap check on its way out')
+report(_src46.count('if self._capture_candidate_has_media_shape(c)') == 2,
+       'both promote-unverified fallbacks (browser_click and mixdrop) apply it')
+report('with no media shape (unverified fallback)' in _src46,
+       'the fallback logs what it dropped')
+report("""                if self._media_url_is_site_promo(candidate):
+                    continue""" in _src46,
+       "the VOE raw scan skips the site's own promo too")
+report('return sorted(real or usable, key=self._media_url_height_hint' in _src46,
+       'the ranking fallback restores teaser renditions, never promos')
 
 print()
 print('FAILURES:', FAILS)

@@ -25953,6 +25953,100 @@ try {
         except Exception:
             return False
 
+    def _fetch_hls_playlist_text(self, url, headers=None, referer=None, timeout=10):
+        """(manifest_text, final_url) for a bounded manifest read.
+
+        Returns ('', '') when it cannot be read or the body is not a
+        playlist. The final URL matters: relative variant/segment URIs must
+        be resolved against wherever the request was redirected to.
+        """
+        try:
+            import requests
+        except Exception:
+            return '', ''
+        try:
+            request_headers = self._stream_request_headers(referer, headers)
+            response = requests.get(
+                str(url or ''),
+                headers=request_headers,
+                stream=True,
+                timeout=timeout or 10,
+                allow_redirects=True,
+            )
+            try:
+                if int(getattr(response, 'status_code', 0) or 0) >= 400:
+                    return '', ''
+                chunk = next(response.iter_content(256 * 1024), b'') or b''
+                final_url = str(getattr(response, 'url', '') or url or '')
+            finally:
+                response.close()
+        except Exception:
+            return '', ''
+        text = bytes(chunk).decode('utf-8', errors='replace')
+        if '#extm3u' not in text[:128].lower():
+            return '', ''
+        return text, final_url
+
+    def _hls_manifest_ships_png_wrapped_segments(self, playback_url, headers=None,
+                                                 referer=None):
+        """True when an HLS stream's segments are media hidden behind PNG.
+
+        Only the local proxy strips those wrappers (see
+        _unwrap_png_wrapped_media). Playback handed straight to mpv instead
+        opens the wrapper: the field log for sextb's hglink hoster shows the
+        audinifer master.m3u8 loading, mpv reporting
+        'codec=PNG (Portable Network Graphics)' at 0x0, then holding that
+        single frame for the playlist's whole two-hour claim until the
+        end-of-stream watchdog advanced the row -- reported as "stuck at the
+        end". These CDNs put the wrappers one level down, so a master
+        playlist is followed to its best variant before the test.
+        """
+        if not playback_url:
+            return False
+        try:
+            text, base = self._fetch_hls_playlist_text(
+                playback_url, headers=headers, referer=referer)
+            if not text:
+                return False
+            if self._hls_playlist_looks_like_decoy(text):
+                return True
+            if '#ext-x-stream-inf' not in text.lower():
+                return False
+            variant = self._hls_best_variant_url(text, base or str(playback_url))
+            if not variant or variant == str(playback_url):
+                return False
+            variant_text, _ = self._fetch_hls_playlist_text(
+                variant, headers=headers, referer=referer)
+            return bool(variant_text) and self._hls_playlist_looks_like_decoy(variant_text)
+        except Exception:
+            return False
+
+    def _flag_png_wrapped_hls_for_proxy(self, info):
+        """Set route_local_proxy on a resolved HLS stream whose segments are
+        PNG-wrapped, so _apply_resolved_remote_stream routes it through the
+        proxy that can unwrap them. Mutates and returns info."""
+        try:
+            if not isinstance(info, dict) or info.get('route_local_proxy'):
+                return info
+            playback_url = str(info.get('playback_url') or '').strip()
+            if not playback_url:
+                return info
+            if not self._is_hls_stream_url(playback_url, info.get('content_type')):
+                return info
+            referer = str(info.get('source_url') or info.get('embed_url') or '')
+            if self._hls_manifest_ships_png_wrapped_segments(
+                    playback_url, headers=info.get('headers'), referer=referer):
+                info['route_local_proxy'] = True
+                print(f"[HLS_PNGWRAP] manifest ships PNG-wrapped segments, "
+                      f"routing through local proxy: {playback_url[:160]}", flush=True)
+        except Exception as exc:
+            # Never break playback over a probe, but never hide the failure
+            # either: a silent pass here once masked a missing dependency and
+            # the stream went back to being played direct.
+            print(f"[HLS_PNGWRAP] probe failed ({type(exc).__name__}: {exc}) "
+                  f"for {str(info.get('playback_url'))[:140]}", flush=True)
+        return info
+
     def _looks_like_png_wrapped_segment(self, target_url, content_type=''):
         """True for segment URLs that ship media hidden behind a PNG image
         wrapper (tiktokcdn ad-site '.image' URLs used by streamhls.click)."""
@@ -28080,6 +28174,47 @@ try {
                     for suffix in self._NON_MEDIA_URL_SUFFIXES)
                 or path.endswith('/js')
                 or path.endswith('/css'))
+
+    def _capture_candidate_has_media_shape(self, url):
+        """Positive shape test for the promote-an-UNVERIFIED-capture fallback.
+
+        That fallback hands mpv something the probe has already refused, so
+        it only earns the attempt when the URL at least looks like a file: a
+        media/playlist extension, or an extension-less but signed CDN path.
+        An ad redirect endpoint is neither. playmate.to's capture promoted
+        https://vd.ambotalaing.com/r19XC1eW9QAwPN/147054 -- a bare
+        two-segment path with no query at all -- which bought two
+        "unrecognized file format" loads and an anti-bot decoy round trip
+        through the local proxy before the row gave up.
+
+        Nothing here names a host: every ad network this has been seen on
+        serves its creative from the same bare-path shape, while the real
+        extension-less CDNs (cloudatacdn's .../k2xybd3hxr~B0OPg12FPJ) always
+        arrive signed.
+        """
+        url = str(url or '').strip()
+        if not url:
+            return False
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return False
+        # A placeholder scheme (javascript:, blob:, data:) is not a URL we
+        # can play. An EMPTY one is a protocol-relative //host/path, which
+        # the capture script does report, so it is judged on its path.
+        _scheme = (parsed.scheme or '').lower()
+        if _scheme and _scheme not in ('http', 'https'):
+            return False
+        path = (parsed.path or '').rstrip('/').lower()
+        if path.endswith(self._PLAYABLE_MEDIA_SUFFIXES + VIDEO_EXTENSIONS
+                         + AUDIO_EXTENSIONS):
+            return True
+        try:
+            if self._is_hls_stream_url(url):
+                return True
+        except Exception:
+            pass
+        return len(parsed.query or '') >= 16
 
     def _familypornhd_player_page(self, candidates, source_url=''):
         """The embedded player's page, to use as Referer for its CDN files.
@@ -35628,6 +35763,8 @@ try {
                     continue
                 if any(d in candidate for d in _BBB_DECOY_HOSTS):
                     continue
+                if self._media_url_is_site_promo(candidate):
+                    continue
                 is_hls = self._is_hls_stream_url(candidate)
                 hdrs   = (self._hls_request_headers(page_url)
                           if is_hls else self._stream_request_headers(page_url))
@@ -37970,6 +38107,13 @@ try {
                 c for c in _non_ad
                 if not self._capture_candidate_is_clearly_not_media(c)
             ]
+            # ...and it has to look like a file. This is the one place an
+            # unverified capture reaches mpv, and an ad endpoint with no
+            # extension and no signed query never is one.
+            _non_ad = [
+                c for c in _non_ad
+                if self._capture_candidate_has_media_shape(c)
+            ]
             if _non_ad:
                 print(f"[MIXDROP_CLICK] probe rejected all {len(_non_ad)} candidate(s) for {page_url}; using best-scoring non-ad capture anyway")
                 result_dict = _mixdrop_browser_result(_non_ad[0])
@@ -39102,6 +39246,10 @@ try {
                                 print(f"[FAMILYPORNHD] legacy playlist handoff: {_family_url[:180]}")
                     except Exception as legacy_exc:
                         print(f"[FAMILYPORNHD] legacy playlist handoff failed: {legacy_exc}")
+                try:
+                    self._flag_png_wrapped_hls_for_proxy(value)
+                except Exception:
+                    pass
             return value
 
         def _with_browser_ua(headers):
@@ -39556,6 +39704,23 @@ try {
                 c for c in _non_ad
                 if not self._capture_candidate_is_clearly_not_media(c)
             ]
+            # ...and it has to look like a file. This is the one place an
+            # unverified capture reaches mpv: playmate.to's headless capture
+            # never started the player, so every candidate here was a script
+            # or an ad endpoint, and the best-ranked one
+            # (vd.ambotalaing.com/r19XC1eW9QAwPN/147054) was promoted as the
+            # video. Reporting no stream is faster and honest; the ladder
+            # still gets its other rungs.
+            _shapeless = [
+                c for c in _non_ad
+                if not self._capture_candidate_has_media_shape(c)
+            ]
+            if _shapeless:
+                _non_ad = [c for c in _non_ad
+                           if self._capture_candidate_has_media_shape(c)]
+                print(f"[BROWSER_CLICK] dropped {len(_shapeless)} candidate(s) "
+                      f"with no media shape (unverified fallback): "
+                      f"{str(_shapeless[0])[:140]}")
             if _non_ad:
                 best = _non_ad[0]
                 print(f"[BROWSER_CLICK] probe rejected all {len(normalized_candidates)} candidate(s) for {source_url}; using best-ranked capture anyway")
@@ -40263,6 +40428,37 @@ try {
             return False
         return bool(re.match(r'^tr[_-]?\d{2,4}p?\.', name, re.IGNORECASE))
 
+    # A JAV site publishes a short promo of the film alongside it and names
+    # it the same way everywhere: <CODE>_PR.mp4. sextb's watch page embeds
+    # that preview, so a page scan decodes it as a media candidate -- the
+    # field log for the player.upn.one hoster row shows
+    # cdn.faleno.net/top/wp-content/uploads/2026/08/FNS-257_PR.mp4 played as
+    # "the video", a two-minute 4K preview instead of the film. Unlike a
+    # low-resolution teaser rendition this is the site's own advert, so it is
+    # dropped even when it is the only candidate on the page.
+    _SITE_PROMO_STEM_TOKENS = (
+        'pr', 'trailer', 'preview', 'prev', 'teaser', 'promo', 'sample',
+    )
+
+    def _media_url_is_site_promo(self, url):
+        """True for a site's own promo/preview file rather than the film.
+
+        Only a promo token that ENDS the filename stem matches (optionally
+        ahead of a resolution tag), so a real product code such as
+        SOD-PR123.mp4 or APR-001.mp4 is never mistaken for one.
+        """
+        try:
+            path = urlparse(str(url or '')).path or ''
+        except Exception:
+            return False
+        name = os.path.basename(path)
+        if not name:
+            return False
+        stem = os.path.splitext(name)[0]
+        stem = re.sub(r'[_-]\d{3,4}p$', '', stem, flags=re.IGNORECASE)
+        tail = re.split(r'[_\-.]', stem)[-1].lower()
+        return tail in self._SITE_PROMO_STEM_TOKENS
+
     @staticmethod
     def _media_url_height_hint(url):
         """Resolution parsed out of a media filename, 0 when absent."""
@@ -40278,18 +40474,27 @@ try {
             return 0
 
     def _rank_real_media_candidates(self, urls, label=''):
-        """Drop trailer/preview renditions and sort the rest best-quality
-        first. Falls back to the untouched list when every candidate looks
-        like a trailer, so a page offering only a teaser still plays."""
+        """Drop the site's own promos and trailer/preview renditions, then
+        sort the rest best-quality first. Falls back to the promo-free list
+        when every remaining candidate looks like a teaser rendition, so a
+        page offering only a teaser still plays - a site promo is never
+        restored, because it advertises the film instead of being it."""
         urls = [u for u in (urls or []) if u]
-        real = [u for u in urls
+        # Site promos are dropped for good; teaser RENDITIONS keep the
+        # "play something" fallback below, because a page that only offers a
+        # teaser is still worth opening. A page that only offers its own
+        # advert is not.
+        usable = [u for u in urls if not self._media_url_is_site_promo(u)]
+        dropped_promo = len(urls) - len(usable)
+        real = [u for u in usable
                 if not self._media_url_is_trailer(u)
                 and not self._media_url_looks_like_preview(u)]
-        dropped = len(urls) - len(real)
-        if dropped and label:
-            print(f'[{label}] dropped {dropped} trailer/preview candidate(s) '
-                  f'of {len(urls)}', flush=True)
-        return sorted(real or urls, key=self._media_url_height_hint, reverse=True)
+        dropped = len(usable) - len(real)
+        if (dropped or dropped_promo) and label:
+            print(f'[{label}] dropped {dropped_promo} site promo(s) + '
+                  f'{dropped} trailer/preview candidate(s) of {len(urls)}',
+                  flush=True)
+        return sorted(real or usable, key=self._media_url_height_hint, reverse=True)
 
     def _resolve_stream_from_html(self, source_url):
         try:
@@ -41529,6 +41734,12 @@ try {
                 # proxy (turbovid family: stitched post-roll ad stripping)
                 or (provider == 'embed_hls_unpack'
                     and stream_info.get('route_local_proxy'))
+                # A browser-captured manifest whose segments ship behind a
+                # PNG wrapper (sextb's hglink/audinifer family). mpv played
+                # direct decodes the wrapper and reports codec=PNG; only the
+                # proxy's content-sniffed unwrap gets the real TS out.
+                or (provider == 'browser_click'
+                    and stream_info.get('route_local_proxy'))
                 # R56: emturbovid / turbovidhls stuck-at-end even when
                 # an older cache entry never set route_local_proxy.
                 or self._embed_hls_needs_adstrip_proxy(
@@ -41543,6 +41754,9 @@ try {
                 _proxy_label = (
                     'HLSVOD_PROXY'
                     if self._hls_needs_vod_playlist_proxy(playback_target, file_path)
+                    else 'PNGHLS_PROXY'
+                    if (provider == 'browser_click'
+                        and stream_info.get('route_local_proxy'))
                     else 'EMBEDHLS_PROXY'
                     if (provider == 'embed_hls_unpack'
                         and stream_info.get('route_local_proxy'))
