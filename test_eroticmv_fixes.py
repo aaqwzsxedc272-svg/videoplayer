@@ -3759,6 +3759,121 @@ report("""                if self._media_url_is_site_promo(candidate):
 report('return sorted(real or usable, key=self._media_url_height_hint' in _src46,
        'the ranking fallback restores teaser renditions, never promos')
 
+# ── 48. mpv showing one still image where a film should be ───────────────────
+# The audinifer master.m3u8 loaded and mpv reported
+#   [mpv][perf] profile=base 0x0 fps=0.00 ... codec=PNG (Portable Network
+#   Graphics) image ...
+# then held that frame until
+#   [PLAYBACK] end-of-stream stall watchdog fired (7208240/7208240 ms, no EOF)
+# Nothing in the log said WHY, so there was no way to tell whether the proxy
+# was failing to strip the wrappers or the segments were genuine decoy
+# images. This names it, once per source, and is deliberately narrow enough
+# that no real film can trip it.
+# Both live on MpvMediaPlayerAdapter (the mpv backend), not VideoPlayer --
+# they read mpv properties, which only that class has.
+_cls48 = next(n for n in _ast44.walk(_main44)
+              if isinstance(n, _ast44.ClassDef) and n.name == 'MpvMediaPlayerAdapter')
+_fn48 = {n.name: n for n in _cls48.body
+         if isinstance(n, _ast44.FunctionDef)
+         and n.name in ('_still_image_video_signature', '_report_still_image_stream')}
+report(sorted(_fn48) == ['_report_still_image_stream',
+                         '_still_image_video_signature'],
+       f'found both new helpers on MpvMediaPlayerAdapter (got {sorted(_fn48)})')
+_g48 = {'IMAGE_EXTENSIONS': G['IMAGE_EXTENSIONS'], 'print': print, 're': re}
+exec(compile(_ast44.Module(body=[_fn48['_still_image_video_signature'],
+                                 _fn48['_report_still_image_stream']],
+                           type_ignores=[]), '<lifted48>', 'exec'), _g48)
+
+_AUD48 = ('https://audinifer.com/stream/6uPtfdlS6WEKqtNSbLZRZw/kjhhiuahiuhgihdf'
+          '/1789619971/74605270/master.m3u8')
+_TURBO48 = 'http://127.0.0.1:51707/hls/e639f991ec9fd7a2/6aa5b7d3efb53.m3u8?id=9687ba43b1556663'
+_FALENO48 = 'https://cdn.faleno.net/top/wp-content/uploads/2026/08/FNS-257_PR.mp4'
+_H264_48 = 'H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10'
+
+
+class _T48Stub:
+    _IMAGE_VIDEO_CODECS = lift_attr('MpvMediaPlayerAdapter', '_IMAGE_VIDEO_CODECS')
+    _still_image_video_signature = _g48['_still_image_video_signature']
+    _report_still_image_stream = _g48['_report_still_image_stream']
+
+    def __init__(self, codec='', w=0, h=0, src=''):
+        self._props = {'video-codec': codec, 'width': w, 'height': h,
+                       'duration': 7208240}
+        self.lines = []
+        self._source = self
+        self._src = src
+
+    def toString(self):
+        return self._src
+
+    def _get_mpv_property(self, name, default=None):
+        return self._props.get(name, default)
+
+
+_s48 = _T48Stub()
+report(_s48._IMAGE_VIDEO_CODECS and 'png' in _s48._IMAGE_VIDEO_CODECS,
+       f'the image-codec table lifted from main.py: {_s48._IMAGE_VIDEO_CODECS}')
+
+# (codec, width, height, source, expected) - the real rows from the field log
+for _codec48, _w48, _h48, _src48, _want48 in [
+    # THE failure: audinifer, played direct, wrappers never stripped
+    ('PNG (Portable Network Graphics)', 0, 0, _AUD48, True),
+    ('png', 0, 0, _AUD48, True),
+    # the same session's working streams must NOT be called images
+    (_H264_48, 854, 480, _TURBO48, False),
+    (_H264_48, 1280, 720, _TURBO48, False),
+    (_H264_48, 3840, 2160, _FALENO48, False),
+    # an image codec WITH real dimensions is a picture, not a broken stream
+    ('PNG (Portable Network Graphics)', 1920, 1080, _AUD48, False),
+    # old MJPEG video is real video - it must never be flagged. This is the
+    # substring trap: 'jpeg' IS contained in 'mjpeg'.
+    ('mjpeg', 0, 0, _AUD48, False),
+    ('MJPEG', 0, 0, _AUD48, False),
+    ('Motion JPEG', 0, 0, _AUD48, False),
+    # 'jpeg' on its own is still an image
+    ('jpeg', 0, 0, _AUD48, True),
+    # a local file the user opened is not a remote stream
+    ('PNG (Portable Network Graphics)', 0, 0, 'C:/Users/Mouad/photo.png', False),
+    ('PNG (Portable Network Graphics)', 0, 0, '/home/user/photo.png', False),
+    # a remote .png URL is an image request, not a film
+    ('PNG (Portable Network Graphics)', 0, 0, 'https://cdn001.imggle.net/cover-player.jpg', False),
+    # nothing to go on
+    ('', 0, 0, _AUD48, False),
+    ('PNG (Portable Network Graphics)', 0, 0, '', False),
+]:
+    _got48 = _s48._still_image_video_signature(_codec48, _w48, _h48, _src48)[0]
+    report(_got48 is _want48,
+           f'still image? {(_codec48 or "(none)")[:34]!r} {_w48}x{_h48} -> {_want48}')
+
+# the reason string names the codec and the empty frame, for the field log
+_ok48, _why48 = _s48._still_image_video_signature('PNG (Portable Network Graphics)', 0, 0, _AUD48)
+report('png' in _why48 and '0x0' in _why48,
+       f'the reason says what mpv actually reported: {_why48!r}')
+
+# logged once per source, and never for a real film
+import io as _io48, contextlib as _ctx48
+_img48 = _T48Stub('PNG (Portable Network Graphics)', 0, 0, _AUD48)
+_buf48 = _io48.StringIO()
+with _ctx48.redirect_stdout(_buf48):
+    _img48._report_still_image_stream()
+    _img48._report_still_image_stream()
+_out48 = _buf48.getvalue()
+report(_out48.count('[PLAYBACK][STILL_IMAGE_STREAM]') == 1,
+       f'a broken stream is named exactly once, not on every tick '
+       f'({_out48.count("[PLAYBACK][STILL_IMAGE_STREAM]")} line(s))')
+report(_AUD48[:60] in _out48 and '7208240' in _out48,
+       'and the line carries the source and the bogus duration')
+_film48 = _T48Stub(_H264_48, 854, 480, _TURBO48)
+_buf48b = _io48.StringIO()
+with _ctx48.redirect_stdout(_buf48b):
+    _film48._report_still_image_stream()
+report('[PLAYBACK][STILL_IMAGE_STREAM]' not in _buf48b.getvalue(),
+       'a real H.264 stream logs nothing')
+
+# wiring: the check is armed from mpv's file-loaded callback
+report('QTimer.singleShot(700, self._report_still_image_stream)' in _src46,
+       'the still-image check is armed on file-loaded')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

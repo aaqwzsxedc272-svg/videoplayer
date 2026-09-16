@@ -2992,6 +2992,87 @@ class MpvMediaPlayerAdapter(QObject):
         if mirror_strategy_changed and self._pending_video_state:
             self._apply_pending_video_state()
 
+    # mpv happily opens a single still image and reports it as the video
+    # track. Inside an HLS stream that is never the film: these CDNs ship
+    # their segments behind a PNG wrapper (see _unwrap_png_wrapped_media),
+    # and when playback bypasses the proxy mpv decodes the wrapper instead
+    # of the media.
+    _IMAGE_VIDEO_CODECS = ('png', 'jpeg', 'jpg', 'bmp', 'gif', 'webp', 'tiff')
+
+    def _still_image_video_signature(self, codec, width, height, source=''):
+        """(is_still_image, reason) for an mpv video track.
+
+        Deliberately narrow: a real film must never be called an image.
+        'mjpeg' is absent on purpose - genuine old MJPEG .avi/.mov video
+        uses it - and a local image the user opened is excluded, since
+        showing it is exactly right. Only a still-image codec on a REMOTE
+        source counts, which is the shape the field log showed:
+        'codec=PNG (Portable Network Graphics)' at 0x0 with fps 0.00 on
+        audinifer's master.m3u8, held for the playlist's whole two-hour
+        claim until the end-of-stream watchdog advanced the row.
+        """
+        codec = str(codec or '').strip().lower()
+        source = str(source or '').strip()
+        if not codec or not source:
+            return False, ''
+        low = source.lower()
+        if not (low.startswith('http://') or low.startswith('https://')):
+            return False, ''
+        if low.endswith(IMAGE_EXTENSIONS):
+            return False, ''
+        try:
+            width = int(width or 0)
+        except Exception:
+            width = 0
+        try:
+            height = int(height or 0)
+        except Exception:
+            height = 0
+        # Compare the codec ID exactly, never as a substring: 'jpeg' is
+        # contained in 'mjpeg', and old MJPEG .avi/.mov files are real video.
+        # mpv reports 'PNG (Portable Network Graphics)', so take the leading
+        # word as the ID.
+        codec_id = re.split(r'[\s(]', codec, 1)[0].strip().lower()
+        if codec_id in self._IMAGE_VIDEO_CODECS:
+            # ...and there is no real frame behind it.
+            if width <= 0 or height <= 0:
+                return True, f'codec={codec} dims={width}x{height}'
+        return False, ''
+
+    def _report_still_image_stream(self):
+        """Log, once per source, that mpv is showing a single image where a
+        film should be. This is the diagnostic that decides the next move:
+        if the local proxy is stripping PNG wrappers correctly this never
+        fires, and if it does fire the segments are genuine decoy images
+        rather than wrapped media - a different bug entirely."""
+        try:
+            source = ''
+            try:
+                source = str(self._source.toString() or '')
+            except Exception:
+                source = ''
+            codec = self._get_mpv_property('video-codec', '') or ''
+            width = self._get_mpv_property('width', 0) or 0
+            height = self._get_mpv_property('height', 0) or 0
+            is_image, reason = self._still_image_video_signature(
+                codec, width, height, source)
+            if not is_image:
+                return
+            seen = getattr(self, '_still_image_stream_logged', None)
+            if not isinstance(seen, set):
+                seen = set()
+                self._still_image_stream_logged = seen
+            if source in seen:
+                return
+            seen.add(source)
+            duration = int(self._get_mpv_property('duration', 0) or 0)
+            print(f'[PLAYBACK][STILL_IMAGE_STREAM] mpv decoded a single image, '
+                  f'not a film ({reason}, claimed duration={duration} ms) - '
+                  f'the segments reached mpv un-stripped: {source[:170]}',
+                  flush=True)
+        except Exception:
+            pass
+
     def _right_angle_rotation(self, rotation):
         try:
             normalized = float(rotation or 0.0) % 360.0
@@ -3204,6 +3285,10 @@ class MpvMediaPlayerAdapter(QObject):
             self._apply_pending_video_state()
             self._apply_adaptive_performance_profile()
             QTimer.singleShot(250, self._apply_adaptive_performance_profile)
+            # Late enough that video-codec/width have settled, early enough
+            # to be useful: a still image must be named before the row sits
+            # on it for the duration the playlist claims.
+            QTimer.singleShot(700, self._report_still_image_stream)
 
         @self._mpv.event_callback('end-file')
         def _end_file(_event):
