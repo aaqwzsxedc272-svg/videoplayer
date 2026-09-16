@@ -66,6 +66,10 @@ PLAYER_HOST_TOKENS = (
     # trailerhg is deliberately NOT here: it is the preview trailer, and it
     # stays on AD_HOST_TOKENS so the film is never replaced by the trailer.
     'turboplays',
+    # Hosters seen behind the SW and US buttons (DevTools, confirmed by the
+    # user). The decrypted /ajax/player fragment no longer needs an allowlist,
+    # but the second hop that follows nested iframes still does.
+    'audinifer', 'upn.one',
 )
 
 _MEDIA_SUFFIXES = ('.m3u8', '.m3u', '.mpd', '.mp4', '.m4v', '.webm', '.mkv')

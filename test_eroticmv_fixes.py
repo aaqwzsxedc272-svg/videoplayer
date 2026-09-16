@@ -3103,6 +3103,63 @@ report(len(_r41['streams']) == 5,
 report(not any('trailerhg' in u or 'dtscout' in u or u.endswith('.jpg') for u in _r41['streams']),
        'and no trailer, tracker or artwork slips through')
 
+# ── 42. sextb: the SW and US hosters, from DevTools ──────────────────────────
+# The user read the live DOM after each click. SW is an iframe on
+# audinifer.com and US is an iframe on player.upn.one whose player carries a
+# direct master.m3u8. Both were being dropped by the player allowlist.
+_T42_SW = ('<iframe width="100%" height="100%" '
+           'src="https://audinifer.com/e/9ok8hstlbxde?poster=https://cdn001.imggle.net/cover-player.jpg" '
+           'frameborder="0" scrolling="no" allowtransparency="" allowfullscreen=""></iframe>')
+_T42_US = ('<iframe width="100%" height="100%" src="https://player.upn.one/e/6a587ecd" '
+           'frameborder="0" scrolling="no" allowtransparency="" allowfullscreen=""></iframe>')
+report(sg34._extract_player_from_fragment(_T42_SW) ==
+       'https://audinifer.com/e/9ok8hstlbxde?poster=https://cdn001.imggle.net/cover-player.jpg',
+       'the SW fragment resolves to audinifer.com')
+report(sg34._extract_player_from_fragment(_T42_US) == 'https://player.upn.one/e/6a587ecd',
+       'the US fragment resolves to player.upn.one')
+# And the second hop, which follows nested iframes by allowlist, must know them.
+for _t42 in ('audinifer', 'upn.one'):
+    report(_t42 in sg34.PLAYER_HOST_TOKENS, f'{_t42} is on the player allowlist for the second hop')
+report(sg34._looks_like_player('https://audinifer.com/e/9ok8hstlbxde'),
+       'audinifer passes the allowlist')
+report(sg34._looks_like_player('https://player.upn.one/e/6a587ecd'),
+       'player.upn.one passes the allowlist')
+
+# upn.one serves a direct manifest in a <source> tag; the scrape must find it.
+_T42_UPN = ('<video crossorigin preload src="blob:https://player.upn.one/6a587ecd">'
+            '<source src="https://player.upn.one/hlsmod/p16-ad-site-sign-sg.tiktokcdn.com/'
+            'wFpgYVKHQJOWIbl-nmGwRA/ipt/j3tyqqon/h5r9ag/tt/master.m3u8?v=1766826492" '
+            'type="application/x-mpegurl" data-vds></video>')
+report(sg34._scrape_media_from_html(_T42_UPN) ==
+       ['https://player.upn.one/hlsmod/p16-ad-site-sign-sg.tiktokcdn.com/'
+        'wFpgYVKHQJOWIbl-nmGwRA/ipt/j3tyqqon/h5r9ag/tt/master.m3u8?v=1766826492'],
+       'the upn.one master.m3u8 is scraped out of the <source> tag')
+
+# End to end: six buttons, four different hoster families, all resolved.
+_T42_HOSTERS = {
+    '4124790': 'https://turboplays.click/t/6a80cae62b911?poster=https://cdn001.imggle.net/cover-player.jpg',
+    '4124770': 'https://audinifer.com/e/9ok8hstlbxde?poster=https://cdn001.imggle.net/cover-player.jpg',
+    '4128035': 'https://player.upn.one/e/6a587ecd',
+    '4124826': 'https://dsvplay.com/e/99dhh6q0eo5b?c_poster=https://cdn001.imggle.net/cover-player.jpg',
+    '4124772': 'https://ryderjet.com/v/tkqbo77j1737?poster=https://cdn001.imggle.net/cover-player.jpg',
+}
+_T42_PAGES = {'https://sextb.net/jul-509-rm': _sp,
+              'https://player.upn.one/e/6a587ecd': _T42_UPN}
+for _n42, _u42 in enumerate(sorted(_T42_HOSTERS.values())):
+    _T42_PAGES.setdefault(_u42, '<script>f:"https:\\/\\/cdn.example.net\\/f%d\\/index.m3u8";</script>' % _n42)
+_rs42, _rm42, _rt42 = sg34.grab_all_static, sg34._make_session, sg34.time
+try:
+    sg34.time = _T38Time
+    _T38_HOSTERS.clear(); _T38_HOSTERS.update(_T42_HOSTERS)
+    sg34._make_session = lambda: (_T38Session(_T42_PAGES), 'test-stub')
+    _r42 = sg34.grab_all_static('https://sextb.net/jul-509-rm')
+finally:
+    sg34.time = _rt42; sg34._make_session = _rm42
+report(len(_r42['streams']) == 5,
+       f"all five hoster families resolve (got {len(_r42['streams'])}: {_r42['streams']})")
+report(any('master.m3u8' in u and 'upn.one' in u for u in _r42['streams']),
+       'including the upn.one manifest')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
