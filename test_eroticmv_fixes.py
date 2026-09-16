@@ -3971,6 +3971,44 @@ for _u49, _want49 in [
            f'promo? {_want49}  {_u49.split("/")[-2] + "/" if _want49 else ""}'
            f'{_u49.split("/")[-1][:34]}')
 
+# ── 50. The headless capture never clicked JW Player's play button ───────────
+# sextb's playmate.to embed is JW Player 8:
+#   MEDIA_URL::/assets/jw8/jwplayer.js
+#   MEDIA_URL::/assets/jw8/googima.js
+#   MEDIA_URL::/assets/js/player-core.min.js
+# ...and then not one media request, ever, on two separate runs. JW draws its
+# own display layer over the <video>, so its play button must be found BEFORE
+# the bare element -- but _click_play returns on the FIRST selector that
+# exists, and "video" was listed above every .jw-* selector. So on a JW page
+# the capture clicked the raw media element (which JW passes through) and
+# never reached the button. Same root cause as the user's report: "works
+# perfectly in browser but doesnt in player even as a solo link".
+_sel50_nodes = [
+    n for n in _ast44.walk(_main44)
+    if isinstance(n, _ast44.Assign)
+    and any(getattr(tg, 'id', None) == '_play_selectors' for tg in n.targets)
+]
+report(len(_sel50_nodes) == 1,
+       f'found exactly one _play_selectors list (got {len(_sel50_nodes)})')
+_sel50 = list(_ast44.literal_eval(_sel50_nodes[0].value))
+report(len(_sel50) >= 6, f'the selector list lifted from main.py: {_sel50}')
+
+_idx50 = {s: i for i, s in enumerate(_sel50)}
+report('.jw-icon-display' in _idx50,
+       "JW 8's real display button is in the list")
+report(_idx50.get('.jw-icon-display', 99) < _idx50['video'],
+       f"and it is tried BEFORE the bare <video> "
+       f"({_idx50.get('.jw-icon-display')} < {_idx50['video']})")
+report(_idx50.get('.jw-display-icon-display', 99) < _idx50['video'],
+       'as is the JW display-icon wrapper')
+# The two fixes this ordering was originally protecting must survive.
+report(_sel50[0] == '.vjs-big-play-button',
+       f"video.js's big play button is still first ({_sel50[0]!r})")
+report(_idx50['.play-overlay'] > _idx50['video']
+       and _idx50['.player-overlay'] > _idx50['video'],
+       'and the Mixdrop ad click-catchers are still LAST, so they can never '
+       'navigate the page to an advert before the real button is pressed')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

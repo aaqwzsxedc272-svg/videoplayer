@@ -57914,6 +57914,21 @@ if __name__ == "__main__":
                                 # and nothing was ever captured. Those ad-layer
                                 # selectors stay last as a fallback only.
                                 ".vjs-big-play-button",
+                                # JW Player 8 (sextb's playmate.to and the
+                                # hglink family) draws its own display layer
+                                # over the <video>, so the button has to be
+                                # found BEFORE the bare element below - and
+                                # _click_play stops at the first match, so the
+                                # old order clicked the raw <video> and never
+                                # reached any .jw-* selector at all. JW treats
+                                # a click on its own media element as a
+                                # passthrough, not a play toggle, which is why
+                                # the capture saw the player script load and
+                                # then nothing.
+                                ".jw-icon-display",
+                                ".jw-display-icon-display",
+                                ".jw-display-icon-container .jw-icon",
+                                ".jw-icon-playback",
                                 "video",
                                 "button.play",
                                 ".jw-display-icon-container",
