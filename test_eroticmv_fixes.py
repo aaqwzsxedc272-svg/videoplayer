@@ -3210,6 +3210,125 @@ for _u43, _w43 in [
 report('_capture_candidate_is_clearly_not_media(c)' in _main43,
        'the promote-unverified fallback still filters through it')
 
+# ── 44. sextb hosters: source page, short ads, manifests ────────────────────
+# A field log on sextb.net/546erofv-391 showed three separate failures:
+#   * the browser's own source page promoted as the playback URL
+#     (playback_url=https://playmate.to/embed/o9Mwa5Cd5r6es, then
+#     https://player.upn.one/#6k6l3x) — mpv "Failed to recognize file
+#     format", three rungs of the load-failed ladder each time;
+#   * a 30-second advert promoted as the film —
+#     MEDIA_DUR::https://video.sacdnssedge.com/video/ol_...mp4|30|854|480
+#     followed by VERIFIED_MEDIA:: on the same URL, which earned the +6
+#     "duration-verified" bonus and beat every real candidate;
+#   * every failing hoster sitting out the whole ~120s capture window.
+import ast as _ast44
+_main44 = _tree43  # the parsed main.py tree from section 43
+_lift44 = {}
+_fn44 = {}
+for _node44 in _ast44.walk(_main44):
+    if isinstance(_node44, _ast44.Assign):
+        for _t44 in _node44.targets:
+            if isinstance(_t44, _ast44.Name) and _t44.id in (
+                    'VIDEO_EXTENSIONS', 'AUDIO_EXTENSIONS'):
+                _lift44[_t44.id] = _ast44.literal_eval(_node44.value)
+    if isinstance(_node44, _ast44.FunctionDef) and _node44.name in (
+            '_capture_candidate_is_source_page', '_capture_line_is_manifest'):
+        _fn44[_node44.name] = _node44
+report(sorted(_lift44) == ['AUDIO_EXTENSIONS', 'VIDEO_EXTENSIONS'],
+       f'lifted the real extension tuples (got {sorted(_lift44)})')
+report(sorted(_fn44) == ['_capture_candidate_is_source_page', '_capture_line_is_manifest'],
+       f'found both new helpers in main.py (got {sorted(_fn44)})')
+
+_g44 = {'urlparse': urlparse,
+        'VIDEO_EXTENSIONS': _lift44['VIDEO_EXTENSIONS'],
+        'AUDIO_EXTENSIONS': _lift44['AUDIO_EXTENSIONS']}
+
+class _T44Stub:
+    VIDEO_EXTENSIONS = _lift44['VIDEO_EXTENSIONS']
+    AUDIO_EXTENSIONS = _lift44['AUDIO_EXTENSIONS']
+    # The real canonicalizer is a 200-line method with its own cache and
+    # PyQt-dependent callers; it is stubbed here as "lowercase + strip a
+    # trailing slash", which is what it does for these two URLs (the field
+    # log shows the playlist key lowercased:
+    # key='https://playmate.to/embed/sciowddkvvlug'). Everything this test
+    # exercises — the extension carve-out and the comparison — is real.
+    @staticmethod
+    def _canonicalize_remote_source_url(u):
+        u = str(u or '').strip().lower()
+        return u[:-1] if u.endswith('/') else u
+    @staticmethod
+    def _sanitize_url(u):
+        return str(u or '').strip()
+exec(compile(_ast44.Module(body=[_fn44['_capture_candidate_is_source_page']],
+                           type_ignores=[]), '<lifted>', 'exec'), _g44)
+_T44Stub._capture_candidate_is_source_page = _g44['_capture_candidate_is_source_page']
+_s44 = _T44Stub()
+
+# (candidate, source_url, expected "is the source page")
+for _c44, _src44, _w44 in [
+    ('https://playmate.to/embed/o9Mwa5Cd5r6es', 'https://playmate.to/embed/o9Mwa5Cd5r6es', True),
+    ('https://player.upn.one/#6k6l3x',          'https://player.upn.one/#6k6l3x',          True),
+    ('https://playmate.to/embed/O9MWA5CD5R6ES', 'https://playmate.to/embed/o9Mwa5Cd5r6es', True),
+    ('https://hglink.to/e/qws3puy5u0ec?poster=https://cdn001.imggle.net/cover-player.jpg',
+     'https://hglink.to/e/qws3puy5u0ec?poster=https://cdn001.imggle.net/cover-player.jpg', True),
+    # a different URL on the same host is NOT the source page
+    ('https://srv1-2.plauymito.live/hls/g6nj1Z4FFkanYnUPa69J5oeEJrTMIXLh/master.txt',
+     'https://playmate.to/embed/o9Mwa5Cd5r6es', False),
+    ('https://cdn1.turboviplay.com/data3/6aa9ecba0f385/6aa9ecba0f385.m3u8',
+     'https://sextb.net/546erofv-391', False),
+    # when the source URL IS the file, keep it
+    ('https://cdn.example.net/v/movie.mp4', 'https://cdn.example.net/v/movie.mp4', False),
+    ('https://cdn.example.net/v/index.m3u8', 'https://cdn.example.net/v/index.m3u8', False),
+    # degenerate inputs
+    ('', 'https://playmate.to/embed/x', False),
+    ('https://playmate.to/embed/x', '', False),
+]:
+    report(_s44._capture_candidate_is_source_page(_c44, _src44) is _w44,
+           f'source-page {_c44[:46]!r} -> {_w44}')
+
+# _capture_line_is_manifest is a real staticmethod — call it unbound.
+_m44 = _T44Stub._capture_line_is_manifest = None
+_g44m = dict(_g44)
+exec(compile(_ast44.Module(body=[_fn44['_capture_line_is_manifest']],
+                           type_ignores=[]), '<lifted>', 'exec'), _g44m)
+class _T44M:
+    _capture_line_is_manifest = staticmethod(_g44m['_capture_line_is_manifest'])
+for _l44, _w44 in [
+    ('MEDIA_URL::https://cdn1.turboviplay.com/data3/6aa9ecba0f385/6aa9ecba0f385.m3u8', True),
+    ('VOE_M3U8::https://g271.turbosplayer.com/file/4cad7c7a/master.m3u8', True),
+    ('MEDIA_URL::https://srv1-2.plauymito.live/hls/g6nj1Z4FFkanYnUPa69J5oeEJrTMIXLh/master.txt', True),
+    ('MEDIA_URL::https://54pkdcyxbsxbermn.meadowbrookcreativeworks.cfd/vpusxz6e9t3q/hls3/01/14957/buun813z5jka_n/master.txt', True),
+    ('MEDIA_URL::https://z6v2p9a8.bkcdn.net/library/984100/466b4fc1.mp4', False),
+    ('MEDIA_URL::javascript:false', False),
+    ('MEDIA_URL::/assets/index-DqFBtoPY.js', False),
+    ('PAGE_TITLE::Loading...', False),
+    ('', False),
+]:
+    report(_T44M._capture_line_is_manifest(_l44) is _w44,
+           f'manifest-line {_l44[:52]!r} -> {_w44}')
+
+# Wiring assertions — the two ranking blocks and the ladder. These read the
+# source rather than executing it (the blocks live inside 400-line methods
+# that need PyQt); each one names a line the field log proved wrong.
+_src44 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.py'),
+              encoding='utf-8').read()
+report(_src44.count('if not (0.1 <= _measured_duration(c) < 45)') == 2,
+       'both promote-an-unverified fallbacks now cut ads at 45s')
+report(_src44.count('if 0.1 <= _m_dur < 45:') == 2,
+       'both probe loops now cut ads at 45s')
+report('and not (0.1 <= _measured_duration(url) < 45.0)' in _src44
+       and _src44.count('and not (0.1 <= _measured_duration(url) < 45.0)') == 2,
+       'both "verified" bonuses are cancelled by a sub-45s measurement')
+report('0.1 <= _measured_duration(c) < 20' not in _src44
+       and '0.1 <= _m_dur < 20' not in _src44,
+       'no 20-second ad ceiling left behind')
+report(_src44.count('self._capture_candidate_is_source_page(c, source_url)') >= 4,
+       'the source-page filter is wired into both ranking blocks')
+report("manifest captured and capture idle, closing browser" in _src44,
+       'the idle-after-manifest browser close exists')
+report("_pw_manifest_at is not None\n                            and _now - _pw_last_line_at > 12" in _src44,
+       'that close is gated on 12s of capture silence')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

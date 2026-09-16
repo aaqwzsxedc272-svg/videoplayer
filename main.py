@@ -27857,6 +27857,26 @@ try {
             return False
 
     @staticmethod
+    def _capture_line_is_manifest(line):
+        """True for a capture line naming an HLS/DASH playlist.
+
+        Used only to decide that the capture has nothing left to give:
+        once the player has asked for a manifest it has finished
+        negotiating, and every hoster in the sextb family announces its
+        stream this way (``cdn1.turboviplay.com/.../<id>.m3u8``,
+        ``srv1-2.plauymito.live/hls/<id>/master.txt``,
+        ``<host>/hls3/.../<id>_n/master.txt``).
+        """
+        try:
+            raw = str(line or '')
+            if not raw.startswith(('MEDIA_URL::', 'VOE_M3U8::')):
+                return False
+            path = (urlparse(raw.split('::', 1)[1].strip()).path or '').lower()
+            return path.endswith(('.m3u8', '.m3u', '.mpd', 'master.txt'))
+        except Exception:
+            return False
+
+    @staticmethod
     def _is_turbocdn_media_line(line):
         """True for a capture line naming a turbo.cr signed media file.
 
@@ -27967,6 +27987,42 @@ try {
         except Exception:
             return False
         return path.endswith('.txt') and '/cdn/hls/' in path
+
+    def _capture_candidate_is_source_page(self, url, source_url):
+        """True when a capture is just the page we opened the browser on.
+
+        The capture script reports the document it navigated to as a
+        MEDIA_URL like any other request, so the browser's own source URL
+        always lands in the candidate list. Promoting it back as the
+        playback URL cannot work — that page is HTML, and it is the very
+        reason the browser was launched (its static HTML held no media).
+        A field log shows it twice over, each time followed by the whole
+        load-failed ladder::
+
+            [BROWSER_CLICK] probe rejected all 11 candidate(s) ...; using best-ranked capture anyway
+            [PLAYBACK][LOADFILE] https://playmate.to/embed/o9Mwa5Cd5r6es
+            [MPV][error][cplayer] Failed to recognize file format.
+
+        A candidate that carries a real media extension is kept: on some
+        hosts the source URL *is* the file, and refusing it would be worse.
+        """
+        url = str(url or '').strip()
+        src = str(source_url or '').strip()
+        if not url or not src:
+            return False
+        try:
+            path = (urlparse(url).path or '').lower()
+        except Exception:
+            return False
+        if path.endswith(('.m3u8', '.m3u', '.mpd', 'master.txt')
+                         + VIDEO_EXTENSIONS + AUDIO_EXTENSIONS):
+            return False
+        try:
+            same = (self._canonicalize_remote_source_url(self._sanitize_url(url))
+                    == self._canonicalize_remote_source_url(self._sanitize_url(src)))
+        except Exception:
+            same = False
+        return bool(same) or url == src
 
     def _capture_candidate_is_clearly_not_media(self, url):
         """True only for captures that cannot possibly be a video.
@@ -37642,6 +37698,21 @@ try {
                     if _n:
                         verified_normalized.add(_n)
 
+            # The page the browser was opened on is an HTML document, not a
+            # stream. The capture script reports the navigation as a
+            # MEDIA_URL like any other request, so it is always in this
+            # list — and the promote-an-unverified-capture fallback used to
+            # hand it straight back as the playback URL, which mpv then
+            # failed on three different ways down the load-failed ladder.
+            _self_pages = [c for c in normalized_candidates
+                           if self._capture_candidate_is_source_page(c, source_url)]
+            if _self_pages:
+                normalized_candidates = [
+                    c for c in normalized_candidates
+                    if not self._capture_candidate_is_source_page(c, source_url)]
+                print(f"[BROWSER_CLICK] dropped {len(_self_pages)} candidate(s) "
+                      f"that are the source page itself: {_self_pages[0][:120]}")
+
             # Same normalization for the measured-duration table so its keys
             # match the normalized candidates below.
             measured_normalized = {}
@@ -37679,9 +37750,14 @@ try {
                     score += 3
                 if '.m3u8' in lower_url:
                     score += 1
-                if url in verified_normalized:
+                if (url in verified_normalized
+                        and not (0.1 <= _measured_duration(url) < 45.0)):
                     # Duration-verified in the live browser: played as real
-                    # long-form content, so it beats any ad capture.
+                    # long-form content, so it beats any ad capture. A
+                    # VERIFIED_MEDIA line only says a <video> played it, not
+                    # that it is the film: sextb's own ad network serves a
+                    # 30-second spot through a real <video> element and
+                    # earned the bonus, then played "the video" as an advert.
                     score += 6
                 if _measured_duration(url) >= 45.0:
                     # Long duration measured directly from a page <video>.
@@ -37746,7 +37822,7 @@ try {
 
             for candidate in normalized_candidates[:6]:
                 _m_dur = _measured_duration(candidate)
-                if 0.1 <= _m_dur < 20 and candidate not in verified_normalized:
+                if 0.1 <= _m_dur < 45:
                     # The page itself measured this as a few seconds long —
                     # it is a pre-roll ad, not the video. Never hand it to
                     # the player even when it probes perfectly.
@@ -37784,7 +37860,7 @@ try {
             # load-failed ladder can still retry via proxy/browser cookies.
             _non_ad = [
                 c for c in normalized_candidates
-                if not (0.1 <= _measured_duration(c) < 20 and c not in verified_normalized)
+                if not (0.1 <= _measured_duration(c) < 45)
             ]
             # ...and neither is a script: this branch promotes an
             # UNVERIFIED capture, the one place a Google tag endpoint
@@ -38708,6 +38784,7 @@ try {
             _pw_m3u8_at = None
             _pw_family_cdn_at = None
             _pw_turbocdn_at = None
+            _pw_manifest_at = None
             _pw_child_dead_at = None
             while True:
                 _now = time.time()
@@ -38738,6 +38815,9 @@ try {
                     elif line.startswith('MEDIA_URL::'):
                         if _pw_media_at is None:
                             _pw_media_at = time.time()
+                        if (_pw_manifest_at is None
+                                and self._capture_line_is_manifest(line)):
+                            _pw_manifest_at = time.time()
                         if (_pw_family_cdn_at is None
                                 and self._is_family_cdn_media_line(line)):
                             _pw_family_cdn_at = time.time()
@@ -38816,6 +38896,20 @@ try {
                         # rest of the window waiting for VERIFIED_MEDIA
                         # that hls.js blob: players never raise.
                         _kill_pw_tree('embed-HLS m3u8 captured, closing browser')
+                        break
+                    if (_pw_manifest_at is not None
+                            and _now - _pw_last_line_at > 12):
+                        # The player already asked for its playlist and the
+                        # pipe has been silent for 12 seconds since: nothing
+                        # more is coming. Every failing sextb hoster
+                        # (player.upn.one, playmate.to, hglink.to) otherwise
+                        # sat out the full ~120s window per link with a
+                        # browser window on the desktop — several minutes
+                        # for one page of results. 12s of silence is the
+                        # guard against closing while a real video is still
+                        # negotiating: a page that is about to hand over
+                        # VERIFIED_MEDIA keeps the pipe busy.
+                        _kill_pw_tree('manifest captured and capture idle, closing browser')
                         break
                     if (_pw_html_at is not None
                             and _now - _pw_html_at > 8):
@@ -39140,6 +39234,21 @@ try {
                     if _n:
                         verified_normalized.add(_n)
 
+            # The page the browser was opened on is an HTML document, not a
+            # stream. The capture script reports the navigation as a
+            # MEDIA_URL like any other request, so it is always in this
+            # list — and the promote-an-unverified-capture fallback used to
+            # hand it straight back as the playback URL, which mpv then
+            # failed on three different ways down the load-failed ladder.
+            _self_pages = [c for c in normalized_candidates
+                           if self._capture_candidate_is_source_page(c, source_url)]
+            if _self_pages:
+                normalized_candidates = [
+                    c for c in normalized_candidates
+                    if not self._capture_candidate_is_source_page(c, source_url)]
+                print(f"[BROWSER_CLICK] dropped {len(_self_pages)} candidate(s) "
+                      f"that are the source page itself: {_self_pages[0][:120]}")
+
             # Same normalization for the measured-duration table so its keys
             # match the normalized candidates below.
             measured_normalized = {}
@@ -39180,10 +39289,15 @@ try {
                     score += 2
                 if re.search(r'[?&](s|token|sig|signature|expires?|exp|e)=', lower_url):
                     score += 1
-                if url in verified_normalized:
+                if (url in verified_normalized
+                        and not (0.1 <= _measured_duration(url) < 45.0)):
                     # Duration-verified in the live browser: a <video> was
                     # playing this as real long-form content (pre-roll ads
                     # are seconds long / low-res). Beats any ad capture.
+                    # Verified is not the same as long: sextb's ad network
+                    # (video.sacdnssedge.com) plays a 30-second spot through
+                    # a real <video>, measured 30s, and won the ranking —
+                    # so a measured sub-45s duration cancels the bonus.
                     score += 6
                 if _measured_duration(url) >= 45.0:
                     # Long duration measured directly from a page <video>.
@@ -39272,7 +39386,7 @@ try {
 
             for candidate in normalized_candidates[:6]:
                 _m_dur = _measured_duration(candidate)
-                if 0.1 <= _m_dur < 20 and candidate not in verified_normalized:
+                if 0.1 <= _m_dur < 45:
                     # The page itself measured this as a few seconds long —
                     # it is a pre-roll ad, not the video. Never hand it to
                     # the player even when it probes perfectly.
@@ -39313,7 +39427,7 @@ try {
             # than reporting no stream.
             _non_ad = [
                 c for c in normalized_candidates
-                if not (0.1 <= _measured_duration(c) < 20 and c not in verified_normalized)
+                if not (0.1 <= _measured_duration(c) < 45)
             ]
             # ...and neither is a script: this branch promotes an
             # UNVERIFIED capture, which is how gtag/js reached mpv and
@@ -40878,13 +40992,23 @@ try {
             # screen. This path runs whenever every static resolver
             # failed — including permanently dead links (file deleted,
             # hoster down): those used to pop a visible browser window
-            # on top of the desktop for nothing. Always the off-screen
-            # headed engine (same as missav/eporner/fileditch/embed
-            # hosts — the page stays 'visible' to Chromium, so playback
-            # and the auto-clicker keep working).
+            # on top of the desktop for nothing.
+            #
+            # "Off-screen headed" does NOT achieve that on Windows — the
+            # window is created and the user sees it, which is exactly the
+            # complaint behind sextb's hosters ("browser opens many time").
+            # So try the true headless engine first, the same ladder the
+            # turbo.cr path above uses, and fall back to off-screen headed
+            # only when headless fails: some bot walls fingerprint headless
+            # Chromium, and there the headed engine is still the better
+            # answer than no stream at all.
             resolved = self._resolve_stream_via_browser_click(
-                source_url, headed_hidden=True,
+                source_url, headless=True,
                 referer=self._embed_origin_referer(source_url))
+            if resolved is None:
+                resolved = self._resolve_stream_via_browser_click(
+                    source_url, headed_hidden=True,
+                    referer=self._embed_origin_referer(source_url))
             if resolved is None:
                 # Short-ish cooldown for pages that needed the click path:
                 # a fresh attempt is expensive but worth retrying sooner
