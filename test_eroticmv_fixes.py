@@ -477,6 +477,8 @@ class HtmlResolveStub:
         'VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
     _SITE_PROMO_STEM_TOKENS = lift_attr(
         'VideoPlayer', '_SITE_PROMO_STEM_TOKENS')
+    _SITE_PROMO_PATH_TOKENS = lift_attr(
+        'VideoPlayer', '_SITE_PROMO_PATH_TOKENS')
     _media_url_is_site_promo = lift(
         'VideoPlayer', '_media_url_is_site_promo')
     _media_url_looks_like_preview = lift(
@@ -640,6 +642,7 @@ report(nd._noodle_sources_from_playlist(None) == [],
 class VoeStub:
     _PREVIEW_MEDIA_URL_TOKENS = lift_attr('VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
     _SITE_PROMO_STEM_TOKENS = lift_attr('VideoPlayer', '_SITE_PROMO_STEM_TOKENS')
+    _SITE_PROMO_PATH_TOKENS = lift_attr('VideoPlayer', '_SITE_PROMO_PATH_TOKENS')
     _media_url_looks_like_preview = lift('VideoPlayer', '_media_url_looks_like_preview')
     _media_url_is_site_promo = lift('VideoPlayer', '_media_url_is_site_promo')
     _media_url_is_trailer = staticmethod(
@@ -1097,6 +1100,8 @@ class FamilyStub:
         'VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
     _SITE_PROMO_STEM_TOKENS = lift_attr(
         'VideoPlayer', '_SITE_PROMO_STEM_TOKENS')
+    _SITE_PROMO_PATH_TOKENS = lift_attr(
+        'VideoPlayer', '_SITE_PROMO_PATH_TOKENS')
     _media_url_is_site_promo = lift(
         'VideoPlayer', '_media_url_is_site_promo')
 
@@ -1154,6 +1159,8 @@ class CaptureStub:
         'VideoPlayer', '_PREVIEW_MEDIA_URL_TOKENS')
     _SITE_PROMO_STEM_TOKENS = lift_attr(
         'VideoPlayer', '_SITE_PROMO_STEM_TOKENS')
+    _SITE_PROMO_PATH_TOKENS = lift_attr(
+        'VideoPlayer', '_SITE_PROMO_PATH_TOKENS')
     _media_url_is_site_promo = lift(
         'VideoPlayer', '_media_url_is_site_promo')
     _familypornhd_player_page = lift(
@@ -3873,6 +3880,96 @@ report('[PLAYBACK][STILL_IMAGE_STREAM]' not in _buf48b.getvalue(),
 # wiring: the check is armed from mpv's file-loaded callback
 report('QTimer.singleShot(700, self._report_still_image_stream)' in _src46,
        'the still-image check is armed on file-loaded')
+
+# ── 49. Two defects the field console caught in the shipped build ────────────
+# (a) C:\...\main.py:3035: DeprecationWarning: 'maxsplit' is passed as
+#     positional argument  -- on EVERY file load, from the still-image check
+#     added one commit earlier.
+# (b) sextb's playmate row stopped playing FNS-257_PR.mp4 (correct) and
+#     started playing the next advert instead:
+#       [VOE-mirror] Trusting unprobed MP4: .../3aaimRZTQPQTwYuGELr8_s_sample_zen/_3
+#       [REMOTE_PROXY][CFFI_UPSTREAM_403] .../_3000.mp4
+#     three times. The promo marker is in a PATH segment there, not in the
+#     filename, so the stem test waved it through.
+_np49 = next(n for n in _ast44.walk(_main44)
+             if isinstance(n, _ast44.FunctionDef)
+             and n.name == '_still_image_video_signature')
+_splits49 = [n for n in _ast44.walk(_np49)
+             if isinstance(n, _ast44.Call)
+             and isinstance(n.func, _ast44.Attribute)
+             and n.func.attr == 'split'
+             and isinstance(n.func.value, _ast44.Name)
+             and n.func.value.id == 're']
+report(bool(_splits49), f'found the re.split call (got {len(_splits49)})')
+_positional49 = [c for c in _splits49 if len(c.args) > 2]
+report(not _positional49,
+       're.split passes maxsplit as a KEYWORD, so Python 3.13+ stays quiet')
+
+_g49 = {'IMAGE_EXTENSIONS': G['IMAGE_EXTENSIONS'], 'print': print, 're': re}
+exec(compile(_ast44.Module(body=[_np49], type_ignores=[]), '<lifted49>', 'exec'), _g49)
+
+
+class _T49Stub:
+    _IMAGE_VIDEO_CODECS = lift_attr('MpvMediaPlayerAdapter', '_IMAGE_VIDEO_CODECS')
+    _still_image_video_signature = _g49['_still_image_video_signature']
+
+
+_s49 = _T49Stub()
+report(_s49._still_image_video_signature('PNG (Portable Network Graphics)', 0, 0,
+                                         'https://vibuxer.com/stream/x/master.m3u8')[0],
+       'the keyword form still detects the PNG case it was written for')
+
+# The path-segment promo tokens
+_paths49 = lift_attr('VideoPlayer', '_SITE_PROMO_PATH_TOKENS')
+report('sample' in _paths49 and 'pr' not in _paths49,
+       f'the path token list covers "sample" but not the too-short "pr": {_paths49}')
+
+_fn49 = next(n for n in _ast44.walk(_main44)
+             if isinstance(n, _ast44.FunctionDef)
+             and n.name == '_media_url_is_site_promo')
+_g49b = {'os': os, 're': re, 'urlparse': urlparse}
+exec(compile(_ast44.Module(body=[_fn49], type_ignores=[]), '<lifted49b>', 'exec'), _g49b)
+
+
+class _T49Promo:
+    _SITE_PROMO_STEM_TOKENS = lift_attr('VideoPlayer', '_SITE_PROMO_STEM_TOKENS')
+    _SITE_PROMO_PATH_TOKENS = lift_attr('VideoPlayer', '_SITE_PROMO_PATH_TOKENS')
+    _SITE_PROMO_PATH_TOKENS = _paths49
+    _media_url_is_site_promo = _g49b['_media_url_is_site_promo']
+
+
+_pm49 = _T49Promo()
+# The advert that actually played, and the one from the previous report
+for _u49, _want49 in [
+    ('https://cdn-dl.webstream.ne.jp/gigadlcdn/dl/'
+     '3aaimRZTQPQTwYuGELr8_s_sample_zen/_3000.mp4', True),
+    ('https://cdn.faleno.net/top/wp-content/uploads/2026/08/FNS-257_PR.mp4', True),
+    # every stream that PLAYED in the same session must survive
+    ('https://audinifer.com/stream/Q69OBFl1Tz9LqOSOgRXcVw/kjhhiuahiuhgihdf'
+     '/1789625947/74532113/master.m3u8', False),
+    ('https://vibuxer.com/stream/PbWMV0c6WpcvanDMKfY3cg/kjhhiuahiuhgihdf'
+     '/1789626446/74510439/master.m3u8', False),
+    ('https://yXqC9C2Vqj7VEPBl.acek-cdn.com/hls2/01/08595/fa58rsem6w0c_n'
+     '/master.m3u8?t=e37w4J1M', False),
+    ('https://wt4PjIIVE9AGjPL.dramiyos-cdn.com/hls2/01/08594/n8dyzufgpzut_n'
+     '/master.m3u8?t=wj6UZIe5', False),
+    ('https://cdn.turboviplay.com/data1/6aa3672b0129f/6aa3672b0129f.m3u8', False),
+    ('https://hls2.turbosplayer.com/file/0caf27dc37fbd3d7ccd62ed1a836ceb7da2c2c8c'
+     '/master.m3u8', False),
+    ('https://ll288op.cloudatacdn.com/u5kj6csbt7plsdgge5y3ujqajikawvdnevpfwvwxd6d'
+     'qmzgkl37q7y72krga/y92b4an3xq~ryLB36Hgmd?token=v9xay&expiry=1', False),
+    ('https://www.porn00.org/get_file/3/4c682e0f1d135cdeb1a1a22466f240e0/5000'
+     '/5665/5665_720p.mp4/?v-acctoken=MTAxNHwx', False),
+    ('https://watchporn.to/get_file/9/fcf01fb76ec4bd596563b6b0f2e6627e/2000'
+     '/2980/2980_720p.mp4/?v-acctoken=MTI3Nnw', False),
+    # a real product code is still safe
+    ('https://cdn.example.com/vids/SOD-PR123.mp4', False),
+    ('https://cdn.example.com/vids/APR-001.mp4', False),
+]:
+    _got49 = _pm49._media_url_is_site_promo(_u49)
+    report(_got49 is _want49,
+           f'promo? {_want49}  {_u49.split("/")[-2] + "/" if _want49 else ""}'
+           f'{_u49.split("/")[-1][:34]}')
 
 print()
 print('FAILURES:', FAILS)

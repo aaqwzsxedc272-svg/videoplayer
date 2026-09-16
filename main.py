@@ -3032,7 +3032,10 @@ class MpvMediaPlayerAdapter(QObject):
         # contained in 'mjpeg', and old MJPEG .avi/.mov files are real video.
         # mpv reports 'PNG (Portable Network Graphics)', so take the leading
         # word as the ID.
-        codec_id = re.split(r'[\s(]', codec, 1)[0].strip().lower()
+        # maxsplit must be a KEYWORD: passing it positionally is a
+        # DeprecationWarning on Python 3.13+, which the field console
+        # duly printed on every single file load.
+        codec_id = re.split(r'[\s(]', codec, maxsplit=1)[0].strip().lower()
         if codec_id in self._IMAGE_VIDEO_CODECS:
             # ...and there is no real frame behind it.
             if width <= 0 or height <= 0:
@@ -40525,6 +40528,19 @@ try {
         'pr', 'trailer', 'preview', 'prev', 'teaser', 'promo', 'sample',
     )
 
+    # Some hosters put the marker in a PATH segment instead of the filename.
+    # sextb's playmate row resolved
+    #   https://cdn-dl.webstream.ne.jp/gigadlcdn/dl/
+    #       3aaimRZTQPQTwYuGELr8_s_sample_zen/_3000.mp4
+    # whose basename stem is just '_3000', so the stem test above passed it
+    # and the player burned three retries on a 403. Deliberately narrower
+    # than the stem list: 'pr' and 'prev' are far too short to trust across
+    # an arbitrary path, where every real URL above splits into segments
+    # like 'hls2', 'data1', 'get', 'file', '08595', 'master', 'm3u8'.
+    _SITE_PROMO_PATH_TOKENS = (
+        'sample', 'samples', 'trailer', 'preview', 'teaser', 'promo',
+    )
+
     def _media_url_is_site_promo(self, url):
         """True for a site's own promo/preview file rather than the film.
 
@@ -40542,7 +40558,13 @@ try {
         stem = os.path.splitext(name)[0]
         stem = re.sub(r'[_-]\d{3,4}p$', '', stem, flags=re.IGNORECASE)
         tail = re.split(r'[_\-.]', stem)[-1].lower()
-        return tail in self._SITE_PROMO_STEM_TOKENS
+        if tail in self._SITE_PROMO_STEM_TOKENS:
+            return True
+        # ...or a promo-named directory anywhere above the file.
+        directory = (path or '').rsplit('/', 1)[0] if '/' in (path or '') else ''
+        return any(seg in self._SITE_PROMO_PATH_TOKENS
+                   for seg in re.split(r'[/_\-.]', directory.lower())
+                   if seg)
 
     @staticmethod
     def _media_url_height_hint(url):
