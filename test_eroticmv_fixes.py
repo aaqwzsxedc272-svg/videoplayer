@@ -4078,6 +4078,99 @@ for _u51, _want51, _why51 in [
     _got51 = _s51._capture_candidate_has_media_shape(_u51)
     report(_got51 is _want51, f'shape? {_want51}  {_why51}')
 
+# ── 52. JW Player 8 keeps its media in item.sources[], not item.file ─────────
+# The user pasted playmate's real URLs and said they "worked instantly" once
+# pasted in by hand:
+#   https://srv1-2.plauymito.live/hls/TVeZDYBcOvOWtCBrcFeAxlYXpuV1C3vV/master.txt
+#   .../index_avc_1080p.txt
+# ...and that FetchV sees them "even before starting the video". So the
+# manifest is configured in the player and readable without playback -- but
+# the DOM probe read only `item.file`, which JW Player 8 leaves undefined on
+# a multi-source playlist. That is why the capture reported jwplayer.js and
+# adverts and never the stream.
+_js52 = next(n.value.value for n in _ast44.walk(_main44)
+             if isinstance(n, _ast44.Assign)
+             and any(getattr(tg, 'id', None) == '_dom_media_js' for tg in n.targets))
+report('item.sources' in _js52, 'the probe now reads JW 8 item.sources[]')
+report('src.file' in _js52, 'and pushes each source file')
+report('getPlaylist' in _js52, 'and walks the whole playlist, not just the current item')
+report('item.file' in _js52, 'while the JW 7 single-source shape still works')
+
+# Execute the SHIPPED JavaScript against a stubbed playmate page, if node is
+# present. This is the real string from main.py, not a copy.
+import shutil as _sh52, subprocess as _sp52, tempfile as _tf52, json as _json52
+if _sh52.which('node'):
+    _MASTER52 = ('https://srv1-2.plauymito.live/hls/'
+                 'TVeZDYBcOvOWtCBrcFeAxlYXpuV1C3vV/master.txt')
+    _VAR52 = ('https://srv1-2.plauymito.live/hls/'
+              'TVeZDYBcOvOWtCBrcFeAxlYXpuV1C3vV/index_avc_1080p.txt')
+    _d52 = _tf52.mkdtemp()
+    _mod52 = os.path.join(_d52, 'dom_media.js')
+    with open(_mod52, 'w', encoding='utf-8') as _f52:
+        _f52.write('module.exports = ' + _js52.strip() + ';\n')
+    _harness52 = """
+const fn = require(process.argv[2]);
+const M = process.argv[3], V = process.argv[4];
+const item = { sources: [ {file: M, type: 'hls'}, {file: V} ] };  // JW 8: no top-level .file
+const div = { id: 'jwplayer' };
+global.document = { querySelectorAll(sel) {
+    if (sel === '.jwplayer') return [div];
+    return [];                       // no <video>, no anchors: nothing has played
+} };
+global.window = { jwplayer: () => ({
+    getPlaylist: () => [item], getPlaylistItem: () => item,
+}) };
+const urls = (fn() || []).map(r => r.u);
+// and the JW 7 single-source shape, on a fresh stub
+global.window = { jwplayer: () => ({ getPlaylistItem: () => ({ file: M }) }) };
+const legacy = (fn() || []).map(r => r.u);
+console.log(JSON.stringify({urls: urls, legacy: legacy}));
+"""
+    _h52 = os.path.join(_d52, 'run.js')
+    with open(_h52, 'w', encoding='utf-8') as _f52:
+        _f52.write(_harness52)
+    _out52 = _sp52.run(['node', _h52, _mod52, _MASTER52, _VAR52],
+                       capture_output=True, text=True, timeout=60)
+    _res52 = _json52.loads(_out52.stdout.strip().splitlines()[-1]) if _out52.stdout.strip() else {}
+    report(_MASTER52 in _res52.get('urls', []),
+           'RUNNING the shipped JS: playmate\'s master.txt is captured from a '
+           'JW 8 sources[] item that has never been played')
+    report(_VAR52 in _res52.get('urls', []),
+           'and so is the 1080p variant')
+    report(_MASTER52 in _res52.get('legacy', []),
+           'and a JW 7 single-source item is still captured')
+else:
+    report(True, 'node not available - skipped executing the capture JS')
+
+# Downstream: the announced URL must survive the gates it has to pass.
+_fn52 = next(n for n in _ast44.walk(_main44)
+             if isinstance(n, _ast44.FunctionDef)
+             and n.name == '_capture_candidate_has_media_shape')
+_g52 = {'urlparse': urlparse, 're': re,
+        'VIDEO_EXTENSIONS': G['VIDEO_EXTENSIONS'],
+        'AUDIO_EXTENSIONS': G['AUDIO_EXTENSIONS']}
+exec(compile(_ast44.Module(body=[_fn52], type_ignores=[]), '<l52>', 'exec'), _g52)
+_disc52 = next(n for n in _ast44.walk(_main44)
+               if isinstance(n, _ast44.FunctionDef)
+               and n.name == '_is_disguised_hls_manifest')
+exec(compile(_ast44.Module(body=[_disc52], type_ignores=[]), '<l52d>', 'exec'), _g52)
+
+
+class _T52:
+    _PLAYABLE_MEDIA_SUFFIXES = ('.m3u8', '.m3u', '.mpd', '.mp4', '.m4v',
+                                '.webm', '.mkv', '.ts', '.flv', '.mov', '.avi')
+    VIDEO_EXTENSIONS = G['VIDEO_EXTENSIONS']
+    AUDIO_EXTENSIONS = G['AUDIO_EXTENSIONS']
+    _capture_candidate_has_media_shape = _g52['_capture_candidate_has_media_shape']
+    _is_disguised_hls_manifest = staticmethod(_g52['_is_disguised_hls_manifest'])
+    _is_hls_stream_url = lambda self, u, ct='': str(u).lower().split('?')[0].endswith(('.m3u8', '.m3u'))
+
+
+for _u52 in (_MASTER52, _VAR52):
+    report(_T52._is_disguised_hls_manifest(_u52)
+           and _T52()._capture_candidate_has_media_shape(_u52),
+           f'the announced {_u52.split("/")[-1]} then survives both gates')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

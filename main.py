@@ -58149,15 +58149,41 @@ if __name__ == "__main__":
                                             }
                                         }
                                     } catch (e) {}
+                                    // JW Player 8 keeps the media in
+                                    // item.sources[]; item.file is only set on
+                                    // a single-source (JW 7 style) setup. So
+                                    // reading item.file alone got undefined on
+                                    // sextb's playmate.to, whose
+                                    // player-core.min.js builds a multi-source
+                                    // playlist -- the manifest was configured
+                                    // in the player and readable before anyone
+                                    // pressed play, and this probe saw nothing.
+                                    const pushJwItem = (item) => {
+                                        if (!item) return;
+                                        try {
+                                            if (Array.isArray(item.sources)) {
+                                                for (const src of item.sources) {
+                                                    try { if (src && src.file) push(src.file, 0, 0, 0); } catch (e) {}
+                                                }
+                                            }
+                                        } catch (e) {}
+                                        try { if (item.file) push(item.file, 0, 0, 0); } catch (e) {}
+                                    };
                                     try {
                                         if (window.jwplayer) {
                                             for (const el of document.querySelectorAll('.jwplayer')) {
                                                 try {
                                                     const api = window.jwplayer(el.id);
-                                                    if (api && api.getPlaylistItem) {
-                                                        const item = api.getPlaylistItem();
-                                                        if (item && item.file) push(item.file, 0, 0, 0);
-                                                    }
+                                                    if (!api) continue;
+                                                    try {
+                                                        const list = api.getPlaylist && api.getPlaylist();
+                                                        if (Array.isArray(list)) {
+                                                            for (const it of list) pushJwItem(it);
+                                                        }
+                                                    } catch (e) {}
+                                                    try {
+                                                        if (api.getPlaylistItem) pushJwItem(api.getPlaylistItem());
+                                                    } catch (e) {}
                                                 } catch (e) {}
                                             }
                                         }
