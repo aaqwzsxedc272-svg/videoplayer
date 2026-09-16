@@ -4242,6 +4242,239 @@ console.log(JSON.stringify(out));
 else:
     report(True, 'node not available - skipped executing the capture JS')
 
+# ── 54. playmate.to: call the site's own /api/s instead of capturing ──────────
+# The embed page holds no media URL at all (window.__PM carries only
+# videoId/referrer/countKey/duration) and player-core.min.js mints the stream
+# with an XHR, so five capture rounds found nothing. player-core is
+# javascript-obfuscator output; decoding its string array with the site's own
+# decoder yields POST /api/s {"c":filecode,"d":device} -> {sx: <manifest>}.
+# GET https://playmate.to/api/s answers {"error":"Method not allowed"}, which
+# is what pins the route and the verb.
+print()
+print('54. playmate.to resolves through its own POST /api/s, no browser')
+
+_pm_host = lift('VideoPlayer', '_is_playmate_host')
+_pm_code = lift('VideoPlayer', '_playmate_filecode')
+_pm_res = lift('VideoPlayer', '_resolve_playmate_source')
+_PM_HOSTS = lift_attr('VideoPlayer', '_PLAYMATE_HOSTS')
+
+
+class PlaymateStub:
+    _PLAYMATE_HOSTS = _PM_HOSTS
+    _is_playmate_host = _pm_host
+    _playmate_filecode = _pm_code
+    _resolve_playmate_source = _pm_res
+    # real shipped helpers, so the HLS/proxy decision is the shipped one
+    _is_disguised_hls_manifest = staticmethod(
+        lift('VideoPlayer', '_is_disguised_hls_manifest'))
+    _is_hls_stream_url = lift('VideoPlayer', '_is_hls_stream_url')
+    _flag_png_wrapped_hls_for_proxy = lift(
+        'VideoPlayer', '_flag_png_wrapped_hls_for_proxy')
+
+    def __init__(self, payload=None, ok=True, status=200, png_wrap=False,
+                 raise_exc=None):
+        self.calls = []
+        self._payload, self._ok, self._status = payload, ok, status
+        self._png_wrap, self._raise = png_wrap, raise_exc
+
+    def _stream_request_headers(self, referer=None, extra=None):
+        return {'User-Agent': 'Mozilla/5.0 (stub)'}
+
+    def _hls_request_headers(self, source_url):
+        return {'Referer': str(source_url)}
+
+    def _clean_remote_title(self, title):
+        return str(title or '').strip()
+
+    def _hls_manifest_ships_png_wrapped_segments(self, url, headers=None,
+                                                 referer=None):
+        return self._png_wrap
+
+
+class _FakeCffiResponse:
+    def __init__(self, stub):
+        self._stub = stub
+        self.status_code = stub._status
+        self.ok = stub._ok
+        self.text = json.dumps(stub._payload) if stub._payload is not None else ''
+
+    def json(self):
+        if self._stub._payload is None:
+            raise ValueError('no json')
+        return self._stub._payload
+
+
+class _FakeCffiSession:
+    def __init__(self, stub):
+        self._stub = stub
+
+    def post(self, url, headers=None, data=None, timeout=None,
+             allow_redirects=None):
+        self._stub.calls.append({
+            'url': url, 'headers': dict(headers or {}), 'data': data,
+            'timeout': timeout, 'allow_redirects': allow_redirects,
+        })
+        if self._stub._raise:
+            raise self._stub._raise
+        return _FakeCffiResponse(self._stub)
+
+
+import sys as _sys54
+import types as _types54
+
+
+class _FakeCffiRequests(_types54.ModuleType):
+    _stub = None
+
+    @classmethod
+    def Session(cls, impersonate=None):
+        return _FakeCffiSession(cls._stub)
+
+
+# the lifted resolver stamps resolved_at_ms, so it needs main.py's module globals
+G.setdefault('time', time)
+
+
+def _run_playmate(stub, url='https://playmate.to/embed/xoDtAGdof2iJA'):
+    """Execute the shipped resolver with curl_cffi.requests stubbed out."""
+    mod = _types54.ModuleType('curl_cffi')
+    req = _FakeCffiRequests('curl_cffi.requests')
+    # Session() is a classmethod on the shipped call path, so the stub has to
+    # live on the class, not on the module instance.
+    _FakeCffiRequests._stub = stub
+    mod.requests = req
+    saved = {k: _sys54.modules.get(k) for k in ('curl_cffi', 'curl_cffi.requests')}
+    _sys54.modules['curl_cffi'] = mod
+    _sys54.modules['curl_cffi.requests'] = req
+    try:
+        return stub, stub._resolve_playmate_source(url)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                _sys54.modules.pop(k, None)
+            else:
+                _sys54.modules[k] = v
+
+
+PlaymateStub._resolve_playmate_source = _pm_res
+
+_SX = 'https://srv1-2.plauymito.live/hls/TVeZDYBcOvOWtCBrcFeAxlYXpuV1C3vV/master.txt'
+_GOOD = {'sx': _SX, 'tx': 'JIMMY-009', 'ix': 'https://srv1-2.plauymito.live/thumbnail/xoDtAGdof2iJA.jpg',
+         'ax': '', 'lx': '', 'cx': 'xoDtAGdof2iJA', 'kx': []}
+
+report('playmate.to' in _PM_HOSTS,
+       'playmate.to is named as a playmate host', str(_PM_HOSTS))
+_s54 = PlaymateStub(_GOOD)
+report(_s54._is_playmate_host('playmate.to') and _s54._is_playmate_host('www.playmate.to'),
+       'the host test matches playmate.to and its www subdomain')
+report(not _s54._is_playmate_host('notplaymate.to')
+       and not _s54._is_playmate_host('playmate.to.evil.example')
+       and not _s54._is_playmate_host(''),
+       "and not a lookalike host, a host merely starting with the name, or ''")
+report(_s54._playmate_filecode('https://playmate.to/embed/xoDtAGdof2iJA') == 'xoDtAGdof2iJA'
+       and _s54._playmate_filecode('https://playmate.to/embed/xoDtAGdof2iJA/') == 'xoDtAGdof2iJA',
+       'the filecode is the embed path segment, with or without a trailing slash')
+
+_stub54, _got54 = _run_playmate(PlaymateStub(_GOOD))
+_got54 = _got54 or {}
+report(len(_stub54.calls) == 1, 'the resolver issued exactly one HTTP call')
+_c54 = (_stub54.calls or [{}])[0]
+report(_c54.get('url') == 'https://playmate.to/api/s',
+       'it POSTed to playmate\'s real endpoint /api/s (the decoded one)',
+       str(_c54.get('url')))
+report(json.loads(_c54.get('data') or '{}') == {'c': 'xoDtAGdof2iJA', 'd': 'web'},
+       'with the body player-core sends: {"c": filecode, "d": device}',
+       str(_c54.get('data')))
+report(_c54.get('headers', {}).get('Content-Type') == 'application/json',
+       'as application/json')
+report(_c54.get('headers', {}).get('Referer') == 'https://playmate.to/embed/xoDtAGdof2iJA'
+       and _c54.get('headers', {}).get('Origin') == 'https://playmate.to',
+       'with the embed page as Referer and the site as Origin')
+report(isinstance(_got54, dict) and _got54.get('playback_url') == _SX,
+       'and the manifest from `sx` became the playback URL')
+report(_got54.get('resolver_provider') == 'playmate_api'
+       and _got54.get('pre_resolved_playback_url') is True,
+       'tagged as pre-resolved, so no capture browser is opened for it')
+# call through an instance so `self` binds the way it does at runtime
+report(_got54.get('content_type') == 'application/vnd.apple.mpegurl'
+       and _s54._is_hls_stream_url(_got54.get('playback_url'),
+                                   _got54.get('content_type')),
+       'and the .txt manifest is recognised as an HLS stream')
+report(_s54._is_disguised_hls_manifest(_SX) is True,
+       'specifically as a .txt-disguised master under /hls/, which is what '
+       'makes the shipped playlist rewriter handle it')
+report(_s54._is_disguised_hls_manifest(
+           'https://watchstreamhd.com/cdn/hls/abc123/master.txt') is False,
+       'while the AES-ciphertext master.txt on watchstreamhd stays excluded')
+report(_got54.get('title') == 'JIMMY-009',
+       "the API's `tx` became the title", str(_got54.get('title')))
+report(_got54.get('route_local_proxy') is not True,
+       'plaintext segments stay off the unwrapping proxy')
+
+_stub54b, _got54b = _run_playmate(PlaymateStub(_GOOD, png_wrap=True))
+_got54b = _got54b or {}
+report(_got54b.get('route_local_proxy') is True,
+       'but PNG-wrapped segments are routed through the local proxy, exactly '
+       'as the field-confirmed hglink path is')
+
+_stub54c, _got54c = _run_playmate(
+    PlaymateStub(_GOOD), 'https://playmate.to/embed/xoDtAGdof2iJA?ref=sextb&t=1')
+report((_stub54c.calls or [{}])[0].get('url')
+       == 'https://playmate.to/api/s?ref=sextb&t=1',
+       "the embed page's own query string is forwarded, as player-core does",
+       str((_stub54c.calls or [{}])[0].get('url')))
+
+_stub54i, _got54i = _run_playmate(
+    PlaymateStub(_GOOD),
+    'https://playmate.to/embed/xoDtAGdof2iJA?filecode=other&t=1')
+report((_stub54i.calls or [{}])[0].get('url')
+       == 'https://playmate.to/api/s?t=1',
+       "except a 'filecode' parameter, which player-core deletes first "
+       "(e.delete('filecode'))",
+       str((_stub54i.calls or [{}])[0].get('url')))
+
+_stub54d, _got54d = _run_playmate(PlaymateStub({'tx': 'no stream here'}))
+report(_got54d is None and len(_stub54d.calls) == 1,
+       'a response with no `sx` yields None, so the capture ladder still runs')
+
+_stub54e, _got54e = _run_playmate(
+    PlaymateStub(_GOOD, ok=False, status=405))
+report(_got54e is None,
+       'a 405 from the endpoint yields None rather than a bogus stream')
+
+_stub54f, _got54f = _run_playmate(PlaymateStub(_GOOD), 'https://hglink.to/e/abc')
+report(_got54f is None and len(_stub54f.calls) == 0,
+       'a non-playmate host is untouched: not one request is made')
+
+_stub54g, _got54g = _run_playmate(
+    PlaymateStub({'sx': '/hls/abc123/master.txt'}))
+_got54g = _got54g or {}
+report(_got54g is not None
+       and _got54g.get('playback_url') == 'https://playmate.to/hls/abc123/master.txt',
+       'a relative `sx` is resolved against the site origin',
+       str(_got54g.get('playback_url')))
+
+_stub54h, _got54h = _run_playmate(
+    PlaymateStub(_GOOD, raise_exc=OSError('tls handshake failed')))
+report(_got54h is None,
+       'a transport error is reported and yields None, never a silent pass')
+
+_src54 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.py'),
+              encoding='utf-8').read()
+report("elif self._is_playmate_host(host):" in _src54
+       and "resolved = self._resolve_playmate_source(source_url)" in _src54,
+       'the resolver is wired into _resolve_stream_source, ahead of the '
+       'generic browser-capture fallback')
+report("_PLAYMATE_HOSTS = ('playmate.to',)" in _src54
+       and 'GET https://playmate.to/api/s answers' in _src54
+       and '{"error":"Method not allowed"}' in _src54,
+       'and the code records how the endpoint was established -- the decoded '
+       'string array plus the live 405 on GET -- rather than a guessed route')
+report("[PLAYMATE_API]" in _src54,
+       'every branch of it prints a [PLAYMATE_API] line, so a field log can '
+       'never be mistaken for a stale build')
+
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

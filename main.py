@@ -40123,6 +40123,182 @@ try {
                 results.append((url, label or (f'{height}p' if height else ''), height))
         return results
 
+    # ------------------------------------------------------------------
+    # playmate.to  (sextb's "PM" server row)
+    # ------------------------------------------------------------------
+    # The embed page carries NO media URL. window.__PM holds only
+    # {videoId, referrer, countKey, duration} and /assets/js/player-core.min.js
+    # mints the stream at runtime, so five capture rounds could not find one:
+    # the field probe printed
+    #     [BROWSER_CLICK][JWPROBE] jwplayer_api=True containers=1 \
+    #                              playlist_items=0 source_files=0 files=[]
+    # i.e. JW's API is loaded and a container exists, but player-core never
+    # configured a playlist, so there was nothing in the DOM and nothing on
+    # the wire for a capture to see.
+    #
+    # player-core.min.js is javascript-obfuscator output (string array encoded
+    # with a CUSTOM base64 table that starts lowercase). Decoding that array
+    # with the site's own decoder gives the real call verbatim:
+    #
+    #     let filecode = getFilecodeFromURL();      // last path segment
+    #     let q = new URLSearchParams(location.search);
+    #     q.delete('filecode');
+    #     apiURL = '/api/s' + (q.toString() ? '?' + q.toString() : '');
+    #     fetch(apiURL, {method: 'POST',
+    #                    headers: {'Content-Type': 'application/json'},
+    #                    body: JSON.stringify({c: filecode, d: detectDevice()})})
+    #       .then(r => r.json())
+    #       .then(data => ({streaming_url: data.sx, title: data.tx,
+    #                       thumbnail: data.ix, vast_ads: data.ax,
+    #                       default_sub_lang: data.lx, filecode: data.cx,
+    #                       subtitles: (data.kx || []).map(...)}))
+    #
+    # and setupPlayer() then hands data.streaming_url to JW Player as
+    # playlist[0].file with type 'hls'. So `sx` IS the manifest URL, in
+    # plaintext: the pako + crypto-js scripts on the page are used only by
+    # flushBeacon()'s analytics payload, never by the stream.
+    # detectDevice() returns 'ios' | 'android' | 'web'.
+    #
+    # Confirmed against the live host: GET https://playmate.to/api/s answers
+    # {"error":"Method not allowed"} -- the route exists and is POST-only,
+    # exactly as the decoded code says. This is the same shape as the URL a
+    # user pasted by hand and that played immediately:
+    #     https://srv1-2.plauymito.live/hls/<32 chars>/master.txt
+    _PLAYMATE_HOSTS = ('playmate.to',)
+
+    def _is_playmate_host(self, host):
+        host = str(host or '').lower().lstrip('.')
+        if not host:
+            return False
+        return any(host == h or host.endswith('.' + h)
+                   for h in self._PLAYMATE_HOSTS)
+
+    def _playmate_filecode(self, source_url):
+        """player-core's getFilecodeFromURL(): the last path segment."""
+        try:
+            path = urlparse(str(source_url or '')).path or ''
+        except Exception:
+            return ''
+        match = re.match(r'^/embed/([^/?#]+)/?$', path, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        segments = [seg for seg in path.split('/') if seg]
+        return segments[-1] if segments else ''
+
+    def _resolve_playmate_source(self, source_url):
+        """POST playmate's own /api/s and read the manifest URL out of `sx`.
+
+        No browser, no click, no DOM scan. Returns None on any failure so
+        the existing capture ladder still runs unchanged.
+        """
+        parsed = urlparse(str(source_url or ''))
+        host = (parsed.netloc or '').lower()
+        if not self._is_playmate_host(host):
+            return None
+        filecode = self._playmate_filecode(source_url)
+        if not filecode:
+            print(f"[PLAYMATE_API] no filecode in {str(source_url)[:140]}", flush=True)
+            return None
+        scheme = parsed.scheme or 'https'
+        origin = f"{scheme}://{parsed.netloc}"
+        api_url = f"{origin}/api/s"
+        # player-core forwards the embed page's own query string, minus a
+        # 'filecode' parameter (the decoded source is
+        # e.delete('filecode') before e.toString()). Pairs are kept verbatim
+        # so nothing is re-encoded on the way through.
+        _pairs = [kv for kv in (parsed.query or '').split('&') if kv]
+        _pairs = [kv for kv in _pairs
+                  if kv.split('=', 1)[0].strip().lower() != 'filecode']
+        if _pairs:
+            api_url = f"{api_url}?{'&'.join(_pairs)}"
+        payload = json.dumps({'c': filecode, 'd': 'web'})
+        headers = self._stream_request_headers(source_url)
+        headers['Content-Type'] = 'application/json'
+        headers.setdefault('Accept', 'application/json, text/plain, */*')
+        headers['Referer'] = source_url
+        headers['Origin'] = origin
+        print(f"[PLAYMATE_API] POST {api_url} filecode={filecode}", flush=True)
+
+        data = None
+        try:
+            import curl_cffi.requests as cfreq
+        except Exception as exc:
+            cfreq = None
+            print(f"[PLAYMATE_API] curl_cffi unavailable "
+                  f"({type(exc).__name__}: {exc}), trying requests", flush=True)
+        if cfreq is not None:
+            try:
+                response = cfreq.Session(impersonate='chrome131').post(
+                    api_url, headers=headers, data=payload,
+                    timeout=25, allow_redirects=True)
+                print(f"[PLAYMATE_API] http {getattr(response, 'status_code', '?')} "
+                      f"({len(getattr(response, 'text', '') or '')} bytes)", flush=True)
+                if response is not None and response.ok:
+                    data = response.json()
+            except Exception as exc:
+                print(f"[PLAYMATE_API] curl_cffi POST failed "
+                      f"({type(exc).__name__}: {exc})", flush=True)
+        if data is None:
+            try:
+                import requests
+            except Exception as exc:
+                requests = None
+                print(f"[PLAYMATE_API] requests unavailable "
+                      f"({type(exc).__name__}: {exc})", flush=True)
+            if requests is not None:
+                try:
+                    response = requests.post(
+                        api_url, headers=headers, data=payload,
+                        timeout=25, allow_redirects=True)
+                    print(f"[PLAYMATE_API] http {response.status_code} "
+                          f"({len(response.text or '')} bytes, requests)", flush=True)
+                    if response.ok:
+                        data = response.json()
+                except Exception as exc:
+                    print(f"[PLAYMATE_API] requests POST failed "
+                          f"({type(exc).__name__}: {exc})", flush=True)
+        if not isinstance(data, dict):
+            print(f"[PLAYMATE_API] {api_url} returned no JSON object; "
+                  f"falling back to the capture", flush=True)
+            return None
+
+        # player-core renames the short keys itself; accept both spellings.
+        stream = str(data.get('sx') or data.get('streaming_url') or '').strip()
+        if not stream:
+            print(f"[PLAYMATE_API] response carried no stream key "
+                  f"(keys: {sorted(str(k) for k in data)[:12]})", flush=True)
+            return None
+        if not re.match(r'^https?://', stream, re.IGNORECASE):
+            stream = urljoin(origin + '/', stream)
+        print(f"[PLAYMATE_API] stream resolved with no browser: {stream[:200]}",
+              flush=True)
+
+        info = {
+            'playback_url': stream,
+            'download_url': stream,
+            'content_type': 'application/vnd.apple.mpegurl',
+            'headers': self._hls_request_headers(stream),
+            'pre_resolved_playback_url': True,
+            'resolver_provider': 'playmate_api',
+            'source_url': source_url,
+            'resolved_at_ms': int(time.time() * 1000),
+        }
+        title = str(data.get('tx') or data.get('title') or '').strip()
+        if title:
+            info['title'] = self._clean_remote_title(title) or title
+        thumb = str(data.get('ix') or data.get('thumbnail') or '').strip()
+        if thumb:
+            info['thumbnail_url'] = thumb
+        # plauymito.live renames its playlists to .txt and may PNG-wrap the
+        # segments exactly like hglink/hanerix do, so let the shared probe
+        # decide whether the local unwrapping proxy is needed.
+        try:
+            self._flag_png_wrapped_hls_for_proxy(info)
+        except Exception as exc:
+            print(f"[PLAYMATE_API] png-wrap probe failed "
+                  f"({type(exc).__name__}: {exc})", flush=True)
+        return info
+
     def _resolve_noodle_family_source(self, source_url):
         """Resolve the REAL stream on a noodlemagazine-family site.
 
@@ -41232,6 +41408,12 @@ try {
                 # also writes other hosters into the h1 title, which become
                 # this row's mirrors.
                 resolved = self._resolve_sxyprn_source(source_url)
+            elif self._is_playmate_host(host):
+                # sextb's PM row. The manifest is minted by an XHR, not
+                # rendered, and the headless player never even configures a
+                # playlist — so call playmate's own /api/s directly instead
+                # of capturing anything.
+                resolved = self._resolve_playmate_source(source_url)
             elif self._is_noodle_family_host(host):
                 # Must run before the VOE auto-detect at the end of this
                 # ladder: these pages ARE VOE-format, so _detect_voe_and_resolve
