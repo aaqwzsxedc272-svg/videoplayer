@@ -27988,6 +27988,26 @@ try {
             return False
         return path.endswith('.txt') and '/cdn/hls/' in path
 
+    @staticmethod
+    def _browser_retry_needs_headed(media_lines):
+        """Whether a second, off-screen-headed capture is worth a window.
+
+        True only when the headless run produced no media-bearing capture
+        line at all — the signature of an engine blocked before the page
+        said anything (bot wall, unsupported codec path, instant crash).
+        That is the one case where a different engine can genuinely help.
+
+        A run that saw the page's media and still found nothing playable
+        will see exactly the same media headed. A field log on sextb's
+        hosters had both engines run for hglink.to and player.upn.one and
+        return the same capture; the second window bought nothing and
+        doubled the wait.
+        """
+        try:
+            return int(media_lines or 0) <= 0
+        except Exception:
+            return True
+
     def _capture_candidate_is_source_page(self, url, source_url):
         """True when a capture is just the page we opened the browser on.
 
@@ -38931,6 +38951,18 @@ try {
             return None
 
         combined = '\n'.join(_pw_out_lines)
+        # How many media-bearing lines this run produced. The caller uses
+        # it to decide whether a second, headed attempt is worth a browser
+        # window: zero means the engine was blocked before the page said
+        # anything, which is the one case where a different engine can
+        # genuinely help. A run that captured plenty of URLs and still
+        # found nothing playable will capture the same URLs headed.
+        try:
+            self._last_browser_click_media_lines = sum(
+                1 for _l in _pw_out_lines
+                if _l.startswith(('MEDIA_URL::', 'VOE_M3U8::', 'VERIFIED_MEDIA::')))
+        except Exception:
+            self._last_browser_click_media_lines = 0
         media_candidates = []
         verified_candidates = set()
         measured_media = {}
@@ -41002,10 +41034,12 @@ try {
             # only when headless fails: some bot walls fingerprint headless
             # Chromium, and there the headed engine is still the better
             # answer than no stream at all.
+            self._last_browser_click_media_lines = 0
             resolved = self._resolve_stream_via_browser_click(
                 source_url, headless=True,
                 referer=self._embed_origin_referer(source_url))
-            if resolved is None:
+            if resolved is None and self._browser_retry_needs_headed(
+                    getattr(self, '_last_browser_click_media_lines', 0)):
                 resolved = self._resolve_stream_via_browser_click(
                     source_url, headed_hidden=True,
                     referer=self._embed_origin_referer(source_url))

@@ -3329,6 +3329,53 @@ report("manifest captured and capture idle, closing browser" in _src44,
 report("_pw_manifest_at is not None\n                            and _now - _pw_last_line_at > 12" in _src44,
        'that close is gated on 12s of capture silence')
 
+# ── 45. one browser, not two, when headless already saw the page ────────────
+# The headless-first ladder added last round doubled the browser count on
+# every failing sextb hoster. The field log shows both engines running for
+# the same URL and returning the same capture:
+#   BROWSER_UA::... HeadlessChrome/153.0.0.0 ...   <- run 1, saw master.txt
+#   BROWSER_UA::... Chrome/153.0.0.0 ...           <- run 2, saw master.txt
+#   [BROWSER_CLICK] killed capture subprocess (manifest captured ...) x2
+# The second window bought nothing, which is the "browser opens many time"
+# complaint. Retry headed only when headless saw nothing at all.
+_fn45 = None
+for _node45 in _ast44.walk(_tree43):
+    if (isinstance(_node45, _ast44.FunctionDef)
+            and _node45.name == '_browser_retry_needs_headed'):
+        _fn45 = _node45
+report(_fn45 is not None, 'found _browser_retry_needs_headed in main.py')
+_g45 = {}
+exec(compile(_ast44.Module(body=[_fn45], type_ignores=[]), '<lifted>', 'exec'), _g45)
+_r45 = staticmethod(_g45['_browser_retry_needs_headed'])
+for _n45, _w45 in [
+    (0, True),      # blocked before the page said anything -> try headed
+    (None, True),
+    ('', True),
+    (1, False),     # saw something -> headed sees the same thing
+    (11, False),    # playmate.to's 11 candidates
+    (18, False),    # hglink.to's capture
+    (-1, True),
+]:
+    report(_r45.__func__(_n45) is _w45, f'needs-headed({_n45!r}) -> {_w45}')
+
+_src45 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.py'),
+              encoding='utf-8').read()
+report('self._browser_retry_needs_headed(' in _src45,
+       'the generic ladder consults the helper')
+report('_last_browser_click_media_lines = sum(' in _src45,
+       'the capture records how many media lines it saw')
+report("""            self._last_browser_click_media_lines = 0
+            resolved = self._resolve_stream_via_browser_click(
+                source_url, headless=True,""" in _src45,
+       'the counter is reset before each headless attempt')
+
+# And the two fixes that the same field log confirmed firing.
+report('f"[BROWSER_CLICK] dropped {len(_self_pages)} candidate(s) "' in _src45
+       and 'f"that are the source page itself: {_self_pages[0][:120]}"' in _src45,
+       'source-page drop message still present (log confirms it fired)')
+report('manifest captured and capture idle, closing browser' in _src45,
+       'idle-after-manifest close still present (log confirms it fired)')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
