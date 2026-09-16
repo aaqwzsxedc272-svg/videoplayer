@@ -3160,6 +3160,56 @@ report(len(_r42['streams']) == 5,
 report(any('master.m3u8' in u and 'upn.one' in u for u in _r42['streams']),
        'including the upn.one manifest')
 
+# ── 43. placeholder schemes are not media candidates ─────────────────────────
+# playmate.to's capture began MEDIA_URL::javascript:false, the probe rejected
+# every candidate, and the promote-an-unverified-capture fallback handed
+# javascript:false to mpv as a playback_url -- "Cannot open file
+# 'C:\\Users\\...\\javascript:false'" -- looping the load-failed ladder several
+# times per link. urlparse('javascript:false') has no netloc and a path of
+# 'false', so neither the host-token nor the suffix test could catch it.
+import ast as _ast43
+_main43 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.py'),
+               encoding='utf-8').read()
+_tree43 = _ast43.parse(_main43)
+_fn43 = None
+_attrs43 = {}
+for _node43 in _ast43.walk(_tree43):
+    if isinstance(_node43, _ast43.FunctionDef) and _node43.name == '_capture_candidate_is_clearly_not_media':
+        _fn43 = _node43
+    if isinstance(_node43, _ast43.Assign):
+        for _t43 in _node43.targets:
+            if isinstance(_t43, _ast43.Name) and _t43.id in (
+                    '_NON_MEDIA_HOST_TOKENS', '_NON_MEDIA_URL_SUFFIXES'):
+                _attrs43[_t43.id] = _ast43.literal_eval(_node43.value)
+report(_fn43 is not None, 'found the real _capture_candidate_is_clearly_not_media')
+report(len(_attrs43) == 2, f'lifted both class attribute tuples (got {sorted(_attrs43)})')
+
+class _T43Stub:
+    _NON_MEDIA_HOST_TOKENS = _attrs43.get('_NON_MEDIA_HOST_TOKENS', ())
+    _NON_MEDIA_URL_SUFFIXES = _attrs43.get('_NON_MEDIA_URL_SUFFIXES', ())
+    exec(compile(_ast43.Module(body=[_fn43], type_ignores=[]), '<lifted>', 'exec'))
+
+_s43 = _T43Stub()
+for _u43, _w43 in [
+    ('javascript:false',                                                    True),
+    ('javascript:;',                                                        True),
+    ('about:blank',                                                         True),
+    ('data:text/html;base64,AAAA',                                          True),
+    ('blob:https://turboplays.click/8e8069c3-08ef-41d3-b709-8a9f',          True),
+    ('file:///C:/x.mp4',                                                    True),
+    ('//cdn.example.net/v/movie.mp4',                                       False),  # protocol-relative is real
+    ('https://cdn.example.net/v/movie.mp4',                                 False),
+    ('https://hanerix.com/stream/abc/def/1/2/master.m3u8',                  False),
+    ('/stream/9g6WyL4AylslzsFPhdAYuA/x/1/2/master.m3u8',                    False),
+    ('',                                                                    False),
+]:
+    report(_s43._capture_candidate_is_clearly_not_media(_u43) is _w43,
+           f'not-media {_u43[:52]!r} -> {_w43}')
+
+# And the promotion path must actually consult it.
+report('_capture_candidate_is_clearly_not_media(c)' in _main43,
+       'the promote-unverified fallback still filters through it')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

@@ -27982,6 +27982,21 @@ try {
         if any(token in low for token in self._NON_MEDIA_HOST_TOKENS):
             return True
         try:
+            scheme = (urlparse(url).scheme or '').lower()
+        except Exception:
+            scheme = ''
+        # A placeholder, not a URL. Players ship these as the src of an
+        # <iframe>/<video> they have not filled in yet, the capture script
+        # reports them like any other MEDIA_URL, and nothing below can rank
+        # them out: urlparse('javascript:false') has no host and a path of
+        # 'false', so every host- and suffix-based test waves it through.
+        # It then reached mpv as a playback_url and was opened as a local
+        # file -- "Cannot open file '...\\javascript:false'" -- which looped
+        # the whole load-failed ladder, several times per link.
+        # An empty scheme is a protocol-relative //host/path, which is real.
+        if scheme and scheme not in ('http', 'https'):
+            return True
+        try:
             path = (urlparse(url).path or '').lower()
         except Exception:
             return False
