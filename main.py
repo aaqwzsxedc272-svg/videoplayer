@@ -58171,7 +58171,16 @@ if __name__ == "__main__":
                                     };
                                     try {
                                         if (window.jwplayer) {
-                                            for (const el of document.querySelectorAll('.jwplayer')) {
+                                            // jwplayer() with no argument hands
+                                            // back the first instance even
+                                            // before the .jwplayer class has
+                                            // been applied to the container.
+                                            try { pushJwItem(window.jwplayer().getPlaylistItem && window.jwplayer().getPlaylistItem()); } catch (e) {}
+                                            try {
+                                                const _l0 = window.jwplayer().getPlaylist && window.jwplayer().getPlaylist();
+                                                if (Array.isArray(_l0)) { for (const _i0 of _l0) pushJwItem(_i0); }
+                                            } catch (e) {}
+                                            for (const el of document.querySelectorAll('.jwplayer, #jwplayer, .jwplayer-container, [id^="jwplayer"]')) {
                                                 try {
                                                     const api = window.jwplayer(el.id);
                                                     if (!api) continue;
@@ -58203,6 +58212,44 @@ if __name__ == "__main__":
                                     return found.length ? found : null;
                                 }
                             """
+
+                            # One-shot diagnostic. Until this existed the JW
+                            # probe failed silently: a capture that found
+                            # nothing looked identical whether the probe never
+                            # ran, jwplayer was absent, or the playlist was
+                            # empty -- so there was no way to tell a stale
+                            # build from a real miss.
+                            _jw_status_js = """
+                                () => {
+                                    const out = {api: false, els: 0, items: 0,
+                                                 sources: 0, files: []};
+                                    try {
+                                        out.api = typeof window.jwplayer === 'function';
+                                        out.els = document.querySelectorAll(
+                                            '.jwplayer, #jwplayer, .jwplayer-container, [id^="jwplayer"]').length;
+                                        if (!out.api) return out;
+                                        const take = (item) => {
+                                            if (!item) return;
+                                            out.items++;
+                                            try { if (item.file) out.files.push(String(item.file)); } catch (e) {}
+                                            try {
+                                                if (Array.isArray(item.sources)) {
+                                                    for (const s of item.sources) {
+                                                        if (s && s.file) { out.sources++; out.files.push(String(s.file)); }
+                                                    }
+                                                }
+                                            } catch (e) {}
+                                        };
+                                        try {
+                                            const l = window.jwplayer().getPlaylist && window.jwplayer().getPlaylist();
+                                            if (Array.isArray(l)) { for (const it of l) take(it); }
+                                        } catch (e) {}
+                                        try { take(window.jwplayer().getPlaylistItem && window.jwplayer().getPlaylistItem()); } catch (e) {}
+                                    } catch (e) {}
+                                    return out;
+                                }
+                            """
+                            _jw_status_reported = False
 
                             # Pre-roll ads on these players load AND play
                             # first — the real video's URL only appears once
@@ -58237,6 +58284,28 @@ if __name__ == "__main__":
                                 # every accessible frame, not only the top
                                 # document; cross-origin frames are still
                                 # readable through Playwright's frame API.
+                                if not _jw_status_reported:
+                                    # Printed once, on the first pass, so the
+                                    # log states plainly whether the JW player
+                                    # object existed at all and whether it had
+                                    # a playlist configured.
+                                    try:
+                                        _jw_st = page.evaluate(_jw_status_js) or {}
+                                        print('[BROWSER_CLICK][JWPROBE] '
+                                              'jwplayer_api=%s containers=%s '
+                                              'playlist_items=%s source_files=%s files=%s'
+                                              % (bool(_jw_st.get('api')),
+                                                 int(_jw_st.get('els') or 0),
+                                                 int(_jw_st.get('items') or 0),
+                                                 int(_jw_st.get('sources') or 0),
+                                                 [str(f)[:150] for f in (_jw_st.get('files') or [])[:4]]))
+                                        sys.stdout.flush()
+                                        _jw_status_reported = True
+                                    except Exception as _jw_exc:
+                                        print('[BROWSER_CLICK][JWPROBE] failed: %s: %s'
+                                              % (type(_jw_exc).__name__, _jw_exc))
+                                        sys.stdout.flush()
+                                        _jw_status_reported = True
                                 dom_recs = []
                                 try:
                                     _dom_frames = list(page.frames)

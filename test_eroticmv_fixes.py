@@ -4171,6 +4171,77 @@ for _u52 in (_MASTER52, _VAR52):
            and _T52()._capture_candidate_has_media_shape(_u52),
            f'the announced {_u52.split("/")[-1]} then survives both gates')
 
+# ── 53. The JW probe needed the .jwplayer CLASS, which only appears after
+#        setup -- and it failed silently, so a stale build looked identical
+#        to a real miss. ────────────────────────────────────────────────────
+# The capture for playmate.to/embed/dl6XiG3upbbCb again showed jwplayer.js,
+# player-core.min.js, adverts and no stream. The probe walked
+# document.querySelectorAll('.jwplayer'), but JW applies that class only once
+# setup has run, and queried jwplayer(el.id) -- so before setup there was
+# nothing to iterate. jwplayer() with no argument returns the first instance
+# regardless. And nothing was logged, so the run above could not distinguish
+# "probe found nothing" from "this build has no probe".
+report(".jwplayer, #jwplayer, .jwplayer-container, [id^=\"jwplayer\"]" in _js52,
+       'the probe now finds the container by id as well as by class')
+report('window.jwplayer().getPlaylistItem' in _js52,
+       'and asks the no-argument jwplayer() for the playlist')
+report('[BROWSER_CLICK][JWPROBE]' in _src46,
+       'the capture now reports what the JW probe saw, once per run')
+report('_jw_status_reported' in _src46,
+       'and only once, so it cannot spam the watch loop')
+
+import shutil as _sh53, subprocess as _sp53, tempfile as _tf53, json as _json53
+if _sh53.which('node'):
+    _st53 = next(n.value.value for n in _ast44.walk(_main44)
+                 if isinstance(n, _ast44.Assign)
+                 and any(getattr(tg, 'id', None) == '_jw_status_js' for tg in n.targets))
+    _d53 = _tf53.mkdtemp()
+    for _nm53, _body53 in (('probe', _js52), ('status', _st53)):
+        with open(os.path.join(_d53, _nm53 + '.js'), 'w', encoding='utf-8') as _f53:
+            _f53.write('module.exports = ' + _body53.strip() + ';\n')
+    _h53 = os.path.join(_d53, 'run.js')
+    with open(_h53, 'w', encoding='utf-8') as _f53:
+        _f53.write("""
+const probe = require(process.argv[2] + '/probe.js');
+const status = require(process.argv[2] + '/status.js');
+const M = process.argv[3];
+const out = {};
+function run(name, els, apiWorks) {
+  global.document = { querySelectorAll(sel) {
+      if (sel === '.jwplayer') return els.filter(e => e.cls);
+      return els.filter(e => !e.cls);
+  } };
+  const inst = { getPlaylist: () => [{sources:[{file:M}]}],
+                 getPlaylistItem: () => ({sources:[{file:M}]}) };
+  global.window = apiWorks ? { jwplayer: () => inst } : {};
+  const urls = (probe() || []).map(r => r.u);
+  const st = status() || {};
+  out[name] = {captured: urls.indexOf(M) !== -1, api: !!st.api,
+               els: st.els || 0, sources: st.sources || 0};
+}
+run('setup',    [{id:'jwplayer', cls:true}],  true);
+run('noclass',  [{id:'jwplayer', cls:false}], true);
+run('noelement',[],                           true);
+run('noapi',    [{id:'jwplayer', cls:false}], false);
+console.log(JSON.stringify(out));
+""")
+    _M53 = 'https://srv1-2.plauymito.live/hls/ABC123def456/master.txt'
+    _o53 = _sp53.run(['node', _h53, _d53, _M53], capture_output=True, text=True, timeout=60)
+    _r53 = _json53.loads(_o53.stdout.strip().splitlines()[-1]) if _o53.stdout.strip() else {}
+    report(_r53.get('setup', {}).get('captured') is True,
+           'RUNNING the shipped JS: a fully set-up JW player is still captured')
+    report(_r53.get('noclass', {}).get('captured') is True,
+           'and one whose .jwplayer class has not been applied yet is captured '
+           'too (this is the case the old probe missed)')
+    report(_r53.get('noelement', {}).get('captured') is True,
+           'and so is one with no container element in the DOM at all')
+    report(_r53.get('noapi', {}).get('captured') is False
+           and _r53.get('noapi', {}).get('api') is False,
+           'while a page where jwplayer never loaded captures nothing and the '
+           'diagnostic says api=false -- the difference is now visible')
+else:
+    report(True, 'node not available - skipped executing the capture JS')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
