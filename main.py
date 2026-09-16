@@ -28302,6 +28302,16 @@ try {
                 return True
         except Exception:
             pass
+        try:
+            # A .txt playlist is a manifest, not a text file: the JW-8
+            # hoster family renames them (playmate.to's plauymito.live CDN
+            # serves srv1-2.plauymito.live/hls/<id>/master.txt), and without
+            # this the capture would announce the stream and the fallback
+            # would immediately discard it again.
+            if self._is_disguised_hls_manifest(url):
+                return True
+        except Exception:
+            pass
         return len(parsed.query or '') >= 16
 
     def _familypornhd_player_page(self, candidates, source_url=''):
@@ -57663,11 +57673,28 @@ if __name__ == "__main__":
                         # but not screenshot names such as ``preview.mp4.jpg``.
                         _media_ext_re = re.compile(r'\.(?:mp4|mkv|webm|mov|m4v)(?:/?(?:[?#]|$))', re.IGNORECASE)
 
+                        def _is_renamed_hls_playlist(req_url):
+                            """The JW-8 hoster family (playmate.to's
+                            plauymito.live CDN, hglink.to and friends) renames
+                            every playlist to .txt to slip past adblockers, so
+                            neither branch below matched and the one request
+                            that mattered was never announced at all -- the
+                            capture reported scripts and adverts and nothing
+                            else. Reuses the predicate the rest of the file
+                            already trusts, including its carve-out for
+                            watchstreamhd's AES-ciphertext master.txt."""
+                            try:
+                                return bool(VideoPlayer._is_disguised_hls_manifest(req_url))
+                            except Exception:
+                                return False
+
                         def handle_request(route, request):
                             req_url = request.url
                             if '.m3u8' in req_url:
                                 _announce_media_url(req_url, prefix='VOE_M3U8::')
                             elif _media_ext_re.search(urlparse(req_url).path or ''):
+                                _announce_media_url(req_url)
+                            elif _is_renamed_hls_playlist(req_url):
                                 _announce_media_url(req_url)
                             route.continue_()
 

@@ -4009,6 +4009,75 @@ report(_idx50['.play-overlay'] > _idx50['video']
        'and the Mixdrop ad click-catchers are still LAST, so they can never '
        'navigate the page to an advert before the real button is pressed')
 
+# ── 51. The capture never announced a .txt playlist ──────────────────────────
+# playmate.txt (the page the user saved) settles why playmate produced
+# nothing. The media URL is NOT in the HTML: the page carries only
+#   window.__PM = { videoId: 233091, ... }
+#   <meta property="og:image" content="https://srv1-2.plauymito.live/thumbnail/xoDtAGdof2iJA.jpg">
+# and /assets/js/player-core.min.js builds the stream at runtime. That CDN
+# renames its playlists to .txt -- the shape this file already documents at
+# _capture_candidate_is_clearly_not_media:
+#   srv1-2.plauymito.live/hls/<id>/master.txt
+# but handle_request only matched '.m3u8' or a media file extension, so the
+# one request that mattered was never announced at all: the capture reported
+# jwplayer.js, googima.js, player-core.min.js and a wall of adverts, and
+# nothing else. Two halves: announce it, and stop the media-shape gate from
+# discarding it again.
+report('elif _is_renamed_hls_playlist(req_url):' in _src46,
+       'the capture now announces a renamed .txt playlist')
+report('VideoPlayer._is_disguised_hls_manifest(req_url)' in _src46,
+       'and it reuses the predicate the rest of the file already trusts '
+       '(including the watchstreamhd carve-out) rather than a second copy')
+report('if self._is_disguised_hls_manifest(url):' in _src46,
+       'the media-shape gate lets a renamed playlist through')
+
+_fn51 = next(n for n in _ast44.walk(_main44)
+             if isinstance(n, _ast44.FunctionDef)
+             and n.name == '_capture_candidate_has_media_shape')
+_g51 = {'urlparse': urlparse, 're': re}
+_g51['VIDEO_EXTENSIONS'] = G['VIDEO_EXTENSIONS']
+_g51['AUDIO_EXTENSIONS'] = G['AUDIO_EXTENSIONS']
+exec(compile(_ast44.Module(body=[_fn51], type_ignores=[]), '<lifted51>', 'exec'), _g51)
+_disc51 = next(n for n in _ast44.walk(_main44)
+               if isinstance(n, _ast44.FunctionDef)
+               and n.name == '_is_disguised_hls_manifest')
+exec(compile(_ast44.Module(body=[_disc51], type_ignores=[]), '<lifted51d>', 'exec'), _g51)
+
+
+class _T51Stub:
+    _PLAYABLE_MEDIA_SUFFIXES = ('.m3u8', '.m3u', '.mpd', '.mp4', '.m4v',
+                                '.webm', '.mkv', '.ts', '.flv', '.mov', '.avi')
+    VIDEO_EXTENSIONS = G['VIDEO_EXTENSIONS']
+    AUDIO_EXTENSIONS = G['AUDIO_EXTENSIONS']
+    _capture_candidate_has_media_shape = _g51['_capture_candidate_has_media_shape']
+    _is_disguised_hls_manifest = staticmethod(_g51['_is_disguised_hls_manifest'])
+    _is_hls_stream_url = lambda self, u, ct='': str(u).lower().split('?')[0].endswith(('.m3u8', '.m3u'))
+
+
+_s51 = _T51Stub()
+for _u51, _want51, _why51 in [
+    # playmate's CDN, in the exact shape this file already documents
+    ('https://srv1-2.plauymito.live/hls/xoDtAGdof2iJA/master.txt', True,
+     "playmate's renamed master playlist"),
+    ('https://srv1-2.plauymito.live/hls/xoDtAGdof2iJA/index_avc_1080p.txt', True,
+     'and its variant'),
+    # the hglink family's shape, same predicate
+    ('https://g4vsrqvtrj.auronetworkdesign.space/As4sNGJK0nXh/hls3/01/14959'
+     '/x0o069k2qb38_o/master.txt', True,
+     "hglink's renamed master playlist"),
+    # watchstreamhd's master.txt is AES ciphertext and must NEVER be playable
+    ('https://watchstreamhd.com/cdn/hls/9f1c4d0e8b2a7361f5c0d9e8b7a63521/master.txt',
+     False,
+     "watchstreamhd's AES-ciphertext master.txt (the carve-out)"),
+    # and nothing that was already rejected changes
+    ('https://vd.ambotalaing.com/r19XC1eW9QAwPN/147054', False,
+     'the playmate advert'),
+    ('https://playmate.to/assets/js/player-core.min.js', False,
+     'the player script itself'),
+]:
+    _got51 = _s51._capture_candidate_has_media_shape(_u51)
+    report(_got51 is _want51, f'shape? {_want51}  {_why51}')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
