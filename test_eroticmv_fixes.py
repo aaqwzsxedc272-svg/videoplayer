@@ -3376,6 +3376,100 @@ report('f"[BROWSER_CLICK] dropped {len(_self_pages)} candidate(s) "' in _src45
 report('manifest captured and capture idle, closing browser' in _src45,
        'idle-after-manifest close still present (log confirms it fired)')
 
+# ── 46. the .txt-disguised HLS master (sextb hoster family) ─────────────────
+# hglink.to and playmate.to both hand their stream over as master.txt. A user
+# fetched one directly and it is ordinary cleartext HLS:
+#     #EXTM3U
+#     #EXT-X-VERSION:6
+#     #EXT-X-STREAM-INF:BANDWIDTH=1696988,...,RESOLUTION=1920x1080
+#     index_avc_1080p.txt
+# Two separate things stopped it reaching mpv:
+#   * media_candidates[:12] truncated it away — in hglink's capture it is
+#     line 18, behind 17 player/ad scripts;
+#   * nothing recognised .txt as a playlist, so the proxy passed the body
+#     through unrewritten and the probe refused it.
+# watchstreamhd's /cdn/hls/<id>/master.txt looks the same but is AES
+# ciphertext ("\m3\...") and must stay excluded.
+_fns46 = {}
+for _node46 in _ast44.walk(_tree43):
+    if isinstance(_node46, _ast44.FunctionDef) and _node46.name in (
+            '_is_disguised_hls_manifest', '_browser_capture_candidate_window'):
+        _fns46[_node46.name] = _node46
+report(sorted(_fns46) == ['_browser_capture_candidate_window', '_is_disguised_hls_manifest'],
+       f'found both new helpers (got {sorted(_fns46)})')
+_g46 = {'urlparse': urlparse, 're': re}
+exec(compile(_ast44.Module(body=[_fns46['_is_disguised_hls_manifest']],
+                           type_ignores=[]), '<lifted>', 'exec'), _g46)
+_dm46 = _g46['_is_disguised_hls_manifest']
+
+for _u46, _w46 in [
+    # playmate.to -> plauymito.live
+    ('https://srv1-2.plauymito.live/hls/g6nj1Z4FFkanYnUPa69J5oeEJrTMIXLh/master.txt', True),
+    # hglink.to -> auronetworkdesign.space (both captures from the field log)
+    ('https://g4vsrqvtrj.auronetworkdesign.space/As4sNGJK0nXh/hls3/01/14959/x0o069k2qb38_o/master.txt', True),
+    ('https://WzrlxFlI3sZHGR0.auronetworkdesign.space/As4sNGJK0nXh/hls3/01/14959/x0o069k2qb38_o/master.txt', True),
+    ('https://2goita23a7njj.meadowlarkculinaryarts.space/dwjdqozeoybz/hls3/01/14950/xqqik7ubeszl_n/master.txt', True),
+    # the variant playlist named inside that master
+    ('https://srv1-2.plauymito.live/hls/g6nj1Z4FFkanYnUPa69J5oeEJrTMIXLh/index_avc_1080p.txt', True),
+    ('https://x.auronetworkdesign.space/a/hls3/01/14959/x0o069k2qb38_o/index_avc_720p.txt', True),
+    # watchstreamhd's ENCRYPTED master must stay out
+    ('https://watchstreamhd.com/cdn/hls/4f0a1b2c3d4e5f60718293a4b5c6d7e8/master.txt', False),
+    # not playlists
+    ('https://cdn1.turboviplay.com/data3/68159c8f30605/68159c8f30605.m3u8', False),
+    ('https://x.auronetworkdesign.space/a/hls3/01/14959/x/seg-1-v1-a1.ts', False),
+    ('https://x.example.net/assets/player-core.txt', False),
+    ('https://x.example.net/hls/abc/notes.txt', False),
+    ('https://vd.ambotalaing.com/r19XC1eW9QAwPN/147054', False),
+    ('', False),
+]:
+    report(_dm46(_u46) is _w46, f'disguised-manifest {_u46[:60]!r} -> {_w46}')
+
+# the candidate window: hglink's real capture, master.txt at index 17
+_hg46 = [
+    'https://mc.yandex.ru/metrika/tag_phono.js',
+    'https://www.googletagmanager.com/gtag/js?id=G-E2BG6CPV2J',
+    'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1',
+    'https://vibuxer.com/player/jw8/vast.js?v=32',
+    'https://mc.yandex.ru/metrika/tag.js',
+    '/js/jquery.min.js', '/js/xupload.js', '/js/jquery.cookie.js',
+    'https://www.googletagmanager.com/gtag/js?id=G-2TL7NH453R',
+    'https://www.googletagmanager.com/gtag/js?id=G-E2BG6CPV2J',
+    '//www.gstatic.com/cast/sdk/libs/sender/1.0/cast_framework.js',
+    '//www.gstatic.com/eureka/clank/153/cast_sender.js',
+    '/player/jw8/jwplayer.js?v=7', '/js/localstorage-slim.js',
+    '/assets/jquery/hg-function.js?type=adult&u=152&v=20260807213908',
+    'https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495',
+    'https://llvpn.com/tag.min.js',
+    'https://g4vsrqvtrj.auronetworkdesign.space/As4sNGJK0nXh/hls3/01/14959/x0o069k2qb38_o/master.txt',
+]
+_g46w = dict(_g46)
+_g46w['VideoPlayer'] = type('_VP46', (), {'_is_disguised_hls_manifest': staticmethod(_dm46)})
+exec(compile(_ast44.Module(body=[_fns46['_browser_capture_candidate_window']],
+                           type_ignores=[]), '<lifted>', 'exec'), _g46w)
+_win46 = _g46w['_browser_capture_candidate_window'](_hg46)
+report(len(_hg46) == 18, f'the fixture really is 18 lines (got {len(_hg46)})')
+report(_hg46[-1] in _win46, 'the .txt master at index 17 survives the window')
+report(len(_win46) == 13, f'window is first 12 + the manifest (got {len(_win46)})')
+report(_win46[:12] == _hg46[:12], 'the first 12 are unchanged and in order')
+report(len(_g46w['_browser_capture_candidate_window'](['a', 'b'])) == 2,
+       'a short capture is passed through untouched')
+
+_src46 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.py'),
+              encoding='utf-8').read()
+report(_src46.count('self._browser_capture_candidate_window(media_candidates)') == 2,
+       'both ranking blocks use the window helper (no [:12] left)')
+report('media_candidates[:12]:' not in _src46,
+       'the fixed 12-candidate truncation is gone')
+report("""            if self._is_disguised_hls_manifest(url):
+                return True""" in _src46,
+       'the local proxy rewrites disguised manifests')
+report('or self._is_disguised_hls_manifest(final_url)' in _src46,
+       'the media probe accepts disguised manifests as HLS')
+report(_src46.count('score += 6') >= 4 and 'self._is_disguised_hls_manifest(url):' in _src46,
+       'both rankers score the disguised master')
+report("if '/cdn/hls/' in path:" in _src46,
+       "watchstreamhd's encrypted master is carved out")
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

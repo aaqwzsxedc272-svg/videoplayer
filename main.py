@@ -28591,6 +28591,71 @@ try {
         host = str(host or '').lower()
         return any(marker in host for marker in ('tulipvid.net', 'onlythot.net'))
 
+    @staticmethod
+    def _browser_capture_candidate_window(media_candidates, limit=12):
+        """The capture lines worth ranking.
+
+        The old fixed ``media_candidates[:12]`` silently dropped the answer.
+        On hglink.to the capture is 17 player/ad scripts followed, at index
+        17, by the one URL that matters::
+
+            MEDIA_URL::https://<host>/<id>/hls3/01/14959/x0o069k2qb38_o/master.txt
+
+        so the stream never reached the ranking stage at all and the fallback
+        promoted an advert instead. Manifests are exactly what we are looking
+        for, so any of them beyond the window is appended; everything else
+        still gets the same first-12 treatment.
+        """
+        items = list(media_candidates or [])
+        window = items[:limit]
+        try:
+            extra = [
+                u for u in items[limit:]
+                if VideoPlayer._is_disguised_hls_manifest(u) and u not in window
+            ]
+        except Exception:
+            extra = []
+        return window + extra
+
+    @staticmethod
+    def _is_disguised_hls_manifest(url):
+        """True for an HLS playlist served with a .txt extension.
+
+        The JW-Player-8 hoster family sextb embeds (hglink.to / hanerix.com /
+        vibuxer.com / audinifer.com, and playmate.to's plauymito.live CDN)
+        renames every playlist to .txt to slip past adblockers. A user
+        fetched one directly and it is a perfectly ordinary cleartext
+        master::
+
+            #EXTM3U
+            #EXT-X-VERSION:6
+            #EXT-X-STREAM-INF:BANDWIDTH=1696988,...,RESOLUTION=1920x1080
+            index_avc_1080p.txt
+
+        So the variant playlists are .txt too, and so this matches both
+        shapes. It is deliberately NOT the same as
+        _capture_candidate_is_obfuscated_master: watchstreamhd's
+        /cdn/hls/<id>/master.txt is AES ciphertext whose entries are the
+        literal scheme "\\m3\\", and that one must never be played.
+        """
+        try:
+            path = (urlparse(str(url or '')).path or '').lower()
+        except Exception:
+            return False
+        if not path.endswith('.txt'):
+            return False
+        if '/hls3/' not in path and '/hls/' not in path:
+            return False
+        # watchstreamhd's /cdn/hls/<id>/master.txt also satisfies everything
+        # above but its entries are AES ciphertext ("\\m3\\..."), so it must
+        # stay out: handing that one to mpv produced six failed attempts in
+        # one field log. That path is _capture_candidate_is_obfuscated_master's
+        # business, not ours.
+        if '/cdn/hls/' in path:
+            return False
+        base = path.rsplit('/', 1)[-1]
+        return base == 'master.txt' or bool(re.match(r'index[_-][\w.-]*\.txt$', base))
+
     def _is_hls_stream_url(self, url, content_type=''):
         ctype = str(content_type or '').lower()
         if 'mpegurl' in ctype or 'x-mpegurl' in ctype or 'vnd.apple.mpegurl' in ctype:
@@ -28608,6 +28673,13 @@ try {
             # (field: treating segments as playlists rewrote binary
             # bodies and crashed the rewrite on garbage lines).
             if ('urlset/' in path and path.endswith('.txt')) or re.search(r'index-f\d+-v\d+-a\d+\.txt$', path):
+                return True
+            # The sextb hoster family (hglink/hanerix/vibuxer/audinifer and
+            # playmate's plauymito CDN) serves the master AND every variant
+            # as .txt under /hls3/ or /hls/. Without this the proxy hands the
+            # body through unrewritten, so mpv resolves index_avc_1080p.txt
+            # against the CDN with no Referer and gets refused.
+            if self._is_disguised_hls_manifest(url):
                 return True
             # Some wrappers/proxies carry the manifest as a query or fragment
             # value instead of the visible URL path.
@@ -28961,6 +29033,10 @@ try {
             extension_path.endswith(('.m3u8', '.m3u'))
             or 'mpegurl' in content_type
             or 'application/vnd.apple.mpegurl' in content_type
+            # sextb's hoster family serves the master and every variant as
+            # .txt under /hls3/ or /hls/, with a text/plain Content-Type, so
+            # neither the extension nor the MIME test above sees a playlist.
+            or self._is_disguised_hls_manifest(final_url)
         )
         if content_type.startswith('video/') or content_type.startswith('audio/') or is_hls:
             resolved = {
@@ -37698,7 +37774,7 @@ try {
             # embed page), sanitize and dedupe every candidate before probing.
             normalized_candidates = []
             seen_candidates = set()
-            for raw_candidate in media_candidates[:12]:
+            for raw_candidate in self._browser_capture_candidate_window(media_candidates):
                 candidate = self._normalize_extracted_media_url(raw_candidate, page_url)
                 if not candidate or candidate.startswith(('blob:', 'about:')):
                     continue
@@ -37768,6 +37844,11 @@ try {
                     score += 4
                 if embed_slug and embed_slug in lower_url:
                     score += 3
+                if self._is_disguised_hls_manifest(url):
+                    # The .txt-disguised HLS master (sextb's hoster family).
+                    # It is the stream; every other capture on that page is a
+                    # player script or an advert.
+                    score += 6
                 if '.m3u8' in lower_url:
                     score += 1
                 if (url in verified_normalized
@@ -39133,7 +39214,7 @@ try {
             )
             normalized_candidates = []
             seen_candidates = set()
-            for raw_candidate in media_candidates[:12]:
+            for raw_candidate in self._browser_capture_candidate_window(media_candidates):
                 candidate = self._normalize_extracted_media_url(raw_candidate, source_url)
                 if not candidate or candidate.startswith(('blob:', 'about:')):
                     continue
@@ -39316,6 +39397,12 @@ try {
                     # pre-roll advert — so the known-good shape carries the
                     # same weight on its own rather than relying on the
                     # browser having finished measuring the <video>.
+                    score += 6
+                if self._is_disguised_hls_manifest(url):
+                    # The .txt-disguised HLS master (sextb's hoster family).
+                    # It is the stream; every other capture on that page is a
+                    # player script or an advert, and the promote fallback
+                    # would otherwise hand one of those to mpv.
                     score += 6
                 if '.m3u8' in lower_url:
                     score += 2
