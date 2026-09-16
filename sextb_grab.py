@@ -71,6 +71,42 @@ PLAYER_HOST_TOKENS = (
 _MEDIA_SUFFIXES = ('.m3u8', '.m3u', '.mpd', '.mp4', '.m4v', '.webm', '.mkv')
 
 
+def _is_fragment_candidate_ok(candidate: str) -> bool:
+    """Filter for URLs inside a decrypted /ajax/player response."""
+    if not candidate or _is_ad_iframe(candidate) or _is_trailer_iframe(candidate):
+        return False
+    try:
+        if urlparse(candidate).path.lower().endswith(_IMAGE_SUFFIXES):
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def _extract_player_from_fragment(fragment: str) -> str | None:
+    """Pull the hoster out of a decrypted /ajax/player response.
+
+    Unlike the watch page, this fragment is not a page full of decoys: it comes
+    from an endpoint authenticated by the rotating __pt token and holds exactly
+    one thing, the hoster the user clicked. So there is deliberately no player
+    allowlist here -- requiring one is what dropped SW, PM, US and PP while TB,
+    DD and FL happened to be on the list. Ads, the trailer and non-media assets
+    are still rejected.
+    """
+    if not fragment:
+        return None
+    for rx in (re.compile(r'<iframe[^>]+src=["\']([^"\']+)["\']', re.I),
+               re.compile(r'<(?:video|source)[^>]+src=["\']([^"\']+)["\']', re.I),
+               re.compile(r'https?://[^\s"\'<>\\]+|//[A-Za-z0-9.-]+/[^\s"\'<>\\]*')):
+        for m in rx.finditer(fragment):
+            cand = unescape(m.group(1) if m.groups() else m.group(0)).strip()
+            if cand.startswith('//'):
+                cand = 'https:' + cand
+            if _is_fragment_candidate_ok(cand):
+                return cand
+    return None
+
+
 def _is_media_url(candidate: str) -> bool:
     """True when the URL is a video file rather than a player page."""
     try:
@@ -654,11 +690,15 @@ def grab_all_static(url: str) -> dict:
             page_html, pt, pk = _fetch_player_via_ajax(
                 btn['epid'], film_id, pt, pk, url, session)
             if page_html:
-                cand = _extract_inline_player(page_html, url)
+                cand = _extract_player_from_fragment(page_html)
                 if cand:
                     stream_url = cand
                 else:
-                    print(f"    [AJAX] {btn['label']}: decrypted {len(page_html)} chars, no player")
+                    # Print the fragment: it is small and it is the ground
+                    # truth for whichever hoster is still being missed.
+                    flat = re.sub(r'\s+', ' ', page_html)[:220]
+                    print(f"    [AJAX] {btn['label']}: decrypted {len(page_html)} chars,"
+                          f" no player; fragment={flat!r}")
         else:
             stream_url = _fetch_episode_stream(btn['source'], btn['epid'], url, session)
 

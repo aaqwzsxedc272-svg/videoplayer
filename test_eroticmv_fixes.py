@@ -3050,6 +3050,59 @@ finally:
     else:
         sg34.BROWSER_EXECUTABLE = _prev40
 
+# ── 41. sextb: accept any hoster the endpoint returns ────────────────────────
+# TB/DD/FL resolved and SW/PM/US/PP did not ("decrypted 198 chars, no player").
+# The cause was the player allowlist: those four sit on hosts nobody has
+# catalogued yet. But a decrypted /ajax/player response is not a page full of
+# decoys -- it is authenticated by the rotating token and holds exactly the
+# hoster that was clicked. So no allowlist applies there; only ads, the trailer
+# and non-media assets are still refused.
+for _label41, _frag41, _want41 in [
+    ('unknown host, absolute',     '<iframe src="https://brand-new-host.xyz/v/abc"></iframe>',
+     'https://brand-new-host.xyz/v/abc'),
+    ('protocol-relative unknown',  '<iframe src="//somehost.click/e/abc123"></iframe>',
+     'https://somehost.click/e/abc123'),
+    ('video tag',                  '<video src="https://cdn.x.net/v/f.mp4"></video>',
+     'https://cdn.x.net/v/f.mp4'),
+    ('entity-escaped',             '<iframe src="https://h.example/e/a?a=1&amp;b=2"></iframe>',
+     'https://h.example/e/a?a=1&b=2'),
+    ('known host still works',     '<iframe src="https://ryderjet.com/v/abc?poster=x"></iframe>',
+     'https://ryderjet.com/v/abc?poster=x'),
+    ('the trailer is refused',     '<iframe src="https://trailerhg.xyz/e/abc"></iframe>', None),
+    ('an ad is refused',           '<iframe src="//duq8bcrl.xyz/api/spots/1?p=1"></iframe>', None),
+    ('a dtscout tracker is refused','<iframe src="https://t.dtscout.com/idg/?su=zz"></iframe>', None),
+    ('an image is refused',        '<img src="https://sextb.net/images/actor/a.jpg">', None),
+    ('empty fragment',             '', None),
+]:
+    _g41 = sg34._extract_player_from_fragment(_frag41)
+    report(_g41 == _want41, f'fragment {_label41} -> {_want41!r} (got {_g41!r})')
+
+# The whole grab now resolves all six hosters even though four are on hosts
+# that appear on no list.
+_T41_HOSTERS = dict(_T38_HOSTERS)
+_T41_HOSTERS['4124770'] = 'https://streamwish-new.example/e/sw9'   # unknown host
+_T41_HOSTERS['4128035'] = '//unknowncdn.example/e/pm9'             # protocol-relative
+_real_static41, _real_sess41, _real_time41 = sg34.grab_all_static, sg34._make_session, sg34.time
+# Each hoster must serve its own manifest, or the dedupe correctly collapses
+# them into one and the test measures nothing.
+_T41_PAGES = {'https://sextb.net/jul-509-rm': _sp}
+for _n41, _u41 in enumerate(sorted(_T41_HOSTERS.values())):
+    _abs41 = _u41 if _u41.startswith('http') else 'https:' + _u41
+    _T41_PAGES[_abs41] = (
+        '<script>f:"https:\\/\\/cdn.example.net\\/h%d\\/index.m3u8";</script>' % _n41)
+try:
+    sg34.time = _T38Time
+    _T38_HOSTERS.update(_T41_HOSTERS)
+    sg34._make_session = lambda: (_T38Session(_T41_PAGES), 'test-stub')
+    _r41 = sg34.grab_all_static('https://sextb.net/jul-509-rm')
+finally:
+    sg34.time = _real_time41
+    sg34._make_session = _real_sess41
+report(len(_r41['streams']) == 5,
+       f"every hoster resolves regardless of its host (got {len(_r41['streams'])}: {_r41['streams']})")
+report(not any('trailerhg' in u or 'dtscout' in u or u.endswith('.jpg') for u in _r41['streams']),
+       'and no trailer, tracker or artwork slips through')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
