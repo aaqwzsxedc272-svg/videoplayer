@@ -12,6 +12,7 @@ import re
 import sys
 import json
 import time
+import base64
 import tempfile
 from shutil import which
 from urllib.parse import urlparse
@@ -224,6 +225,108 @@ def _find_local_browser() -> str:
         except Exception:
             continue
     return ''
+
+
+# ── The real player endpoint ────────────────────────────────────────────────
+# sextb.js binds the buttons like this:
+#
+#   $('button.btn-player').on('click', function () {
+#       var episode = $(this).attr('data-id');
+#       $.post('/ajax/player', {episode: episode, filmId: filmId, pt: window.__pt},
+#              function (response) {
+#           var item = JSON.parse(response);
+#           if (item.error) return;
+#           var html = xorDecrypt(item.player_enc, window.__pk);
+#           $('#sextb-player').html(html);
+#           window.__pt = item.next_pt;
+#           window.__pk = item.next_pk;
+#       });
+#   });
+#
+# So the hosters come from POST /ajax/player, NOT from /api/episode/... -- an
+# endpoint that does not appear anywhere in sextb.js. filmId, __pt and __pk are
+# all in the page HTML, the token rotates on every call, and no Turnstile is
+# involved. That means no browser is needed to reach the other hosters.
+_PLAYER_TOKEN_RES = (
+    re.compile(r'var\s+filmId\s*=\s*(\d+)'),
+    re.compile(r'window\.__pt\s*=\s*["\']([^"\']+)["\']'),
+    re.compile(r'window\.__pk\s*=\s*["\']([^"\']+)["\']'),
+)
+
+
+def _extract_player_tokens(page_html: str):
+    """Pull (filmId, __pt, __pk) out of the watch page.
+
+    All three are emitted in an inline <script> near the top of the document.
+    """
+    if not page_html:
+        return None
+    vals = []
+    for rx in _PLAYER_TOKEN_RES:
+        m = rx.search(page_html)
+        if not m:
+            return None
+        vals.append(m.group(1))
+    return vals[0], vals[1], vals[2]
+
+
+def _xor_decrypt(encoded: str, key: str) -> str:
+    """Port of sextb.js xorDecrypt: base64-decode, then XOR against the key.
+
+    The JS returns '' for an empty input or key; the key must be non-empty or
+    `i % key.length` divides by zero.
+    """
+    if not encoded or not key:
+        return ''
+    try:
+        raw = base64.b64decode(encoded)
+    except Exception:
+        return ''
+    return ''.join(chr(raw[i] ^ ord(key[i % len(key)])) for i in range(len(raw)))
+
+
+def _fetch_player_via_ajax(epid: str, film_id: str, pt: str, pk: str,
+                           referer: str, session):
+    """POST /ajax/player and return (decrypted_html, next_pt, next_pk).
+
+    The token rotates on every call, so the caller must thread next_pt/next_pk
+    through the remaining buttons or every call after the first fails.
+    """
+    headers = {
+        'User-Agent': _UA,
+        'Referer': referer or 'https://sextb.net/',
+        'Origin': 'https://sextb.net',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Accept': '*/*',
+    }
+    try:
+        resp = session.post('https://sextb.net/ajax/player',
+                            data={'episode': epid, 'filmId': film_id, 'pt': pt},
+                            headers=headers, timeout=20)
+    except Exception as e:
+        print(f"    [AJAX] episode {epid} -> request failed: {e}")
+        return None, pt, pk
+
+    body = resp.text or ''
+    try:
+        item = json.loads(body)
+    except Exception:
+        print(f"    [AJAX] episode {epid} -> HTTP {resp.status_code}, not JSON,"
+              f" {len(body)} bytes, head={body[:120]!r}")
+        return None, pt, pk
+    if not isinstance(item, dict):
+        print(f"    [AJAX] episode {epid} -> unexpected payload {type(item).__name__}")
+        return None, pt, pk
+    if item.get('error'):
+        print(f"    [AJAX] episode {epid} -> error={str(item.get('error'))[:60]!r}")
+        return None, pt, pk
+
+    enc = item.get('player_enc') or ''
+    html = _xor_decrypt(enc, pk)
+    if not html:
+        print(f"    [AJAX] episode {epid} -> decrypted to nothing"
+              f" (player_enc {len(enc)} chars, pk {len(pk)} chars)")
+    return (html or None), (item.get('next_pt') or pt), (item.get('next_pk') or pk)
 
 
 def _is_trailer_iframe(candidate: str) -> bool:
@@ -520,8 +623,7 @@ def grab_all_static(url: str) -> dict:
     result['title'] = _extract_title(html)
 
     # The active episode's player is already rendered in the document (inside
-    # <div id="sextb-player">), so take it before spending anything on the
-    # API -- which wants a Cloudflare Turnstile token we do not have.
+    # <div id="sextb-player">), so take it first.
     inline = _extract_inline_player(html, url)
     if inline:
         result['streams'].append(inline)
@@ -529,18 +631,42 @@ def grab_all_static(url: str) -> dict:
 
     buttons = _extract_buttons(html)
     print(f"  Found {len(buttons)} episode buttons: {[b['label'] for b in buttons]} (session={session_kind})")
-    
+
+    # filmId / __pt / __pk drive POST /ajax/player -- the call the site itself
+    # makes when a button is clicked. It needs no Turnstile token, so the other
+    # hosters are reachable over plain HTTP and no browser window is required.
+    tokens = _extract_player_tokens(html)
+    if tokens:
+        film_id, pt, pk = tokens
+    else:
+        film_id = pt = pk = None
+        print("  [!] filmId/__pt/__pk not in the page; falling back to /api/episode/")
+
     seen = set(result['streams'])
     for btn in buttons:
         if btn['label'].upper().startswith('VIP'):
             continue  # skip VIP buttons
-        
-        stream_url = _fetch_episode_stream(btn['source'], btn['epid'], url, session)
+
+        stream_url = None
+        if tokens:
+            # The token rotates on every response; thread it through or every
+            # call after the first is rejected.
+            page_html, pt, pk = _fetch_player_via_ajax(
+                btn['epid'], film_id, pt, pk, url, session)
+            if page_html:
+                cand = _extract_inline_player(page_html, url)
+                if cand:
+                    stream_url = cand
+                else:
+                    print(f"    [AJAX] {btn['label']}: decrypted {len(page_html)} chars, no player")
+        else:
+            stream_url = _fetch_episode_stream(btn['source'], btn['epid'], url, session)
+
         if stream_url and stream_url not in seen:
             seen.add(stream_url)
             result['streams'].append(stream_url)
             print(f"  [+] {btn['label']}: {stream_url[:80]}")
-        
+
         time.sleep(0.5)
 
     # Everything collected so far is a player PAGE, not a video file. Take one
@@ -799,6 +925,16 @@ def grab_all(url: str, visible: bool = False) -> dict:
     else:
         print("  [!] Static grab found nothing")
 
+    # /ajax/player reaches every hoster over plain HTTP, so the browser is a
+    # last resort -- and it opens a visible window, which is not something to
+    # do on every link.
+    if len(static_streams) >= 2:
+        print("  [OK] every hoster resolved without a browser")
+        result['streams'] = static_streams
+        print(f"  [OK] sextb: {len(static_streams)} stream(s) total")
+        return result
+
+    print("  [!] Fewer than two hosters over HTTP; falling back to a browser click-through")
     try:
         pw = grab_all_playwright(url, visible=visible)
     except Exception as e:

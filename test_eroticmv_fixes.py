@@ -2830,10 +2830,46 @@ class _T38Resp:
     def __init__(self, body, ctype='text/html'):
         self.text = body; self.status_code = 200
         self.headers = {'Content-Type': ctype}
+
+# What each episode button resolves to on the real site. The page opens on TB.
+_T38_HOSTERS = {
+    '4124790': 'https://turboplays.click/t/6a80cae62b911?poster=https://cdn001.imggle.net/cover-player.jpg',
+    '4124770': 'https://streamwish.com/e/sw0001',
+    '4128035': 'https://doodstream.com/e/dd0002',
+    '4124826': 'https://doodstream.com/e/dd0003',
+    '4124772': 'https://filemoon.sx/e/fm0004',
+}
+
+def _t38_xor_encode(plain, key):
+    import base64 as _b64
+    return _b64.b64encode(bytes(ord(c) ^ ord(key[i % len(key)])
+                                for i, c in enumerate(plain))).decode()
+
 class _T38Session:
-    def __init__(self, pages): self.pages = pages; self.seen = []
+    """Stands in for curl_cffi, including POST /ajax/player with key rotation."""
+    def __init__(self, pages, pk0='bdc3144fc04eaa106cf6dba2db0b8393'):
+        self.pages = pages; self.seen = []; self.posts = []
+        self._pk = pk0; self._n = 0
     def get(self, url, headers=None, timeout=None):
         self.seen.append(url); return _T38Resp(self.pages.get(url, ''))
+    def post(self, url, data=None, headers=None, timeout=None):
+        self.seen.append(url)
+        self.posts.append(dict(data or {}))
+        if url != 'https://sextb.net/ajax/player':
+            return _T38Resp('{}', 'application/json')
+        epid = str((data or {}).get('episode'))
+        hoster = _T38_HOSTERS.get(epid)
+        if not hoster:
+            return _T38Resp(json.dumps({'error': 'not found'}), 'application/json')
+        self._n += 1
+        next_pk = 'k%031d' % self._n
+        payload = {
+            'player_enc': _t38_xor_encode(f'<iframe src="{hoster}"></iframe>', self._pk),
+            'next_pt': 'pt%030d' % self._n,
+            'next_pk': next_pk,
+        }
+        self._pk = next_pk          # the real site rotates the key every call
+        return _T38Resp(json.dumps(payload), 'application/json')
 
 _T38_MEDIA = ('<script>sources:[{file:"https:\\/\\/cdn.turbo.example\\/jul-509\\/index.m3u8'
               '?token=abc"}]</script>')
@@ -2843,6 +2879,10 @@ try:
     _sess38 = _T38Session({
         'https://sextb.net/jul-509-rm': _sp,
         'https://turboplays.click/t/6a80cae62b911?poster=https://cdn001.imggle.net/cover-player.jpg': _T38_MEDIA,
+        'https://streamwish.com/e/sw0001': '<script>f:"https:\\/\\/cdn.example.net\\/sw\\/index.m3u8";</script>',
+        'https://doodstream.com/e/dd0002': '<script>f:"https:\\/\\/cdn.example.net\\/dd2\\/index.m3u8";</script>',
+        'https://doodstream.com/e/dd0003': '<script>f:"https:\\/\\/cdn.example.net\\/dd3\\/index.m3u8";</script>',
+        'https://filemoon.sx/e/fm0004':    '<script>f:"https:\\/\\/cdn.example.net\\/fm\\/index.m3u8";</script>',
     })
     sg34.time = _T38Time
     sg34._make_session = lambda: (_sess38, 'test-stub')
@@ -2851,14 +2891,29 @@ finally:
     sg34.time = _real_time
     sg34._make_session = _real_session
 
-report(_res38['streams'] == ['https://cdn.turbo.example/jul-509/index.m3u8?token=abc'],
-       f"grab_all_static returns the .m3u8 (got {_res38['streams']})")
+report(_res38['streams'] == ['https://cdn.turbo.example/jul-509/index.m3u8?token=abc',
+                             'https://cdn.example.net/sw/index.m3u8',
+                             'https://cdn.example.net/dd2/index.m3u8',
+                             'https://cdn.example.net/dd3/index.m3u8',
+                             'https://cdn.example.net/fm/index.m3u8'],
+       f"grab_all_static returns every hoster's .m3u8 (got {_res38['streams']})")
 report(_res38['title'].startswith('JUL-509-RM'), 'grab_all_static keeps the real title')
 # The page was fetched once, the embed once, and the remaining buttons still
 # go to the API -- the inline player is an addition, not a replacement.
 report(_sess38.seen[0] == 'https://sextb.net/jul-509-rm', 'the watch page is fetched first')
-report(sum(1 for u in _sess38.seen if '/api/episode/16934905/' in u) == 5,
-       f'all 5 buttons still hit the API (got {_sess38.seen})')
+# Superseded: the buttons no longer call /api/episode/ (an endpoint that does
+# not appear anywhere in sextb.js). They POST /ajax/player, once per button.
+report(sum(1 for u in _sess38.seen if u == 'https://sextb.net/ajax/player') == 5,
+       f'all 5 buttons POST /ajax/player (posts={len(_sess38.posts)})')
+report(not any('/api/episode/' in u for u in _sess38.seen),
+       'the dead /api/episode/ endpoint is no longer called')
+report([p['episode'] for p in _sess38.posts] ==
+       ['4124790', '4124770', '4128035', '4124826', '4124772'],
+       'every button is sent with its own episode id')
+report(all(p['filmId'] == '16934905' for p in _sess38.posts),
+       'filmId comes from the page')
+report(len({p['pt'] for p in _sess38.posts}) == 5,
+       f'the token rotates and is threaded through (pts={[p["pt"][:6] for p in _sess38.posts]})')
 report(any('turboplays.click' in u for u in _sess38.seen),
        'the inline player page was fetched for its media')
 
@@ -2873,8 +2928,12 @@ try:
 finally:
     sg34.time = _real_time
     sg34._make_session = _real_session
-report(_res38b['streams'] == [_WANT_PLAYER],
-       f"no media on the embed -> the player page is kept (got {_res38b['streams'][:1]})")
+# Every hoster is now found, so this scenario keeps all five player pages.
+# The point is that none of them is replaced by a fabricated media URL.
+report(_res38b['streams'][0] == _WANT_PLAYER and len(_res38b['streams']) == 5,
+       f"no media anywhere -> all 5 player pages kept (got {len(_res38b['streams'])})")
+report(all(not sg34._is_media_url(u) for u in _res38b['streams']),
+       'and none is passed off as a media file')
 report(not any('duq8bcrl' in u or 'dtscout' in u for u in _res38b['streams']),
        'no ad ever reaches the playlist')
 
