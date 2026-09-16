@@ -7,10 +7,13 @@ Then parses the iframe/stream from the response JSON.
 Falls back to Playwright if the API approach fails.
 """
 
+import os
 import re
 import sys
 import json
 import time
+import tempfile
+from shutil import which
 from urllib.parse import urlparse
 from html import unescape
 
@@ -185,6 +188,44 @@ def _resolve_embed_page(embed_url: str, referer: str, session, depth: int = 0) -
     return out
 
 
+def _find_local_browser() -> str:
+    """Prefer the user's installed Brave, then Chrome/Edge.
+
+    sextb's buttons only resolve when the page's Cloudflare Turnstile widget
+    has issued a token, and Turnstile reliably refuses bundled headless
+    Chromium. Same policy as javdock_grab: a real installed browser, headed.
+    The app overrides this through the BROWSER_EXECUTABLE module attribute.
+    """
+    override = globals().get('BROWSER_EXECUTABLE')
+    if override and os.path.isfile(str(override)):
+        return str(override)
+    candidates = []
+    if os.name == 'nt':
+        program_files = os.environ.get('PROGRAMFILES', r'C:\Program Files')
+        program_files_x86 = os.environ.get('PROGRAMFILES(X86)', r'C:\Program Files (x86)')
+        local_appdata = os.environ.get('LOCALAPPDATA', '')
+        for root in (program_files, program_files_x86):
+            for rel in (
+                ('BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+                ('Google', 'Chrome', 'Application', 'chrome.exe'),
+                ('Microsoft', 'Edge', 'Application', 'msedge.exe'),
+            ):
+                candidates.append(os.path.join(root, *rel))
+        if local_appdata:
+            candidates.append(os.path.join(
+                local_appdata, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'))
+    else:
+        candidates.extend(
+            ('brave-browser', 'brave', 'google-chrome', 'chromium', 'microsoft-edge'))
+    for cand in candidates:
+        try:
+            if os.path.isfile(cand) or which(cand):
+                return cand
+        except Exception:
+            continue
+    return ''
+
+
 def _is_trailer_iframe(candidate: str) -> bool:
     """True for the preview trailer, which must never be taken for the film.
 
@@ -256,6 +297,14 @@ def _extract_inline_player(page_html: str, page_url: str | None = None) -> str |
     return None
 
 
+# sextb.net is on the player allowlist because its /e/ embeds are real, so
+# every other file on that host used to pass too. The episode API answers
+# "https://sextb.net/images/actor/amateur.jpg" for some films and that 404
+# artwork reached the playlist as a stream.
+_IMAGE_SUFFIXES = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.ico',
+                   '.css', '.js', '.json', '.txt', '.xml', '.woff', '.woff2')
+
+
 def _looks_like_player(candidate: str) -> bool:
     """True when an iframe src is a player embed or a media file.
 
@@ -264,6 +313,11 @@ def _looks_like_player(candidate: str) -> bool:
     text = unescape((candidate or '').strip())
     if not text or _is_ad_iframe(text):
         return False
+    try:
+        if urlparse(text).path.lower().endswith(_IMAGE_SUFFIXES):
+            return False
+    except Exception:
+        pass
     low = text.lower()
     host = (urlparse(text).netloc if '//' in text else '').lower()
     if host and any(tok in host for tok in PLAYER_HOST_TOKENS):
@@ -519,24 +573,44 @@ def grab_all_playwright(url: str, visible: bool = False) -> dict:
         pass
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(
-            headless=not visible,
-            args=[
-                '--no-sandbox', '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled',
-                '--window-size=1280,800',
-            ],
-        )
-        ctx = browser.new_context(
-            user_agent=_UA,
-            viewport={'width': 1280, 'height': 800},
-            java_script_enabled=True,
-            ignore_https_errors=True,
-            extra_http_headers={'Accept-Language': 'en-US,en;q=0.9'},
-        )
-        page = ctx.new_page()
+        # Turnstile defeats bundled headless Chromium, so launch the user's
+        # installed browser HEADED with a persistent profile -- the same
+        # approach javdock_grab uses for Cloudflare. Clearance and cookies
+        # then survive between captures. The user agent is deliberately NOT
+        # overridden: a real browser claiming a different UA is itself a
+        # fingerprint mismatch.
+        exe = _find_local_browser()
+        profile_dir = os.path.join(tempfile.gettempdir(), 'sextb_capture_profile')
+        ctx = None
+        for attempt_exe in ([exe] if exe else []) + [None]:
+            try:
+                ctx = pw.chromium.launch_persistent_context(
+                    profile_dir,
+                    headless=False,
+                    executable_path=attempt_exe or None,
+                    args=[
+                        '--no-sandbox', '--disable-dev-shm-usage',
+                        '--window-size=1280,800',
+                    ],
+                    # navigator.webdriver makes Turnstile refuse the token.
+                    ignore_default_args=['--enable-automation'],
+                    ignore_https_errors=True,
+                    locale='en-US',
+                    viewport={'width': 1280, 'height': 800},
+                )
+                print(f"    [browser] {'installed: ' + os.path.basename(attempt_exe) if attempt_exe else 'bundled chromium'}")
+                break
+            except Exception as launch_err:
+                print(f"    [browser] {attempt_exe or 'bundled chromium'} failed: {launch_err}")
+        if ctx is None:
+            result['error'] = 'could not launch a browser'
+            return result
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
         if stealth_fn:
-            stealth_fn(page)
+            try:
+                stealth_fn(page)
+            except Exception:
+                pass
 
         # Block navigations away from the main site to prevent ad hijacking
         def block_ads(route):
@@ -547,6 +621,22 @@ def grab_all_playwright(url: str, visible: bool = False) -> dict:
             else:
                 route.continue_()
         page.route("**/*", block_ads)
+
+        # The buttons resolve through an AJAX call carrying a Turnstile token.
+        # Log its status and body: if the click is firing but the token is
+        # missing, the response says so instead of leaving us guessing.
+        def log_api(resp):
+            try:
+                if '/api/episode/' not in resp.url:
+                    return
+                try:
+                    body = (resp.text() or '')[:200]
+                except Exception:
+                    body = '<unreadable>'
+                print(f"    [API-CLICK] HTTP {resp.status} {resp.url[-40:]} -> {body!r}")
+            except Exception:
+                pass
+        page.on('response', log_api)
 
         try:
             page.goto(url, wait_until='domcontentloaded', timeout=60_000)
@@ -675,14 +765,18 @@ def grab_all_playwright(url: str, visible: bool = False) -> dict:
                     if iframe_found:
                         break
                     else:
-                        print(f"    [!] Iframe not loaded for {label}. Retrying click...")
+                        # Say what the player actually is, so "nothing changed"
+                        # is distinguishable from "the player disappeared".
+                        _cur = _extract_inline_player(html_now, url) if html_now else None
+                        print(f"    [!] No change for {label} -- player still"
+                              f" {(_cur or 'none')[:64]}. Retrying click...")
                         page.wait_for_timeout(1000)
 
             except Exception as btn_err:
                 print(f"    [!] Error on {label}: {btn_err}. Skipping.")
                 continue
 
-        browser.close()
+        ctx.close()
 
     return result
 

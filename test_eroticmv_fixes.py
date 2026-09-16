@@ -2942,6 +2942,55 @@ finally:
 report(_r39b['streams'] == ['https://cdn.example.net/a/index.m3u8'],
        f'a failed click-through still returns the static stream (got {_r39b["streams"]})')
 
+# ── 40. sextb: artwork is not a player, and the click needs a real browser ───
+# The API answered "https://sextb.net/images/actor/amateur.jpg" for ppbd-321-rm
+# and bkd-342-rm. sextb.net is on the player allowlist for its /e/ embeds, so
+# every other file on that host passed too and the 404 artwork became a
+# playlist row.
+for _u40, _w40 in [
+    ('https://sextb.net/images/actor/amateur.jpg',              False),
+    ('https://sextb.net/images/icons/android-icon-192x192.png', False),
+    ('https://sextb.net/css/site.css',                          False),
+    ('https://sextb.net/js/sextb.js',                           False),
+    ('https://sextb.net/e/jul-509-rm',                          True),
+    ('https://turboplays.click/t/6a80cae62b911',                True),
+    ('https://cdn.example.net/v/movie.mp4',                     True),
+    ('https://cdn.example.net/hls/x/master.m3u8',               True),
+]:
+    report(sg34._looks_like_player(_u40) is _w40, f'non-media test {_u40[:46]!r} -> {_w40}')
+
+# The click-through must run in the user's installed browser: sextb's buttons
+# only resolve once Turnstile has issued a token, and Turnstile refuses
+# bundled headless Chromium. javdock_grab established this for Cloudflare.
+_src40 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           'sextb_grab.py'), encoding='utf-8').read()
+report("globals().get('BROWSER_EXECUTABLE')" in _src40,
+       'the click-through honours the app-supplied browser')
+report('launch_persistent_context(' in _src40, 'and uses a persistent profile')
+report("ignore_default_args=['--enable-automation']" in _src40,
+       'and hides navigator.webdriver from Turnstile')
+report('headless=False' in _src40, 'and runs headed, which Turnstile requires')
+report('/api/episode/' in _src40 and 'API-CLICK' in _src40,
+       'and logs the click-time API response')
+report('pw.chromium.launch(' not in _src40, 'the bare headless launch is gone')
+
+# _find_local_browser must degrade to "" rather than raise where no browser
+# exists (this sandbox), and must prefer the app-supplied path.
+_fb40 = sg34._find_local_browser()
+report(isinstance(_fb40, str), f'_find_local_browser returns a str without raising (got {_fb40!r})')
+_prev40 = sg34.__dict__.get('BROWSER_EXECUTABLE')
+try:
+    sg34.BROWSER_EXECUTABLE = __file__   # any existing file stands in
+    report(sg34._find_local_browser() == __file__, 'the app-supplied browser wins when it exists')
+    sg34.BROWSER_EXECUTABLE = '/nonexistent/brave.exe'
+    report(sg34._find_local_browser() != '/nonexistent/brave.exe',
+           'a missing override is ignored rather than returned')
+finally:
+    if _prev40 is None:
+        sg34.__dict__.pop('BROWSER_EXECUTABLE', None)
+    else:
+        sg34.BROWSER_EXECUTABLE = _prev40
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
