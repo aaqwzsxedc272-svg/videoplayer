@@ -4974,10 +4974,11 @@ report('sources_seen' in _msrc55._MOVIE_KEEP_FIELDS
 _dir58 = _tf55.mkdtemp()
 _orig58 = _msrc55._fetch_bytes
 try:
-    _msrc55._fetch_bytes = lambda url, timeout=20: b''
+    _msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: b''
     report(_msrc55.save_thumbnail(_dir58, 'x-1', 'https://x/y.jpg') == '',
            'a failed download saves nothing and reports nothing')
-    _msrc55._fetch_bytes = lambda url, timeout=20: b'\xff\xd8' + b'0' * 900
+    _msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: (
+        b'\xff\xd8' + b'0' * 900)
     _p58 = _msrc55.save_thumbnail(_dir58, '256651/my stepsis?', 'https://x/y.jpg')
     report(bool(_p58) and os.path.isfile(_p58)
            and os.path.basename(_p58).startswith('256651'),
@@ -5307,7 +5308,7 @@ _gate62 = threading.Event()
 _orig_fetch62 = _msrc55._fetch_bytes
 
 
-def _slow62(url, timeout=20):
+def _slow62(url, timeout=20, referer='', diag=None):
     _calls62.append(url)
     _gate62.wait(5)
     return b'\xff\xd8' + b'0' * 900
@@ -5565,7 +5566,8 @@ _scr65.signals = _Sigs65()
 _scr65._fetch_gallery_page = lambda page: _HTML65 if page == 1 else ''
 _saved65 = []
 _orig65 = _msrc55.save_thumbnail
-_msrc55.save_thumbnail = lambda p, sl, u: (_saved65.append((sl, u)), '/x/cover.jpg')[1]
+_msrc55.save_thumbnail = lambda p, sl, u, referer='', diag=None: (
+    _saved65.append((sl, u, referer)), '/x/cover.jpg')[1]
 try:
     _scr65._run()
 finally:
@@ -5579,6 +5581,9 @@ report(int(_after65.get('image_expires') or 0) == 9999999999,
        'along with its signature expiry, so a dead one can be pruned later')
 report(_saved65 and _saved65[0][0] == '256651-my-stepsis-is-a-hot-mess',
        'and the bytes are downloaded to thumbnails/ while the URL is alive')
+report(bool(_saved65) and _saved65[0][2] == 'https://nubiles-porn.com/',
+       'and asked for as the network that signed it, not as teamskeet',
+       repr(_saved65[0][2]) if _saved65 else 'no fetch')
 report(_after65.get('sources_seen') == ['shesinmybed'],
        'without disturbing the sources_seen bookkeeping')
 
@@ -5588,7 +5593,8 @@ _saved65.clear()
 _scr65b = _msrc55.NetworkGalleryScraper(_msrc55.MetadataDB(_d65), _site65, mode='update')
 _scr65b.signals = _Sigs65()
 _scr65b._fetch_gallery_page = lambda page: _HTML65 if page == 1 else ''
-_msrc55.save_thumbnail = lambda p, sl, u: (_saved65.append((sl, u)), '/x/cover.jpg')[1]
+_msrc55.save_thumbnail = lambda p, sl, u, referer='', diag=None: (
+    _saved65.append((sl, u, referer)), '/x/cover.jpg')[1]
 try:
     _scr65b._run()
 finally:
@@ -5756,7 +5762,7 @@ def _scrape68(payload):
     scr.signals = _Sigs68(msgs)
     scr._fetch_gallery_page = lambda page: _HTML68 if page == 1 else ''
     orig = _msrc55._fetch_bytes
-    _msrc55._fetch_bytes = lambda url, timeout=20: payload
+    _msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: payload
     try:
         scr._run()
     finally:
@@ -5900,6 +5906,102 @@ report(_msrc55._best_srcset_url(
        'a srcset resolves to its widest entry')
 report(_msrc55._best_srcset_url('https://x/shared/med.jpg') == 'https://x/shared/med.jpg',
        'and an unlabelled one still resolves to its only URL')
+
+# ── 71. A cover is fetched from the network that signed it ────────────────────
+# REQUEST_HEADERS carries "Referer: https://www.teamskeet.com/". That is right
+# for images.psmcdn.net, which is unsigned and public, and wrong for
+# images.nubiles-porn.com, whose covers are signed precisely so they cannot be
+# hotlinked. So even with the cover URL in hand, every nubiles download asked
+# the wrong network for it -- and save_thumbnail swallowed the refusal.
+print()
+print('71. A cover is requested from the network that signed it')
+
+_ALL71 = (_msrc55.METADATA_SITES['teamskeet']['sources']
+          + _msrc55.METADATA_SITES['nubiles']['gallery_sources'])
+
+
+def _exp71(s):
+    v = str((s or {}).get('base_url') or '')
+    return v if (not v or v.endswith('/')) else v + '/'
+
+
+_ref71 = getattr(_msrc55, '_referer_for', None)
+report(_ref71 is not None and all(_ref71(s) == _exp71(s) for s in _ALL71),
+       'every gallery source resolves to its own network as the referer',
+       ', '.join(sorted({(_ref71 or _exp71)(s) for s in _ALL71})))
+report(bool(_ref71) and _ref71({}) == '' and _ref71(None) == '',
+       'and an unknown site leaves the module default alone')
+
+
+class _Resp71:
+    status_code = 200
+    content = b'\xff\xd8\xff\xe0' + b'0' * 900
+
+
+class _Refused71:
+    status_code = 403
+    content = b''
+
+
+_cap71 = {}
+
+
+def _install71(resp):
+    _cap71.clear()
+
+    def _get(url, headers=None, timeout=None, impersonate=None):
+        _cap71['url'] = url
+        _cap71['headers'] = dict(headers or {})
+        return resp
+    mod = _types55.ModuleType('curl_cffi')
+    mod.requests = _types55.SimpleNamespace(get=_get)
+    return mod
+
+
+_saved71 = _sys55.modules.get('curl_cffi')
+_U71 = ('https://images.nubiles-porn.com/videos/my_stepsis/samples/'
+        'cover960.jpg?st=A&e=9999999999')
+_d71 = os.path.join(_tf55.mkdtemp(), 'ref71.json')
+try:
+    _sys55.modules['curl_cffi'] = _install71(_Resp71)
+    _p71 = _msrc55.save_thumbnail(_d71, 'ref71-slug', _U71,
+                                  referer='https://nubiles-porn.com/')
+    report(bool(_p71) and os.path.isfile(_p71),
+           'a cover downloads when the request names the network that signed it')
+    report(_cap71['headers'].get('Referer') == 'https://nubiles-porn.com/',
+           'and that referer is what goes on the wire, not teamskeet',
+           str(_cap71['headers'].get('Referer')))
+    report(str(_cap71['headers'].get('Accept') or '').startswith('image/'),
+           'asking for an image rather than an HTML document',
+           str(_cap71['headers'].get('Accept'))[:40])
+    _msrc55.save_thumbnail(_d71, 'ref71-slug2', _U71)
+    report(_cap71['headers'].get('Referer') == 'https://www.teamskeet.com/',
+           'with no referer given the teamskeet default is left as it was',
+           str(_cap71['headers'].get('Referer')))
+    _sys55.modules['curl_cffi'] = _install71(_Refused71)
+    _diag71 = []
+    _p71b = _msrc55.save_thumbnail(_d71, 'ref71-slug3', _U71,
+                                   referer='https://nubiles-porn.com/',
+                                   diag=_diag71)
+    report(not _p71b and _diag71 == ['HTTP 403'],
+           'a refused cover says why, so a 403 is not mistaken for a markup '
+           'change', str(_diag71))
+finally:
+    if _saved71 is None:
+        _sys55.modules.pop('curl_cffi', None)
+    else:
+        _sys55.modules['curl_cffi'] = _saved71
+
+_run71 = ast.get_source_segment(
+    open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                      'metadata_scraper.py'), encoding='utf-8').read(),
+    next(n for n in ast.walk(ast.parse(open(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), 'metadata_scraper.py'),
+        encoding='utf-8').read()))
+         if isinstance(n, ast.ClassDef) and n.name == 'NetworkGalleryScraper'))
+report(_run71.count('referer=src_referer') == 2,
+       'both gallery cover saves pass the network referer through',
+       str(_run71.count('referer=src_referer')))
 
 print()
 print('FAILURES:', FAILS)

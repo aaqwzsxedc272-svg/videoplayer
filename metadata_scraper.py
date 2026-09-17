@@ -1325,29 +1325,59 @@ def thumbnails_dir(db_path: str) -> str:
     return os.path.join(base, "thumbnails")
 
 
-def _fetch_bytes(url: str, timeout: int = 20) -> bytes:
-    """Binary GET through the same impersonating client the scraper uses."""
+def _fetch_bytes(url: str, timeout: int = 20, referer: str = "",
+                 diag: list | None = None) -> bytes:
+    """Binary GET through the same impersonating client the scraper uses.
+
+    `referer` overrides the module default when the caller knows which network
+    the asset belongs to: REQUEST_HEADERS claims teamskeet, which is right for
+    images.psmcdn.net and wrong everywhere else. `diag` receives a short reason
+    on failure, because "no cover" otherwise looks the same whether the markup
+    changed, the signature expired, or the CDN refused the request.
+    """
     try:
         from curl_cffi import requests as _cff
     except Exception:
+        if diag is not None:
+            diag.append("curl_cffi unavailable")
         return b""
+    headers = dict(REQUEST_HEADERS)
+    headers["Accept"] = "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+    if referer:
+        headers["Referer"] = referer
     try:
-        r = _cff.get(url, headers=REQUEST_HEADERS, timeout=timeout,
+        r = _cff.get(url, headers=headers, timeout=timeout,
                      impersonate="chrome110")
+        if diag is not None:
+            diag.append(f"HTTP {r.status_code}")
         if r.status_code == 200:
             return r.content or b""
-    except Exception:
-        pass
+    except Exception as exc:
+        if diag is not None:
+            diag.append(f"{type(exc).__name__}: {exc}"[:140])
     return b""
 
 
-def save_thumbnail(db_path: str, slug: str, url: str) -> str:
+def _referer_for(site: dict) -> str:
+    """The Referer a network's own image CDN expects, '' if unknown."""
+    s = site or {}
+    for key in ("base_url", "gallery_url"):
+        value = str(s.get(key) or "").strip()
+        if value:
+            return value if value.endswith("/") else value + "/"
+    return ""
+
+
+def save_thumbnail(db_path: str, slug: str, url: str, referer: str = "",
+                   diag: list | None = None) -> str:
     """Download a cover now, while its signature is still valid. Returns the
     local path, or '' if it could not be saved."""
     if not url or not slug:
         return ""
-    data = _fetch_bytes(url)
+    data = _fetch_bytes(url, referer=referer, diag=diag)
     if len(data) < 512:
+        if diag is not None and (not diag or diag[-1] == "HTTP 200"):
+            diag.append(f"{len(data)} byte(s)")
         return ""
     ext = ".jpg"
     m = re.search(r"\.(jpe?g|png|webp)(?:[?#]|$)", url, re.IGNORECASE)
@@ -1725,7 +1755,8 @@ class TeamSkeetScraper(QThread):
                 self.db.upsert(movie)
                 enriched += 1
                 if movie.get("image"):
-                    save_thumbnail(self.db.db_path, movie["slug"], movie["image"])
+                    save_thumbnail(self.db.db_path, movie["slug"], movie["image"],
+                                   referer=_referer_for(source))
                 self.signals.progress.emit(
                     f"  OK {movie['title']}"
                     + (f" | {movie['series']}" if movie.get('series') else "")
@@ -1835,7 +1866,8 @@ class TeamSkeetScraper(QThread):
                         # needs the network again.
                         if movie.get("image"):
                             local = save_thumbnail(self.db.db_path, movie["slug"],
-                                                   movie["image"])
+                                                   movie["image"],
+                                                   referer=_referer_for(source))
                             if local:
                                 self.signals.progress.emit(
                                     f"    thumbnail saved: {os.path.basename(local)}")
@@ -1975,6 +2007,10 @@ class NetworkGalleryScraper(QThread):
             src_movies = 0
             src_cover_saved = 0
             src_cover_failed = 0
+            # The cover CDN signs its URLs so they cannot be hotlinked, and
+            # REQUEST_HEADERS claims teamskeet -- the right referer for
+            # images.psmcdn.net, the wrong one here.
+            src_referer = _referer_for(source)
             source_name = source.get("name") or self.site.get("name", "site")
 
             while not self._cancel:
@@ -2048,14 +2084,21 @@ class NetworkGalleryScraper(QThread):
                                 existing["preview_expires"] = int(movie.get("preview_expires") or 0)
                             self.db.upsert(existing)
                             page_changed = True
+                            _diag68 = []
                             local = save_thumbnail(self.db.db_path, movie["slug"],
-                                                   movie["image"])
+                                                   movie["image"],
+                                                   referer=src_referer,
+                                                   diag=_diag68)
                             if local:
                                 src_cover_saved += 1
                                 self.signals.progress.emit(
                                     f"    cover backfilled: {os.path.basename(local)}")
                             else:
                                 src_cover_failed += 1
+                                if src_cover_failed <= 3:
+                                    self.signals.progress.emit(
+                                        "    cover download failed: "
+                                        + ("; ".join(_diag68) or "no data"))
                         continue
                     if _movie_identity_changed(existing, movie):
                         page_changed = True
@@ -2067,14 +2110,21 @@ class NetworkGalleryScraper(QThread):
                     # movie in the database. The signed URL expires in about
                     # an hour, so this is the only moment it can be saved.
                     if movie.get("image"):
+                        _diag68 = []
                         local = save_thumbnail(self.db.db_path, movie["slug"],
-                                               movie["image"])
+                                               movie["image"],
+                                               referer=src_referer,
+                                               diag=_diag68)
                         if local:
                             src_cover_saved += 1
                             self.signals.progress.emit(
                                 f"    thumbnail saved: {os.path.basename(local)}")
                         else:
                             src_cover_failed += 1
+                            if src_cover_failed <= 3:
+                                self.signals.progress.emit(
+                                    "    cover download failed: "
+                                    + ("; ".join(_diag68) or "no data"))
 
                 # Cover telemetry: if a gallery changes its markup or starts
                 # lazy-loading, the cover silently stops being captured and
@@ -2818,7 +2868,7 @@ def ensure_thumbnail_async(player, site: dict, slug: str, url: str) -> bool:
 
     def _work():
         try:
-            save_thumbnail(db_path, slug, url)
+            save_thumbnail(db_path, slug, url, referer=_referer_for(site))
         except Exception:
             pass
         finally:
