@@ -1647,6 +1647,16 @@ class TitleMatcher:
         'site':          0.05,  # near-free: every movie from that source
     }
     _MODEL_SIGNAL_CAP = 0.50
+    # An id with nothing corroborating it. Video ids are only 5-6 digits
+    # (2938 six-digit, 2433 five-digit in the shipped nubiles DB), so an
+    # unrelated URL or filename that happens to carry such a number -- e.g.
+    # randomtube.example/watch/248755/totally-unrelated -- would otherwise
+    # rename the row to a movie it has nothing to do with. Held below
+    # HIGH_CONFIDENCE_STRENGTH so it is offered as a possible match for the
+    # user to confirm rather than auto-applied. A real source URL always
+    # carries the site and/or the scene title alongside the id, so it is
+    # unaffected.
+    _LONE_ID_STRENGTH = 0.55
     # Auto-apply threshold: 'id' or 'scene' alone clears it, while the
     # ('series','site') pair at 0.25 does not.
     HIGH_CONFIDENCE_STRENGTH = 0.60
@@ -1811,7 +1821,10 @@ class TitleMatcher:
         """
         total = 0.0
         model_total = 0.0
-        for sig in signals or ():
+        sigs = [str(s) for s in (signals or ())]
+        if sigs == ["id"]:
+            return self._LONE_ID_STRENGTH
+        for sig in sigs:
             if str(sig).startswith("model:"):
                 model_total += self._SIGNAL_WEIGHTS["model"]
                 continue

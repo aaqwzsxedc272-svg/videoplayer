@@ -4568,9 +4568,17 @@ _HIGH55 = _msrc55.TitleMatcher.HIGH_CONFIDENCE_STRENGTH
 report(_mt55._signal_strength(['series', 'site']) < _HIGH55,
        "the near-free ('series','site') pair is NOT high confidence",
        f"{_mt55._signal_strength(['series','site'])} < {_HIGH55}")
-report(_mt55._signal_strength(['id']) >= _HIGH55
-       and _mt55._signal_strength(['scene']) >= _HIGH55,
-       'while a unique video id, or the whole scene title, is')
+report(_mt55._signal_strength(['scene']) >= _HIGH55
+       and _mt55._signal_strength(['id', 'site']) >= _HIGH55,
+       'while the whole scene title, or an id corroborated by the site, is')
+# Video ids are only 5-6 digits, so an unrelated URL or filename carrying such
+# a number must NOT be enough to rename a row on its own.
+report(_msrc55.TitleMatcher._LONE_ID_STRENGTH < _HIGH55
+       and _mt55._signal_strength(['id']) < _HIGH55,
+       'a lone video id is offered as a possible match, never auto-applied',
+       f"lone id {_mt55._signal_strength(['id'])} < {_HIGH55}")
+report(_mt55._signal_strength(['id']) > _mt55._signal_strength(['series', 'site']),
+       'but it still outranks the cheap series+site pair')
 report(_mt55._signal_strength(['model:a'] * 9)
        == _mt55._signal_strength(['model:a', 'model:b']),
        'model matches are capped, so cast size cannot outvote a video id',
