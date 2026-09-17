@@ -216,7 +216,7 @@ _MOVIE_KEEP_FIELDS = (
     "sources_seen",
     # Cover thumbnail. The URL is signed and expires (see _image_expiry_epoch),
     # so the local file under thumbnails/ is what the player should display.
-    "image", "image_expires",
+    "image", "image_expires", "preview", "preview_expires",
     # Neither network supplies a runtime today, so this costs nothing on disk;
     # it is kept so the criterion stays wired if a source ever provides one.
     "duration",
@@ -1087,6 +1087,56 @@ def _gallery_cover_image(html: str, title_start: int, window: int = 4000) -> str
     return best
 
 
+_MEDIA_SRC_RE = re.compile(
+    r"""(?:\bsrc\s*=\s*|\bdata-[a-z-]*\s*=\s*|\(|["\'])"""
+    r"""["\']?(?P<src>https?://[^"\'\s)]+?\.mp4[^"\'\s)]*)""", re.IGNORECASE)
+
+
+def _cdn_folder_name(text: str) -> str:
+    """Title or series -> the CDN folder/name form the site uses."""
+    return re.sub(r"[^a-z0-9]+", "_", str(text or "").lower()).strip("_")
+
+
+def preview_loop_url(title: str, series: str, height: int = 480) -> str:
+    """The hover-preview loop for a scene, derived from stored fields.
+
+    Verified against a URL captured live from the gallery with a media
+    sniffer:
+
+        https://images.nubiles-porn.com/videos/stepmom_is_a_great_kisser/
+          videos/loops/momsteachsex_stepmom_is_a_great_kisser_loop_480.mp4
+
+    reproduced exactly from title='Stepmom Is A Great Kisser' and
+    series='MomsTeachSex'. NOTE: unsigned it returns 403, so this only
+    locates the asset -- a signature has to come from a loaded page.
+    """
+    t = _cdn_folder_name(title)
+    if not t:
+        return ""
+    ser = _cdn_folder_name(series)
+    name = f"{ser}_{t}_loop_{height}.mp4" if ser else f"{t}_loop_{height}.mp4"
+    return f"https://images.nubiles-porn.com/videos/{t}/videos/loops/{name}"
+
+
+def _gallery_preview_video(html: str, title_start: int, window: int = 4000) -> str:
+    """The hover-preview mp4 for a card, from the markup just before its title.
+
+    The player injects it on hover, so it may sit in a <source>, a data-*
+    attribute or an inline script; anything ending in .mp4 in the card region
+    is taken, preferring the /loops/ path the site actually uses.
+    """
+    region = (html or "")[max(0, title_start - window):title_start]
+    found = []
+    for match in _MEDIA_SRC_RE.finditer(region):
+        src = html_unescape(match.group("src") or "").strip()
+        if src and src not in found:
+            found.append(src)
+    for src in found:
+        if "/loops/" in src or "_loop_" in src:
+            return src
+    return found[-1] if found else ""
+
+
 def _image_expiry_epoch(url: str) -> int:
     """The signed URL's expiry, from its e= parameter (0 if unsigned/unknown).
 
@@ -1203,6 +1253,7 @@ def _gallery_movies_from_html(html: str, site: dict) -> list[dict]:
         block = html[hit["end"]:block_end]
 
         image = _gallery_cover_image(html, hit["start"])
+        preview = _gallery_preview_video(html, hit["start"])
         models = []
         model_urls = []
         series = ""
@@ -1255,6 +1306,8 @@ def _gallery_movies_from_html(html: str, site: dict) -> list[dict]:
             "url":                hit["url"],
             "image":              image,
             "image_expires":      _image_expiry_epoch(image),
+            "preview":            preview,
+            "preview_expires":    _image_expiry_epoch(preview),
             "source_site":        site.get("id") or "",
             "source_name":        site.get("name") or "",
             # NOTE: this literal used to repeat "image": "" further down, and a

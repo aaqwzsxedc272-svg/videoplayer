@@ -4931,6 +4931,61 @@ try:
 finally:
     _msrc55._fetch_bytes = _orig58
 
+# ── 59. Hover preview loop ───────────────────────────────────────────────────
+# Ground truth captured live from the gallery with a media sniffer (found.txt):
+#   https://images.nubiles-porn.com/videos/stepmom_is_a_great_kisser/videos/
+#     loops/momsteachsex_stepmom_is_a_great_kisser_loop_480.mp4?st=..&e=..
+# It is reproducible exactly from the title and series the DB already stores.
+print()
+print('59. Hover preview loop is derived from title + series, and captured when signed')
+
+_FOUND59 = ('https://images.nubiles-porn.com/videos/stepmom_is_a_great_kisser/'
+            'videos/loops/momsteachsex_stepmom_is_a_great_kisser_loop_480.mp4')
+report(_msrc55.preview_loop_url('Stepmom Is A Great Kisser', 'MomsTeachSex') == _FOUND59,
+       'the derived loop URL matches the one captured from the live site',
+       _msrc55.preview_loop_url('Stepmom Is A Great Kisser', 'MomsTeachSex')[-64:])
+_mv59 = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    'nubiles_metadata.json'), encoding='utf-8'))['movies']
+_row59 = next(m for m in _mv59.values() if m.get('title') == 'Stepmom Is A Great Kisser')
+report(_msrc55.preview_loop_url(_row59['title'], _row59['series']) == _FOUND59,
+       'and it derives from the stored record, not just from hand-typed strings',
+       f"{_row59['slug']} series={_row59['series']!r}")
+report(_msrc55.preview_loop_url('Some Scene', '') .endswith('/videos/some_scene/videos/loops/some_scene_loop_480.mp4'),
+       'a scene with no series still gets a loop path')
+report(_msrc55.preview_loop_url('', 'MomsTeachSex') == '',
+       'and no title means no invented path')
+report(_msrc55._cdn_folder_name('Stepmom Is A Great Kisser') == 'stepmom_is_a_great_kisser'
+       and _msrc55._cdn_folder_name('  WEIRD--Name!! 42 ') == 'weird_name_42',
+       'titles are folded to the CDN folder form')
+
+_SRC59 = ('<a href="/video/watch/1/x"><source src="https://images.nubiles-porn.com/videos/x/'
+          'videos/loops/s_x_loop_480.mp4?st=a&e=1789621200"></a>'
+          '<a href="/video/watch/1/x">Some Scene Title Here</a>')
+_ATTR59 = _SRC59.replace('<source src="', '<a data-preview="').replace('"></a>', '">')
+_p59 = _msrc55._gallery_preview_video(_SRC59, _SRC59.index('Some Scene Title Here'))
+report('_loop_480.mp4' in _p59 and _msrc55._image_expiry_epoch(_p59) == 1789621200,
+       'the signed loop is read out of a <source> tag, with its expiry', _p59[:64])
+report('_loop_480.mp4' in _msrc55._gallery_preview_video(
+           _ATTR59, _ATTR59.index('Some Scene Title Here')),
+       'and out of a data-* attribute, since the player injects it on hover')
+report(_msrc55._gallery_preview_video('<a href="/v">Some Scene Title Here</a>', 20) == '',
+       'a card with no loop yields an empty string, never a wrong one')
+
+_HTML59 = _SRC59.replace('/video/watch/1/x', 'https://nubiles-porn.com/video/watch/256294/stepmom-is-a-great-kisser-s27e1')
+_HTML59 = _HTML59.replace('<a href="https://nubiles-porn.com/video/watch/256294/stepmom-is-a-great-kisser-s27e1"><source',
+                          '<a href="https://nubiles-porn.com/video/watch/256294/stepmom-is-a-great-kisser-s27e1"><img src="https://images.nubiles-porn.com/videos/stepmom_is_a_great_kisser/samples/cover960.jpg?st=z&e=1789621200"><source')
+_pv59 = _msrc55._gallery_movies_from_html(_HTML59, _site58)
+report(len(_pv59) == 1 and '_loop_480.mp4' in _pv59[0].get('preview', ''),
+       'the gallery parser now stores the preview alongside the cover',
+       _pv59[0].get('preview', '')[:60] or 'EMPTY')
+report(_pv59[0].get('preview_expires') == 1789621200
+       and _pv59[0].get('image_expires') == 1789621200,
+       'both carrying the expiry, so the player knows the signed URL is dead '
+       'in about an hour')
+report('preview' in _msrc55._MOVIE_KEEP_FIELDS
+       and 'preview_expires' in _msrc55._MOVIE_KEEP_FIELDS,
+       'and both survive the field trim')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
