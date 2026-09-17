@@ -4767,6 +4767,88 @@ report('_duration_seconds(' in _src56.split('def _site_movie_from_entry')[1].spl
 report(_src56.count('duration_ms=_player_duration_ms(self.player, fp)') == 1,
        'and the linker passes each row runtime into the match')
 
+# ── 57. Metadata DB stores only fields something reads back ──────────────────
+# Measured on the shipped nubiles DB: model_details 1.46 MB and model_urls
+# 0.79 MB were read by nothing, and image / trailer_url / description / tags /
+# stats / _tags / _categories were filled in 0 of 5371 records. published_date,
+# sources_seen and type were read by nothing. Together they were most of the
+# file -- which is why the 71 MB teamskeet DB could not be pushed to GitHub.
+print()
+print('57. Metadata DB keeps only the name/actors/series/date fields that are used')
+
+_K57 = _msrc55._MOVIE_KEEP_FIELDS
+report(set(('slug', 'title', 'series', 'models', 'date')).issubset(set(_K57)),
+       'the keep-list holds the four criteria that drive a match, plus the key')
+report(all(k in _K57 for k in ('video_id', 'source_site', 'source_name', 'meta_fetched')),
+       'and the tie-breaker, site signal, display-name source and index gate')
+report(not any(k in _K57 for k in ('model_details', 'model_urls', 'image',
+                                   'trailer_url', 'description', 'tags', 'stats',
+                                   '_tags', '_categories', 'published_date',
+                                   'sources_seen', 'type')),
+       'and none of the fields that were never read or never filled', str(_K57))
+
+_fat57 = {
+    'slug': 'x-1', 'title': 'Facials For My Stepsis', 'series': 'NubilesPorn',
+    'models': ['Axel Haze'], 'date': '08/04/2026', 'video_id': '248755',
+    'source_site': 'nubiles-porn', 'source_name': 'Nubiles Porn',
+    'meta_fetched': True, 'scraped_at': '2026-08-04T00:00:00Z',
+    'url': 'https://nubiles-porn.com/video/watch/248755/x',
+    'model_details': [{'id': 'a', 'img': 'http://i/a.jpg', 'stats': {'v': 1}}],
+    'model_urls': ['https://nubiles-porn.com/models/axel-haze'],
+    'image': '', 'trailer_url': '', 'description': '', 'tags': [], 'stats': {},
+    '_tags': [], '_categories': [], 'published_date': '', 'sources_seen': [],
+    'type': 'video',
+}
+_thin57 = _msrc55._trim_movie(_fat57)
+_expect57 = [k for k in _K57 if k in _fat57]
+report(list(_thin57) == _expect57,
+       'a record is trimmed to the keep-list in a stable order',
+       f'{len(_fat57)} fields -> {len(_thin57)}')
+report(not any(k in _thin57 for k in ('model_details', 'model_urls', 'image',
+                                      'trailer_url', 'description', 'tags',
+                                      'stats', '_tags', '_categories',
+                                      'published_date', 'sources_seen', 'type')),
+       'no retired field survives the trim',
+       f'{len(json.dumps(_fat57))} -> {len(json.dumps(_thin57))} bytes')
+report(_msrc55._trim_movie(None) is None and _msrc55._trim_movie('x') == 'x',
+       'a non-record passes through untouched instead of raising')
+
+# A trimmed record must not look "changed" on the next scrape, or every
+# update would rewrite the entire database.
+report(_msrc55._movie_identity_changed(_thin57, _msrc55._trim_movie(_fat57)) is False,
+       're-scraping the same movie into a trimmed record is not a change')
+report(_msrc55._movie_identity_changed(
+           _thin57, _msrc55._trim_movie(dict(_fat57, title='Something Else'))) is True,
+       'but a real title change still is')
+
+_dbp57 = os.path.join(_tf55.mkdtemp(), 'trim57.json')
+_db57 = _msrc55.MetadataDB(_dbp57)
+_db57.upsert(dict(_fat57))
+report(sorted(_db57.movies['x-1']) == sorted(_expect57),
+       'upsert stores the trimmed record, not the fat one',
+       f"{len(_db57.movies['x-1'])} of {len(_fat57)} fields")
+_db57.save()
+_raw57 = json.load(open(_dbp57, encoding='utf-8'))['movies']['x-1']
+report('model_details' not in _raw57 and 'model_urls' not in _raw57,
+       'and nothing retired reaches the file')
+_reload57 = _msrc55.MetadataDB(_dbp57)
+_m57 = _reload57 and _msrc55.TitleMatcher(_reload57)
+report(_m57.match('https://nubiles-porn.com/video/watch/248755/facials-for-my-stepsis')
+       is not None,
+       'a trimmed database still indexes and matches')
+
+_legacy57 = os.path.join(_tf55.mkdtemp(), 'legacy57.json')
+with open(_legacy57, 'w', encoding='utf-8') as _f57:
+    json.dump({'movies': {'x-1': dict(_fat57)}}, _f57)
+_before57 = os.path.getsize(_legacy57)
+_ld57 = _msrc55.MetadataDB(_legacy57)
+report(sorted(_ld57.movies['x-1']) == sorted(_expect57),
+       'loading an older file drops the retired fields from memory',
+       f"{len(_ld57.movies['x-1'])} of {len(_fat57)} fields")
+_b57, _a57 = _ld57.compact()
+report(_a57 < _before57, 'and compact() shrinks it on disk',
+       f'{_before57} -> {_a57} bytes')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

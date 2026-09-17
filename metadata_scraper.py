@@ -189,6 +189,38 @@ def _find_ytdlp() -> Optional[str]:
 # MetadataDB
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Fields worth persisting, measured against the shipped nubiles DB
+# (tools_eval_metadata_linker.py / the field census). Everything else was
+# either never filled by either network or never read back:
+#
+#   model_details 1.46 MB  image/trailer_url/description/tags/stats/_tags/
+#   model_urls    0.79 MB  _categories: 0 of 5371 records filled
+#   series_url    0.18 MB  published_date/sources_seen/type: read by nothing
+#   series_slug   0.14 MB
+#
+# What actually drives a match is name (title), actors (models), series and
+# date -- plus video_id as a tie-breaker, source_site/source_name for the
+# site signal and the display name, meta_fetched as the index gate, and
+# scraped_at/url as provenance. Dropping the rest takes the nubiles DB from
+# 5.98 MB to 1.56 MB (-74%), and the same ratio applied to the 71 MB
+# teamskeet file is the difference between pushable and not.
+_MOVIE_KEEP_FIELDS = (
+    "slug", "title", "series", "models", "date",
+    "video_id", "source_site", "source_name",
+    "meta_fetched", "scraped_at", "url",
+    # Neither network supplies a runtime today, so this costs nothing on disk;
+    # it is kept so the criterion stays wired if a source ever provides one.
+    "duration",
+)
+
+
+def _trim_movie(movie: dict) -> dict:
+    """Keep only the fields anything reads back, in a stable order."""
+    if not isinstance(movie, dict):
+        return movie
+    return {k: movie[k] for k in _MOVIE_KEEP_FIELDS if k in movie}
+
+
 class MetadataDB:
     """
     JSON on-disk store.
@@ -225,8 +257,32 @@ class MetadataDB:
                     d = json.load(f)
                 if isinstance(d, dict) and "movies" in d:
                     self._data = d
+                    # Older files carry the retired fields; drop them from
+                    # memory now so the next save shrinks the file on disk.
+                    self.compact_records()
             except Exception:
                 pass
+
+    def compact_records(self) -> int:
+        """Strip retired fields from every record in memory. Returns how many
+        records changed."""
+        movies = self._data.get("movies") or {}
+        changed = 0
+        for slug, movie in list(movies.items()):
+            if not isinstance(movie, dict):
+                continue
+            if len(movie) != len(_trim_movie(movie)):
+                movies[slug] = _trim_movie(movie)
+                changed += 1
+        return changed
+
+    def compact(self) -> tuple:
+        """Compact in memory and write back. Returns (before_bytes, after_bytes)."""
+        before = os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
+        self.compact_records()
+        self.save()
+        after = os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
+        return before, after
 
     def save(self):
         with self._lock:
@@ -297,7 +353,7 @@ class MetadataDB:
         if not slug:
             return
         with self._lock:
-            self._data.setdefault("movies", {})[slug] = movie
+            self._data.setdefault("movies", {})[slug] = _trim_movie(movie)
 
     def stubs_needing_enrichment(self) -> list[str]:
         return [s for s, m in self._data.get("movies", {}).items()
@@ -915,11 +971,10 @@ def _site_movie_from_entry(entry: dict, source: Optional[dict] = None) -> Option
 def _movie_identity_changed(existing: Optional[dict], movie: dict) -> bool:
     if not existing or not existing.get("meta_fetched"):
         return True
-    keys = (
-        "title", "series", "series_url", "series_slug", "models", "model_urls",
-        "date", "published_date_iso", "image", "trailer_url", "video_id",
-        "description", "tags", "_tags",
-    )
+    # Only persisted fields: comparing a field that is no longer stored
+    # against a record that still carries it would report a change on every
+    # re-scrape and rewrite the whole database.
+    keys = ("title", "series", "models", "date", "video_id")
     return any(existing.get(k) != movie.get(k) for k in keys)
 
 
