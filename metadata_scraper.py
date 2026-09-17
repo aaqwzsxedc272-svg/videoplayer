@@ -208,6 +208,15 @@ _MOVIE_KEEP_FIELDS = (
     "slug", "title", "series", "models", "date",
     "video_id", "source_site", "source_name",
     "meta_fetched", "scraped_at", "url",
+    # Load-bearing, not decoration: NetworkGalleryScraper._run dedupes on
+    # sources_seen and sets page_changed when a source is added to it. Trimming
+    # it made `src_id not in sources_seen` permanently true, so every movie was
+    # re-upserted on every scrape and the "caught up - no new listing metadata"
+    # early-stop could never fire, turning an Update into a full 175-page crawl.
+    "sources_seen",
+    # Cover thumbnail. The URL is signed and expires (see _image_expiry_epoch),
+    # so the local file under thumbnails/ is what the player should display.
+    "image", "image_expires",
     # Neither network supplies a runtime today, so this costs nothing on disk;
     # it is kept so the criterion stays wired if a source ever provides one.
     "duration",
@@ -1052,6 +1061,89 @@ def _is_gallery_video_href(href: str, base_url: str) -> bool:
     return bool(re.search(r"/video/(?:watch/)?\d+(?:/|$)", path, re.IGNORECASE))
 
 
+_IMG_SRC_RE = re.compile(
+    r"""<img\b[^>]*?\bsrc\s*=\s*["\'](?P<src>[^"\']+)["\']""", re.IGNORECASE)
+_MD_IMG_RE = re.compile(r"!\[[^\]]*\]\((?P<src>https?://[^)\s]+)\)")
+
+
+def _gallery_cover_image(html: str, title_start: int, window: int = 4000) -> str:
+    """The card's cover image, taken from the markup just BEFORE its title.
+
+    The gallery card is <a href=watch><img src=cover></a> followed by the title
+    link, so the cover is the last image before the title anchor. Handles both
+    the real HTML the Playwright session returns and the markdown the reader
+    fallback returns.
+    """
+    region = (html or "")[max(0, title_start - window):title_start]
+    best = ""
+    for pattern in (_IMG_SRC_RE, _MD_IMG_RE):
+        for match in pattern.finditer(region):
+            src = html_unescape(match.group("src") or "").strip()
+            if not src or src.startswith("data:"):
+                continue
+            if not re.search(r"/samples/|/videos/|cover|thumb", src, re.IGNORECASE):
+                continue
+            best = src
+    return best
+
+
+def _image_expiry_epoch(url: str) -> int:
+    """The signed URL's expiry, from its e= parameter (0 if unsigned/unknown).
+
+    Measured on nubiles-porn.com: e=1789617600 -> 2026-09-17T04:00:00Z and
+    e=1789621200 -> 2026-09-17T05:00:00Z, fetched at 03:33Z, i.e. the signature
+    is minted for roughly an hour. Requesting the same path with no signature
+    returns 403, so a stored URL is a dead link almost immediately -- which is
+    why the bytes are downloaded at scrape time instead.
+    """
+    m = re.search(r"[?&]e=(\d{9,11})", str(url or ""))
+    return int(m.group(1)) if m else 0
+
+
+def thumbnails_dir(db_path: str) -> str:
+    base = os.path.dirname(os.path.abspath(db_path or "")) or "."
+    return os.path.join(base, "thumbnails")
+
+
+def _fetch_bytes(url: str, timeout: int = 20) -> bytes:
+    """Binary GET through the same impersonating client the scraper uses."""
+    try:
+        from curl_cffi import requests as _cff
+    except Exception:
+        return b""
+    try:
+        r = _cff.get(url, headers=REQUEST_HEADERS, timeout=timeout,
+                     impersonate="chrome110")
+        if r.status_code == 200:
+            return r.content or b""
+    except Exception:
+        pass
+    return b""
+
+
+def save_thumbnail(db_path: str, slug: str, url: str) -> str:
+    """Download a cover now, while its signature is still valid. Returns the
+    local path, or '' if it could not be saved."""
+    if not url or not slug:
+        return ""
+    data = _fetch_bytes(url)
+    if len(data) < 512:
+        return ""
+    ext = ".jpg"
+    m = re.search(r"\.(jpe?g|png|webp)(?:[?#]|$)", url, re.IGNORECASE)
+    if m:
+        ext = "." + m.group(1).lower().replace("jpeg", "jpg")
+    dest_dir = thumbnails_dir(db_path)
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, re.sub(r"[^A-Za-z0-9._-]", "_", slug) + ext)
+        with open(dest, "wb") as f:
+            f.write(data)
+        return dest
+    except Exception:
+        return ""
+
+
 def _gallery_slug_from_url(url: str) -> str:
     path = urlparse(url).path.strip("/")
     parts = [p for p in path.split("/") if p]
@@ -1110,6 +1202,7 @@ def _gallery_movies_from_html(html: str, site: dict) -> list[dict]:
         block_end = title_list[idx + 1]["start"] if idx + 1 < len(title_list) else min(len(html), hit["end"] + 2600)
         block = html[hit["end"]:block_end]
 
+        image = _gallery_cover_image(html, hit["start"])
         models = []
         model_urls = []
         series = ""
@@ -1160,9 +1253,14 @@ def _gallery_movies_from_html(html: str, site: dict) -> list[dict]:
             "published_date":     date_match.group(0) if date_match else "",
             "published_date_iso": date_iso,
             "url":                hit["url"],
+            "image":              image,
+            "image_expires":      _image_expiry_epoch(image),
             "source_site":        site.get("id") or "",
             "source_name":        site.get("name") or "",
-            "image":              "",
+            # NOTE: this literal used to repeat "image": "" further down, and a
+            # duplicate key in a dict literal silently wins -- which is why
+            # image was empty in every one of the 5371 shipped records even
+            # though the cover URL was sitting in the same HTML.
             "trailer_url":        "",
             "video_id":           slug.split("-", 1)[0] if slug else "",
             "description":        "",
@@ -1681,6 +1779,16 @@ class NetworkGalleryScraper(QThread):
                         changed += 1
                     movie["sources_seen"] = [source.get("id") or ""] if source.get("id") else []
                     self.db.upsert(movie)
+                    # Only for movies that are new or changed, so an Update
+                    # costs a handful of image fetches rather than one per
+                    # movie in the database. The signed URL expires in about
+                    # an hour, so this is the only moment it can be saved.
+                    if movie.get("image"):
+                        local = save_thumbnail(self.db.db_path, movie["slug"],
+                                               movie["image"])
+                        if local:
+                            self.signals.progress.emit(
+                                f"    thumbnail saved: {os.path.basename(local)}")
 
                 total_hint = f"/{max_pages}" if max_pages else ""
                 self.signals.progress.emit(

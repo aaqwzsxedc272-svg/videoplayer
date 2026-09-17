@@ -4781,11 +4781,13 @@ report(set(('slug', 'title', 'series', 'models', 'date')).issubset(set(_K57)),
        'the keep-list holds the four criteria that drive a match, plus the key')
 report(all(k in _K57 for k in ('video_id', 'source_site', 'source_name', 'meta_fetched')),
        'and the tie-breaker, site signal, display-name source and index gate')
-report(not any(k in _K57 for k in ('model_details', 'model_urls', 'image',
-                                   'trailer_url', 'description', 'tags', 'stats',
-                                   '_tags', '_categories', 'published_date',
-                                   'sources_seen', 'type')),
+report(not any(k in _K57 for k in ('model_details', 'model_urls', 'trailer_url',
+                                   'description', 'tags', 'stats', '_tags',
+                                   '_categories', 'published_date', 'type')),
        'and none of the fields that were never read or never filled', str(_K57))
+report('sources_seen' in _K57 and 'image' in _K57,
+       'except sources_seen (the update early-stop depends on it) and the '
+       'cover thumbnail, which are both load-bearing')
 
 _fat57 = {
     'slug': 'x-1', 'title': 'Facials For My Stepsis', 'series': 'NubilesPorn',
@@ -4804,10 +4806,10 @@ _expect57 = [k for k in _K57 if k in _fat57]
 report(list(_thin57) == _expect57,
        'a record is trimmed to the keep-list in a stable order',
        f'{len(_fat57)} fields -> {len(_thin57)}')
-report(not any(k in _thin57 for k in ('model_details', 'model_urls', 'image',
+report(not any(k in _thin57 for k in ('model_details', 'model_urls',
                                       'trailer_url', 'description', 'tags',
                                       'stats', '_tags', '_categories',
-                                      'published_date', 'sources_seen', 'type')),
+                                      'published_date', 'type')),
        'no retired field survives the trim',
        f'{len(json.dumps(_fat57))} -> {len(json.dumps(_thin57))} bytes')
 report(_msrc55._trim_movie(None) is None and _msrc55._trim_movie('x') == 'x',
@@ -4848,6 +4850,86 @@ report(sorted(_ld57.movies['x-1']) == sorted(_expect57),
 _b57, _a57 = _ld57.compact()
 report(_a57 < _before57, 'and compact() shrinks it on disk',
        f'{_before57} -> {_a57} bytes')
+
+# ── 58. Gallery cover thumbnails ─────────────────────────────────────────────
+# Every gallery card on nubiles-porn.com carries a cover at
+# images.nubiles-porn.com/videos/<title_underscored>/samples/cover960.jpg,
+# signed with st= and an e= expiry on the hour (~1 h after page load). The URL
+# was already inside the HTML the scraper fetches; it was thrown away by a
+# duplicate "image": "" key later in the same dict literal, which silently
+# won -- so image was empty in all 5371 shipped records.
+print()
+print('58. Gallery scraper captures the cover thumbnail already in the page')
+
+_HTML58 = """<html><body>
+<div class="card">
+ <a href="https://nubiles-porn.com/video/watch/256651/my-stepsis-is-a-hot-mess">
+   <img src="https://images.nubiles-porn.com/videos/my_stepsis_is_a_hot_mess/samples/cover960.jpg?st=C5dl1YO4Wv&amp;e=1789617600" alt="x">
+ </a>
+ <a href="https://nubiles-porn.com/video/watch/256651/my-stepsis-is-a-hot-mess">My Stepsis Is A Hot Mess</a>
+ <a href="https://nubiles-porn.com/model/profile/28550/arin-jones">Arin Jones</a>
+ <a href="https://shesinmybed.com/">ShesInMyBed</a> &ndash; Sep 16, 2026
+</div></body></html>"""
+_MD58 = ('[![My Stepsis Is A Hot Mess](https://images.nubiles-porn.com/videos/'
+         'my_stepsis_is_a_hot_mess/samples/cover960.jpg?st=Abc&e=1789621200)]'
+         '(https://nubiles-porn.com/video/watch/256651/my-stepsis-is-a-hot-mess)\n\n'
+         '[My Stepsis Is A Hot Mess](https://nubiles-porn.com/video/watch/256651/'
+         'my-stepsis-is-a-hot-mess)\n\n[Arin Jones](https://nubiles-porn.com/'
+         'model/profile/28550/arin-jones)\n\n[ShesInMyBed](https://shesinmybed.com/)')
+
+_pos58 = _HTML58.index('>My Stepsis Is A Hot Mess<')
+_img58 = _msrc55._gallery_cover_image(_HTML58, _pos58)
+report('cover960.jpg' in _img58 and _img58.startswith('https://images.nubiles-porn.com'),
+       'the cover is read from the real HTML the browser session returns',
+       _img58[:70])
+report('cover960.jpg' in _msrc55._gallery_cover_image(_MD58, _MD58.rindex('My Stepsis')),
+       'and from the markdown the reader fallback returns')
+report(_msrc55._gallery_cover_image('<p>no images here</p>', 12) == '',
+       'a card with no image yields an empty string, never a wrong one')
+
+report(_msrc55._image_expiry_epoch('https://x/y.jpg?st=a&e=1789621200') == 1789621200
+       and _msrc55._image_expiry_epoch('https://x/y.jpg') == 0
+       and _msrc55._image_expiry_epoch(None) == 0,
+       'the signature expiry is parsed from e=, and 0 when there is none')
+
+_site58 = {"base_url": "https://nubiles-porn.com",
+           "gallery_url": "https://nubiles-porn.com/video/gallery"}
+_mv58 = _msrc55._gallery_movies_from_html(_HTML58, _site58)
+report(len(_mv58) == 1 and _mv58[0]['slug'] == '256651-my-stepsis-is-a-hot-mess',
+       'the gallery card still parses to one movie', str(len(_mv58)))
+report('cover960.jpg' in _mv58[0].get('image', ''),
+       'and that movie now carries its cover URL -- the duplicate "image": "" '
+       'key no longer wipes it', _mv58[0].get('image', '')[:64])
+report(_mv58[0].get('image_expires') == 1789617600,
+       'with its expiry, so the player knows when the URL dies',
+       str(_mv58[0].get('image_expires')))
+report(_mv58[0]['models'] == ['Arin Jones'] and _mv58[0]['series'] == 'ShesInMyBed',
+       'title, actors and series are unaffected')
+
+# sources_seen is load-bearing: the gallery loop dedupes on it and flags
+# page_changed when a source is added. Trimming it made the update early-stop
+# unreachable, turning every Update into a full crawl.
+report('sources_seen' in _msrc55._MOVIE_KEEP_FIELDS
+       and 'image' in _msrc55._MOVIE_KEEP_FIELDS
+       and 'image_expires' in _msrc55._MOVIE_KEEP_FIELDS,
+       'sources_seen (the update early-stop) and the cover survive the trim')
+
+_dir58 = _tf55.mkdtemp()
+_orig58 = _msrc55._fetch_bytes
+try:
+    _msrc55._fetch_bytes = lambda url, timeout=20: b''
+    report(_msrc55.save_thumbnail(_dir58, 'x-1', 'https://x/y.jpg') == '',
+           'a failed download saves nothing and reports nothing')
+    _msrc55._fetch_bytes = lambda url, timeout=20: b'\xff\xd8' + b'0' * 900
+    _p58 = _msrc55.save_thumbnail(_dir58, '256651/my stepsis?', 'https://x/y.jpg')
+    report(bool(_p58) and os.path.isfile(_p58)
+           and os.path.basename(_p58).startswith('256651'),
+           'a good download is written under thumbnails/, slug sanitised',
+           os.path.basename(_p58) if _p58 else 'NOT SAVED')
+    report(_msrc55.thumbnails_dir(_dir58).endswith('thumbnails'),
+           'thumbnails live beside the database, not inside it')
+finally:
+    _msrc55._fetch_bytes = _orig58
 
 print()
 print('FAILURES:', FAILS)
