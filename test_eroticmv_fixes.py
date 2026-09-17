@@ -4620,8 +4620,41 @@ report(len(_weak55) == 0 and len(_strong55) == 1
        'one carrying a video id',
        f'weak={len(_weak55)} strong={len(_strong55)}')
 
+# Determinism: hits is filled by iterating the q_tokens SET, whose order
+# Python randomises per process, so ranking on count alone made the
+# 80-slot candidate pool -- and therefore the answer -- differ between
+# runs of the same query (measured 1989/1988/1990 on three identical
+# runs before the slug tie-break).
+report(_mt55._candidate_slugs(('facials', 'stepsis', 'friend'), set())
+       == _mt55._candidate_slugs(('friend', 'stepsis', 'facials'), set()),
+       'the candidate pool does not depend on token iteration order')
+_cands55 = _mt55.match_candidates('NubilesPorn stepsis', limit=5, include_weak=True)
+_tie55 = [c55['movie']['slug'] for c55 in _cands55]
+report(len(_tie55) > 1 and _tie55 == [c55['movie']['slug'] for c55 in
+                                      _mt55.match_candidates('NubilesPorn stepsis',
+                                                             limit=5, include_weak=True)],
+       'the same query resolves to the same order every time', str(_tie55))
+_str55b = [c55['strength'] for c55 in _cands55]
+report(_str55b == sorted(_str55b, reverse=True),
+       'and that order is by strength first', str(_str55b))
+
 _src55 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            'metadata_scraper.py'), encoding='utf-8').read()
+
+# A filehost URL shares no token with the index. Scoring the whole database
+# for it cost ~1 s per row on the 5371-movie nubiles DB, and 246 of 300
+# sampled playlist rows (pixeldrain / bunkr / gofile) hit that path inside
+# _run_match's loop on the UI thread -- to produce no candidate at all.
+_t055 = time.time()
+_far55 = _mt55.match_candidates('https://pixeldrain.com/u/ksbtnekh', limit=5,
+                                include_weak=True)
+_dt55 = time.time() - _t055
+report(_far55 == [] and _dt55 < 0.05,
+       'an unrelated filehost URL short-circuits instead of scanning every '
+       'record', f'{len(_far55)} candidates in {_dt55*1000:.2f} ms')
+report('            candidate_slugs = set(self._records)' not in _src55,
+       'the whole-database fallback is gone from match_candidates')
+
 report(_src55.count('_candidate_is_high_confidence(top)') == 1
        and _src55.count('_candidate_is_high_confidence(candidates[0])') == 1,
        'both linker auto-apply sites use the shared gate, not their own '
@@ -4629,6 +4662,9 @@ report(_src55.count('_candidate_is_high_confidence(top)') == 1
 report('signal_count", 0)) >= 2' not in _src55.replace(
            'int(candidate.get("signal_count", 0)) >= 2', ''),
        'and no auto-apply site is left spelling the old rule')
+report('key=lambda item: (-item[1], item[0])' in _src55
+       and 'item["strength"], -item["score"]' in _src55,
+       'both ranking sorts carry an explicit deterministic tie-break')
 
 print()
 print('FAILURES:', FAILS)

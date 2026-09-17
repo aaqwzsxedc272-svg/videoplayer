@@ -1721,8 +1721,17 @@ class TitleMatcher:
         q_date   = re.findall(r'\d{8}|\d{4}[-/]\d{2}[-/]\d{2}|\d{2}[-/]\d{2}[-/]\d{4}', raw)
         q_date_d = set(_date_digits(d) for d in q_date if len(_date_digits(d)) == 8)
         candidate_slugs = self._candidate_slugs(q_tokens, q_date_d)
+        # Deliberately NOT falling back to every record when the inverted
+        # index turns up nothing. _candidate_slugs indexes title, series,
+        # model and slug tokens plus release dates, so a query that shares
+        # none of them cannot match a record on any real signal -- the only
+        # things left are the fuzzy _sim terms, which produce noise. Scoring
+        # the whole database instead cost ~1 s per query on the 5371-movie
+        # nubiles DB and ~246 of 300 sampled playlist rows (pixeldrain,
+        # bunkr, gofile URLs -- exactly the ones this app is used with) hit
+        # that path, inside _run_match's loop, on the UI thread.
         if not candidate_slugs:
-            candidate_slugs = set(self._records)
+            return []
 
         matches = []
 
@@ -1749,8 +1758,13 @@ class TitleMatcher:
             })
 
         # Strength first: a unique video id must beat a pile of cheap
-        # population-level signals however well the fuzzy score reads.
-        matches.sort(key=lambda item: (item["strength"], item["score"]), reverse=True)
+        # population-level signals however well the fuzzy score reads. The
+        # slug is the final tie-break so that two equally-plausible records
+        # always resolve the same way instead of following set iteration
+        # order over candidate_slugs.
+        matches.sort(key=lambda item: (-item["strength"], -item["score"],
+                                       str((item.get("movie") or {}).get("slug")
+                                           or "")))
         return matches[:max(1, int(limit or 1))]
 
     def _match_signals(self, raw: str, q_norm: str, q_compact: str, q_tokens: set,
@@ -1816,7 +1830,11 @@ class TitleMatcher:
         if not hits:
             return set()
 
-        ranked = sorted(hits.items(), key=lambda item: item[1], reverse=True)
+        # Tie-break on the slug, not on dict insertion order: hits is filled
+        # by iterating the q_tokens SET, whose order Python randomises per
+        # process, so a stable sort on count alone made ranked[:80] -- and
+        # therefore the answer -- differ between runs of the same query.
+        ranked = sorted(hits.items(), key=lambda item: (-item[1], item[0]))
         cutoff = 1 if len(q_tokens) <= 3 else 2
         candidates = {slug for slug, count in ranked[:80] if count >= cutoff}
         if len(candidates) < 40:
