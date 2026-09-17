@@ -190,25 +190,32 @@ def _find_ytdlp() -> Optional[str]:
 # MetadataDB
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Fields worth persisting, measured against the shipped nubiles DB
-# (tools_eval_metadata_linker.py / the field census). Everything else was
-# either never filled by either network or never read back:
+# Fields worth persisting. Every entry here has a reader; anything else was
+# dropped after tracing it, not after measuring its size. Field census of the
+# shipped databases (bytes as a share of payload):
 #
-#   model_details 1.46 MB  image/trailer_url/description/tags/stats/_tags/
-#   model_urls    0.79 MB  _categories: 0 of 5371 records filled
-#   series_url    0.18 MB  published_date/sources_seen/type: read by nothing
-#   series_slug   0.14 MB
+#   teamskeet  image 19.0%  trailer_url 18.7%  url 16.3%  video_id 8.9%
+#              title 7.8%  slug 7.6%  models 5.4%  series 3.5%  date 3.1%
+#   nubiles    url 30.4%  slug 15.3%  models 14.5%  title 10.2%  date 5.0%
 #
-# What actually drives a match is name (title), actors (models), series and
-# date -- plus video_id as a tie-breaker, source_site/source_name for the
-# site signal and the display name, meta_fetched as the index gate, and
-# scraped_at/url as provenance. Dropping the rest takes the nubiles DB from
-# 5.98 MB to 1.56 MB (-74%), and the same ratio applied to the 71 MB
-# teamskeet file is the difference between pushable and not.
+# Retired because nothing reads them:
+#   scraped_at   0 reads in main.py or here. The top-level last_full_scrape /
+#                last_update_scrape already say when the DB was last touched.
+#                233 KB on teamskeet, 118 KB on nubiles.
+#   source_name  1:1 with source_site in all 15957 records (5 distinct pairs
+#                on teamskeet, 4 on nubiles), so _source_display_name()
+#                derives it from the site config instead. 47 KB.
+#
+# url is KEPT even though no part of the player opens it: 3724 of 15957
+# records point at a host that cannot be rebuilt from the slug -- pervz, mylf,
+# familystrokes and swappz on teamskeet, momlover, nubilefilms and brattysis
+# on nubiles -- and source_site, the only other hint, is filled on just 3988
+# records between the two files. It is the sole record of where a scene came
+# from, so it stays despite costing 1.05 MB.
 _MOVIE_KEEP_FIELDS = (
     "slug", "title", "series", "models", "date",
-    "video_id", "source_site", "source_name",
-    "meta_fetched", "scraped_at", "url",
+    "video_id", "source_site",
+    "meta_fetched", "url",
     # Load-bearing, not decoration: NetworkGalleryScraper._run dedupes on
     # sources_seen and sets page_changed when a source is added to it. Trimming
     # it made `src_id not in sources_seen` permanently true, so every movie was
@@ -230,10 +237,46 @@ _MOVIE_KEEP_FIELDS = (
 
 
 def _trim_movie(movie: dict) -> dict:
-    """Keep only the fields anything reads back, in a stable order."""
+    """Keep only the fields anything reads back, dropping empty ones.
+
+    An empty string, empty list or 0 is indistinguishable from an absent key
+    to every reader in this module -- they all read `movie.get(k) or default`
+    -- so persisting it costs bytes and buys nothing. In practice nubiles
+    carried three dead keys on all 5371 records (preview, preview_expires,
+    trailer_url) and teamskeet a fourth (duration, always 0 because neither
+    network sends a runtime in any of its five aliases).
+    """
     if not isinstance(movie, dict):
         return movie
-    return {k: movie[k] for k in _MOVIE_KEEP_FIELDS if k in movie}
+    out = {}
+    for k in _MOVIE_KEEP_FIELDS:
+        if k not in movie:
+            continue
+        v = movie[k]
+        if not v and k != "slug":
+            continue
+        out[k] = v
+    return out
+
+
+def _source_display_name(movie: dict) -> str:
+    """The human name of a movie's source network, from the site config.
+
+    source_name used to be stored on every record, but it was 1:1 with
+    source_site everywhere, so it is derived. This matters for the display
+    name: 1806 nubiles movies have no series and fall back to the network
+    name, so dropping the field without this would have silently shortened
+    all of those names from "NubileFilms - ..." to just the title.
+    """
+    sid = str((movie or {}).get("source_site") or "")
+    if not sid:
+        return ""
+    for cfg in METADATA_SITES.values():
+        srcs = list(cfg.get("sources") or []) + list(cfg.get("gallery_sources") or [])
+        for src in srcs:
+            if isinstance(src, dict) and str(src.get("id") or "") == sid:
+                return str(src.get("name") or "")
+    return ""
 
 
 class MetadataDB:
@@ -364,18 +407,19 @@ class MetadataDB:
         with self._lock:
             movies = self._data.setdefault("movies", {})
             if slug not in movies:
-                movies[slug] = {
+                # meta_fetched: False is dropped by _trim_movie, which is the
+                # same thing -- stubs_needing_enrichment() tests
+                # `not m.get("meta_fetched")`, and an absent key reads as not
+                # fetched.
+                movies[slug] = _trim_movie({
                     "slug":         slug,
                     "title":        _slug_to_title(slug),
                     "series":       "",
-                    "series_url":   "",
                     "models":       [],
-                    "model_urls":   [],
                     "date":         "",
                     "url":          f"https://www.teamskeet.com/movies/{slug}",
-                    "scraped_at":   _utc_now(),
                     "meta_fetched": False,
-                }
+                })
 
     def upsert(self, movie: dict):
         slug = movie.get("slug", "")
@@ -1000,11 +1044,14 @@ def _site_movie_from_entry(entry: dict, source: Optional[dict] = None) -> Option
 def _movie_identity_changed(existing: Optional[dict], movie: dict) -> bool:
     if not existing or not existing.get("meta_fetched"):
         return True
-    # Only persisted fields: comparing a field that is no longer stored
-    # against a record that still carries it would report a change on every
-    # re-scrape and rewrite the whole database.
+    # Only persisted fields, and canonicalised. `existing` comes off disk
+    # where _trim_movie has already dropped empty values, while `movie` is
+    # the raw builder output that still carries them, so a plain comparison
+    # would see None against "" on every record and report a change at every
+    # scrape -- which sets page_changed, which turns an Update back into a
+    # full 175-page crawl.
     keys = ("title", "series", "models", "date", "video_id")
-    return any(existing.get(k) != movie.get(k) for k in keys)
+    return any((existing.get(k) or None) != (movie.get(k) or None) for k in keys)
 
 
 def _fetch_movie_page_metadata(slug: str, source: Optional[dict] = None) -> Optional[dict]:
@@ -2390,6 +2437,7 @@ def format_display_name(movie: dict) -> str:
     series = (
         movie.get("series")
         or movie.get("source_name")
+        or _source_display_name(movie)
         or movie.get("site_name")
         or movie.get("site")
         or movie.get("studio")

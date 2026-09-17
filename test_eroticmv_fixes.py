@@ -4779,8 +4779,13 @@ print('57. Metadata DB keeps only the name/actors/series/date fields that are us
 _K57 = _msrc55._MOVIE_KEEP_FIELDS
 report(set(('slug', 'title', 'series', 'models', 'date')).issubset(set(_K57)),
        'the keep-list holds the four criteria that drive a match, plus the key')
-report(all(k in _K57 for k in ('video_id', 'source_site', 'source_name', 'meta_fetched')),
-       'and the tie-breaker, site signal, display-name source and index gate')
+report(all(k in _K57 for k in ('video_id', 'source_site', 'meta_fetched')),
+       'and the tie-breaker, the site signal and the index gate')
+report(not any(k in _K57 for k in ('scraped_at', 'source_name')),
+       'but not scraped_at (0 reads in main.py or the scraper -- the top-level '
+       'last_full_scrape already records when the DB was touched) nor '
+       'source_name (1:1 with source_site, so _source_display_name derives it)',
+       str(_K57))
 report(not any(k in _K57 for k in ('model_details', 'model_urls', 'description',
                                    'tags', 'stats', '_tags', '_categories',
                                    'published_date', 'type')),
@@ -4802,7 +4807,9 @@ _fat57 = {
     'type': 'video',
 }
 _thin57 = _msrc55._trim_movie(_fat57)
-_expect57 = [k for k in _K57 if k in _fat57]
+# _trim_movie drops empties as well as off-list fields, so the expectation
+# has to allow for both.
+_expect57 = [k for k in _K57 if _fat57.get(k) or k == 'slug']
 report(list(_thin57) == _expect57,
        'a record is trimmed to the keep-list in a stable order',
        f'{len(_fat57)} fields -> {len(_thin57)}')
@@ -4821,6 +4828,48 @@ report(_msrc55._movie_identity_changed(_thin57, _msrc55._trim_movie(_fat57)) is 
 report(_msrc55._movie_identity_changed(
            _thin57, _msrc55._trim_movie(dict(_fat57, title='Something Else'))) is True,
        'but a real title change still is')
+
+report(all(k in _thin57 for k in ('slug', 'title', 'series', 'models', 'date')),
+       'the fields that drive a match survive the trim', str(sorted(_thin57)))
+report('image' not in _thin57 and 'trailer_url' not in _thin57
+       and 'sources_seen' not in _thin57,
+       'and an empty cover, trailer or sources list is not stored at all -- '
+       'every reader does movie.get(k) or default, so "" is the same as absent')
+
+# source_name is derived now; if the derivation is wrong, 1806 nubiles movies
+# with no series lose their network prefix.
+report(_msrc55._source_display_name({'source_site': 'nubilefilms'}) == 'NubileFilms'
+       and _msrc55._source_display_name({'source_site': 'momlover'}) == 'MomLover'
+       and _msrc55._source_display_name({'source_site': 'brattysis'}) == 'BrattySis'
+       and _msrc55._source_display_name({'source_site': 'nubiles-porn'}) == 'Nubiles Porn',
+       'all four nubiles network names are derivable from source_site')
+report(_msrc55._source_display_name({'source_site': 'mylf'}) == 'MYLF'
+       and _msrc55._source_display_name({'source_site': 'pervz'}) == 'Pervz'
+       and _msrc55._source_display_name({'source_site': 'familystrokes'}) == 'FamilyStrokes'
+       and _msrc55._source_display_name({'source_site': 'swappz'}) == 'Swappz'
+       and _msrc55._source_display_name({'source_site': 'teamskeet'}) == 'TeamSkeet',
+       'and all five teamskeet ones')
+report(_msrc55._source_display_name({}) == '' and _msrc55._source_display_name(None) == '',
+       'with no source_site it returns empty rather than raising')
+_noSeries = {'slug': 's', 'title': 'Some Scene', 'series': '', 'models': ['A B'],
+             'date': '08/04/2026', 'source_site': 'nubilefilms'}
+report(_msrc55.format_display_name(_noSeries).startswith('NubileFilms - '),
+       'so a movie with no series still gets its network prefix',
+       _msrc55.format_display_name(_noSeries)[:52])
+
+# THE REGRESSION GUARD. `existing` comes off disk trimmed (empties dropped);
+# `movie` is the raw builder output that still carries them. Comparing None
+# against "" would report a change on every record at every scrape.
+_rawNoSeries = dict(_fat57, series='', models=[])
+_trimmedNoSeries = _msrc55._trim_movie(_rawNoSeries)
+report('series' not in _trimmedNoSeries and 'models' not in _trimmedNoSeries,
+       'a record with no series or models stores neither key')
+report(_msrc55._movie_identity_changed(_trimmedNoSeries, _rawNoSeries) is False,
+       'and re-scraping it against the raw builder output is still not a '
+       'change -- the trimmed-vs-raw comparison is canonicalised')
+report(_msrc55._movie_identity_changed(
+           _trimmedNoSeries, dict(_rawNoSeries, series='BrattySis')) is True,
+       'while a series appearing where there was none still is')
 
 _dbp57 = os.path.join(_tf55.mkdtemp(), 'trim57.json')
 _db57 = _msrc55.MetadataDB(_dbp57)
