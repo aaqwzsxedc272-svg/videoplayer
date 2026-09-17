@@ -5494,8 +5494,8 @@ report('preview_live' in _clip64 and 'preview_url' in _clip64,
 report('_hover_clip_timer.start()' in _clip64,
        'with a timeout, so a dead URL cannot leave the card stuck')
 _st64b = _vsrc64('_on_hover_clip_status')
-report('hover_preview_image.hide()' in _st64b and 'hover_preview_video.show()' in _st64b,
-       'the clip swaps over the cover once it is buffered')
+report('_swap_to_hover_clip' in _st64b,
+       'a buffered clip hands over to the swap')
 report('LoadedMedia' in _st64b and 'BufferedMedia' in _st64b,
        'and only on a buffered status')
 _ab64b = _vsrc64('_abandon_hover_clip')
@@ -5586,6 +5586,47 @@ finally:
 report(not _saved65,
        'a second pass backfills nothing, so the crawl converges again',
        f'{len(_saved65)} fetches')
+
+# ── 66. Card placement on first show, and a 0.7 s hold on the cover ───────────
+print()
+print('66. The card is placed correctly the first time and holds the cover 0.7 s')
+
+_mv66 = _vsrc64('_move_preview_widget')
+report('min(w, self.width() - 16)' in _mv66 and 'min(h, self.height() - 16)' in _mv66,
+       'the card size is clamped before the edge test, so a pre-layout size '
+       'cannot flip it into the top-left corner')
+report('self.hover_preview.width() > ' not in _mv66,
+       'and the raw pre-layout size is no longer compared directly')
+_show66 = _vsrc64('_show_hover_preview')
+report('hover_preview.show()' in _show66
+       and '_reposition_hover_preview()' in _show66
+       and _show66.index('hover_preview.show()') < _show66.index('_reposition_hover_preview()'),
+       'it is repositioned once more after show(), when the layout is live')
+
+report(lift_attr('VideoPlayer', 'HOVER_COVER_HOLD_MS') == 700,
+       'the cover is held for 0.7 s before the clip takes over',
+       str(lift_attr('VideoPlayer', 'HOVER_COVER_HOLD_MS')))
+_init66 = _vsrc64('__init__')
+report('HOVER_COVER_HOLD_MS' in _init66 and '_hover_cover_hold_timer.setSingleShot(True)' in _init66,
+       'via a single-shot timer wired to the swap')
+_clip66 = _vsrc64('_start_metadata_hover_clip')
+report('_hover_cover_hold_timer.start()' in _clip66,
+       'the hold starts when the clip is requested')
+report(_clip66.index('_hover_cover_hold_timer.start()') < _clip66.index('setSource'),
+       'and buffering starts during the hold, so the swap is not delayed by it')
+_swap66 = _vsrc64('_swap_to_hover_clip')
+report('_hover_clip_ready' in _swap66 and '_hover_cover_hold_timer.isActive()' in _swap66,
+       'the swap needs both the clip buffered and the hold elapsed')
+report('hover_preview_image.hide()' in _swap66 and 'hover_preview_video.show()' in _swap66
+       and '_hover_clip_player.play()' in _swap66,
+       'and it is what performs the swap')
+report('_swap_to_hover_clip' in _vsrc64('_on_hover_clip_status'),
+       'either side can arrive last, so both call it')
+_ab66 = _vsrc64('_abandon_hover_clip')
+report('_hover_cover_hold_timer.stop()' in _ab66,
+       'giving up on the clip also cancels the hold, leaving the cover up')
+report('_hover_cover_hold_timer.stop()' in _vsrc64('_stop_metadata_hover_clip'),
+       'and so does hiding the card')
 
 print()
 print('FAILURES:', FAILS)

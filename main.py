@@ -6730,6 +6730,11 @@ class RemoteDownloadWorker(QThread):
 
 
 class VideoPlayer(QMainWindow):
+    # How long the scene cover stays on screen in the hover card before the
+    # clip takes over. Buffering runs during the hold, so this is purely how
+    # long the cover is visible, not added latency before the clip.
+    HOVER_COVER_HOLD_MS = 700
+
     video_info_updated = pyqtSignal(str, float, float)
     stream_resolved = pyqtSignal(str, object)
     remote_download_variants_ready = pyqtSignal(str, object)
@@ -7477,6 +7482,14 @@ class VideoPlayer(QMainWindow):
         self._hover_clip_timer.setInterval(6000)
         self._hover_clip_timer.timeout.connect(self._abandon_hover_clip)
         self._hover_clip_wanted = False
+        self._hover_clip_ready = False
+        # The cover is held on screen for this long before the clip takes
+        # over. Buffering starts immediately, so the swap is not delayed by
+        # the hold -- the hold is purely so the cover is actually seen.
+        self._hover_cover_hold_timer = QTimer(self)
+        self._hover_cover_hold_timer.setSingleShot(True)
+        self._hover_cover_hold_timer.setInterval(self.HOVER_COVER_HOLD_MS)
+        self._hover_cover_hold_timer.timeout.connect(self._swap_to_hover_clip)
 
         self.pdf_edge_switch_left_btn = QPushButton("< AVN", self)
         self.pdf_edge_switch_right_btn = QPushButton("AVN >", self)
@@ -8938,13 +8951,22 @@ class VideoPlayer(QMainWindow):
     def _move_preview_widget(self, global_pos):
         if not hasattr(self, 'hover_preview'):
             return
+        # The very first time this runs the card has never been shown, so
+        # width()/height() are pre-layout defaults rather than the size the
+        # frame will actually take. Measuring those made both flip branches
+        # fire and clamp to (8, 8) -- the card appeared in the top-left
+        # corner on the first hover and correctly on every one after.
+        w = self.hover_preview.width()
+        h = self.hover_preview.height()
+        w = max(1, min(w, self.width() - 16))
+        h = max(1, min(h, self.height() - 16))
         local_pos = self.mapFromGlobal(global_pos)
         x = local_pos.x() + 18
         y = local_pos.y() + 18
-        if x + self.hover_preview.width() > self.width() - 8:
-            x = max(8, local_pos.x() - self.hover_preview.width() - 18)
-        if y + self.hover_preview.height() > self.height() - 8:
-            y = max(8, local_pos.y() - self.hover_preview.height() - 18)
+        if x + w > self.width() - 8:
+            x = max(8, local_pos.x() - w - 18)
+        if y + h > self.height() - 8:
+            y = max(8, local_pos.y() - h - 18)
         self.hover_preview.move(x, y)
 
     def _get_preview_trigger_mode(self):
@@ -9130,7 +9152,9 @@ class VideoPlayer(QMainWindow):
         if self._ensure_hover_clip_player() is None:
             return
         self._hover_clip_wanted = True
+        self._hover_clip_ready = False
         self._hover_clip_timer.start()
+        self._hover_cover_hold_timer.start()
         try:
             self._hover_clip_player.setSource(QUrl(url))
         except Exception:
@@ -9147,18 +9171,33 @@ class VideoPlayer(QMainWindow):
             return
         if ready:
             self._hover_clip_timer.stop()
-            self.hover_preview_image.hide()
-            self.hover_preview_video.show()
-            try:
-                self._hover_clip_player.play()
-            except Exception:
-                self._abandon_hover_clip()
+            self._hover_clip_ready = True
+            self._swap_to_hover_clip()
         elif bad:
+            self._abandon_hover_clip()
+
+    def _swap_to_hover_clip(self):
+        """Cover has had its 0.7 s and the clip is buffered: swap over.
+
+        Called from both sides -- the status signal and the hold timer --
+        because either can arrive last. Whichever comes second does the swap.
+        """
+        if not (self._hover_clip_wanted and self._hover_clip_ready):
+            return
+        if self._hover_cover_hold_timer.isActive():
+            return
+        self.hover_preview_image.hide()
+        self.hover_preview_video.show()
+        try:
+            self._hover_clip_player.play()
+        except Exception:
             self._abandon_hover_clip()
 
     def _abandon_hover_clip(self):
         """No clip: keep the cover up, which is why it is painted first."""
         self._hover_clip_wanted = False
+        self._hover_clip_ready = False
+        self._hover_cover_hold_timer.stop()
         self._hover_clip_timer.stop()
         self._stop_clip_playback()
         self.hover_preview_video.hide()
@@ -9176,6 +9215,9 @@ class VideoPlayer(QMainWindow):
 
     def _stop_metadata_hover_clip(self):
         self._hover_clip_wanted = False
+        self._hover_clip_ready = False
+        if hasattr(self, '_hover_cover_hold_timer'):
+            self._hover_cover_hold_timer.stop()
         if hasattr(self, '_hover_clip_timer'):
             self._hover_clip_timer.stop()
         self._stop_clip_playback()
@@ -9868,6 +9910,9 @@ class VideoPlayer(QMainWindow):
         self._move_preview_widget(global_pos)
         self.hover_preview.show()
         self.hover_preview.raise_()
+        # Showing it activates the layout, so the card now has its real size.
+        # Reposition once more or the first hover keeps the pre-layout guess.
+        self._reposition_hover_preview()
         self._hover_preview_path = path
         self._start_metadata_hover_clip(meta)
 
