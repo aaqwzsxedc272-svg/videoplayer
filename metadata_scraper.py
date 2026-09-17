@@ -1623,6 +1623,34 @@ def _date_keys(date: str) -> set[str]:
 
 
 class TitleMatcher:
+    # Signals are not equally trustworthy, and treating them as if they were
+    # is exactly what made the linker auto-apply the WRONG movie. 'site'
+    # fires for every movie scraped from that source whenever the query
+    # mentions the source, and 'series' fires for every movie in the series,
+    # so ('series','site') is the most common two-signal combination in the
+    # whole database -- while 'id' is a unique numeric video id.
+    #
+    # Measured against the shipped nubiles DB (tools_eval_metadata_linker.py,
+    # 1500 movies x 5 query shapes) with the old sort key
+    # (signal_count, score):
+    #     page_url 67.0%   host_style 71.7%   display_name 98.8%
+    # The exact movie lost to a same-series one because _score had NO term
+    # for the video id and none for a whole-title match, so the two
+    # decisive signals were invisible to the ranking.
+    _SIGNAL_WEIGHTS = {
+        'id':            1.00,  # unique numeric video id -- decisive
+        'scene':         0.60,  # the whole scene title appears in the query
+        'date':          0.45,
+        'model':         0.35,  # per model, capped by _MODEL_SIGNAL_CAP
+        'series':        0.20,
+        'scene_partial': 0.15,  # only two or more overlapping title tokens
+        'site':          0.05,  # near-free: every movie from that source
+    }
+    _MODEL_SIGNAL_CAP = 0.50
+    # Auto-apply threshold: 'id' or 'scene' alone clears it, while the
+    # ('series','site') pair at 0.25 does not.
+    HIGH_CONFIDENCE_STRENGTH = 0.60
+
     def __init__(self, db: MetadataDB):
         self.db = db
         self._records: dict[str, dict] = {}
@@ -1704,21 +1732,25 @@ class TitleMatcher:
                 continue
             score = self._score(raw, q_norm, q_tokens, q_date_d, record)
             signals = self._match_signals(raw, q_norm, q_compact, q_tokens, q_date_d, record)
-            signal_count = len(signals)
-            if score < MATCH_THRESHOLD and signal_count == 0:
+            strength = self._signal_strength(signals)
+            if score < MATCH_THRESHOLD and not signals:
                 continue
-            if not include_weak and signal_count < 2:
+            if not include_weak and strength < self.HIGH_CONFIDENCE_STRENGTH:
                 continue
-            confidence = "high" if signal_count >= 2 else "possible"
+            confidence = ("high" if strength >= self.HIGH_CONFIDENCE_STRENGTH
+                          else "possible")
             matches.append({
                 "movie": record["movie"],
                 "score": score,
                 "signals": signals,
-                "signal_count": signal_count,
+                "signal_count": len(signals),
+                "strength": round(strength, 4),
                 "confidence": confidence,
             })
 
-        matches.sort(key=lambda item: (item["signal_count"], item["score"]), reverse=True)
+        # Strength first: a unique video id must beat a pile of cheap
+        # population-level signals however well the fuzzy score reads.
+        matches.sort(key=lambda item: (item["strength"], item["score"]), reverse=True)
         return matches[:max(1, int(limit or 1))]
 
     def _match_signals(self, raw: str, q_norm: str, q_compact: str, q_tokens: set,
@@ -1733,7 +1765,9 @@ class TitleMatcher:
         if record["title_compact"] and record["title_compact"] in q_compact:
             signals.append("scene")
         elif len(title_overlap) >= 2:
-            signals.append("scene")
+            # Two or more shared title tokens is weak on this material:
+            # 'stepsis' and 'friend' alone are enough to trip it.
+            signals.append("scene_partial")
 
         for model_name, mn, mc in zip(record["models"], record["model_norms"], record["model_compacts"]):
             matched = bool(mn and mn in q_norm) or bool(mc and mc in q_compact)
@@ -1754,6 +1788,21 @@ class TitleMatcher:
             signals.append("site")
 
         return signals
+
+    def _signal_strength(self, signals: list) -> float:
+        """Specificity-weighted strength of a signal list.
+
+        Model matches are summed but capped, so a six-performer scene cannot
+        outvote a unique video id on cast size alone.
+        """
+        total = 0.0
+        model_total = 0.0
+        for sig in signals or ():
+            if str(sig).startswith("model:"):
+                model_total += self._SIGNAL_WEIGHTS["model"]
+                continue
+            total += self._SIGNAL_WEIGHTS.get(str(sig), 0.0)
+        return total + min(model_total, self._MODEL_SIGNAL_CAP)
 
     def _candidate_slugs(self, q_tokens: set, q_date_d: set) -> set[str]:
         hits: dict[str, int] = {}
@@ -1820,13 +1869,23 @@ class TitleMatcher:
             if q_date_d & _date_keys(date):
                 s_date = 0.45
 
+        # S7: the unique numeric video id. Worth more than everything else
+        # combined, and previously absent from this sum entirely -- which is
+        # why an exact /watch/248755/ URL scored below a same-series movie
+        # that merely shared the site name.
+        s_id = 0.0
+        vid = str(record.get("video_id") or "")
+        if vid and (vid in q_norm.split() or f"/{vid}/" in str(raw)):
+            s_id = 0.55
+
         score = (
             s_slug      * 0.30 +
             s_title     * 0.20 +
             s_title_tok * 0.15 +
             s_series    +
             s_model     +
-            s_date
+            s_date      +
+            s_id
         )
         return score
 
@@ -1985,6 +2044,22 @@ def _best_match_raw_title(player, file_path: str, *, fetch_remote_page: bool = F
                 return raw
 
     return _extract_raw_title(fp)
+
+
+def _candidate_is_high_confidence(candidate) -> bool:
+    """The linker's auto-apply gate, in one place.
+
+    TitleMatcher and MetadataScraperDialog used to each spell their own
+    version of this rule, so the two could disagree about what 'high
+    confidence' means. Candidates built before strength existed fall back to
+    the old two-signal test rather than being silently demoted.
+    """
+    if not isinstance(candidate, dict):
+        return False
+    strength = candidate.get("strength")
+    if strength is None:
+        return int(candidate.get("signal_count", 0) or 0) >= 2
+    return float(strength) >= TitleMatcher.HIGH_CONFIDENCE_STRENGTH
 
 
 def _db_signature(db: MetadataDB) -> tuple:
@@ -2689,7 +2764,7 @@ class MetadataScraperDialog(QDialog):
             auto_apply = False
             if candidates:
                 top = candidates[0]
-                if int(top.get("signal_count", 0)) >= 2:
+                if _candidate_is_high_confidence(top):
                     movie = top.get("movie")
                     auto_apply = True
                 else:
@@ -2727,7 +2802,9 @@ class MetadataScraperDialog(QDialog):
         self._log_msg(f"URL title: {raw!r}")
 
         candidates = self.matcher.match_candidates(raw, limit=5, include_weak=True)
-        movie = candidates[0].get("movie") if candidates and int(candidates[0].get("signal_count", 0)) >= 2 else None
+        movie = (candidates[0].get("movie")
+                 if candidates and _candidate_is_high_confidence(candidates[0])
+                 else None)
         if not movie:
             if candidates:
                 top_movie = candidates[0].get("movie") or {}

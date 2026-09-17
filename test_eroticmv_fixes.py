@@ -4475,6 +4475,161 @@ report("[PLAYMATE_API]" in _src54,
        'never be mistaken for a stale build')
 
 
+# ── 55. Metadata Linker: rank by signal specificity, not signal count ────────
+# The linker auto-applies its top candidate, so a wrong one overwrites the
+# row's display name. Measured against the shipped nubiles DB
+# (tools_eval_metadata_linker.py, 1500 movies x 5 query shapes), sorting by
+# (signal_count, score) linked 12.20% of queries to a genuinely wrong movie:
+# page_url 67.0%, host_style 71.7%. Cause: 'site' fires for every movie from
+# that source and 'series' for every movie in the series, so the pair
+# ('series','site') is the most common two-signal combination in the DB, while
+# 'id' -- a unique numeric video id -- contributed nothing to _score at all.
+print()
+print('55. Metadata Linker ranks a unique video id above cheap shared signals')
+
+import sys as _sys55, tempfile as _tf55, types as _types55
+
+# metadata_scraper imports PyQt6 at module scope; the ranking under test needs
+# none of it, so stub the module and import the real thing.
+if 'PyQt6' not in _sys55.modules:
+    class _Q55:
+        def __init__(self, *a, **k): pass
+        def __getattr__(self, n): return _Q55()
+        def __call__(self, *a, **k): return _Q55()
+
+    class _QtMod55(_types55.ModuleType):
+        def __getattr__(self, n):
+            return (lambda *a, **k: _Q55()) if n == 'pyqtSignal' else _Q55
+
+    for _n55 in ('PyQt6', 'PyQt6.QtCore', 'PyQt6.QtWidgets', 'PyQt6.QtGui'):
+        _sys55.modules[_n55] = _QtMod55(_n55)
+
+import metadata_scraper as _msrc55
+
+_TARGET55 = '248755-facials-for-my-stepsis-and-her-friend-s7e6'
+_MOVIES55 = {}
+
+
+def _mk55(slug, vid, title, series, models, date, source='nubiles-porn'):
+    _MOVIES55[slug] = {
+        'slug': slug, 'title': title, 'series': series, 'series_url': '',
+        'series_slug': '', 'models': list(models), 'model_urls': [],
+        'model_details': [], 'date': date, 'published_date': '',
+        'published_date_iso': '', 'video_id': vid, 'type': 'video',
+        'url': f'https://nubiles-porn.com/video/watch/{vid}/'
+               + slug.split('-', 1)[1].replace('-s7e6', ''),
+        'source_site': source, 'source_name': 'Nubiles Porn',
+        'scraped_at': '', 'meta_fetched': True,
+    }
+
+
+# the real failure shape: one exact movie, plus same-series siblings that all
+# share the cheap ('series','site') pair
+_mk55(_TARGET55, '248755', 'Facials For My Stepsis And Her Friend',
+      'NubilesPorn', ['Axel Haze', 'Delilah Dagger'], '08/04/2026')
+for _n55b, _v55, _t55 in (
+    ('253704-im-pretty-sure-stepsis-is-a-super-heroine', '253704',
+     'Im Pretty Sure Stepsis Is A Super Heroine Friend'),
+    ('253662-watching-stepsisters-nighttime-routine', '253662',
+     'Watching My Stepsis Nighttime Routine With Her Friend'),
+    ('254138-can-i-sleep-in-your-room-tonight-stepsis', '254138',
+     'Can I Sleep In Your Room Tonight Stepsis'),
+):
+    _mk55(_n55b, _v55, _t55, 'NubilesPorn', ['Axel Haze'], '08/04/2026')
+
+_dbf55 = os.path.join(_tf55.mkdtemp(), 'linker55.json')
+with open(_dbf55, 'w', encoding='utf-8') as _f55:
+    json.dump({'last_full_scrape': '2026-08-04T00:00:00Z',
+               'last_update_scrape': None, 'movies': _MOVIES55}, _f55)
+_db55 = _msrc55.MetadataDB(_dbf55)
+_mt55 = _msrc55.TitleMatcher(_db55)
+
+report(len(_mt55._records) == len(_MOVIES55),
+       'the real TitleMatcher indexes the fixture', str(len(_mt55._records)))
+
+_url55 = f'https://nubiles-porn.com/video/watch/248755/facials-for-my-stepsis-and-her-friend'
+_hit55 = _mt55.match(_url55)
+report(_hit55 is not None and _hit55.get('slug') == _TARGET55,
+       'a page URL carrying the unique video id resolves to that exact movie '
+       '(was: a same-series sibling won)', str((_hit55 or {}).get('slug')))
+
+_host55 = _mt55.match('nubiles-porn 248755 Facials For My Stepsis And Her Friend')
+report(_host55 is not None and _host55.get('slug') == _TARGET55,
+       'and so does a file-host style name built from site + id + title',
+       str((_host55 or {}).get('slug')))
+
+_c55 = _mt55.match_candidates(_url55, limit=5, include_weak=True)[0]
+report(_c55.get('signals') and 'id' in _c55['signals'],
+       "the winning candidate is the one that matched the video id, "
+       f"signals={_c55.get('signals')}")
+
+_W55 = _msrc55.TitleMatcher._SIGNAL_WEIGHTS
+_HIGH55 = _msrc55.TitleMatcher.HIGH_CONFIDENCE_STRENGTH
+report(_mt55._signal_strength(['series', 'site']) < _HIGH55,
+       "the near-free ('series','site') pair is NOT high confidence",
+       f"{_mt55._signal_strength(['series','site'])} < {_HIGH55}")
+report(_mt55._signal_strength(['id']) >= _HIGH55
+       and _mt55._signal_strength(['scene']) >= _HIGH55,
+       'while a unique video id, or the whole scene title, is')
+report(_mt55._signal_strength(['model:a'] * 9)
+       == _mt55._signal_strength(['model:a', 'model:b']),
+       'model matches are capped, so cast size cannot outvote a video id',
+       str(_mt55._signal_strength(['model:a'] * 9)))
+report(_W55['id'] > _W55['scene'] > _W55['date'] > _W55['model']
+       > _W55['series'] > _W55['scene_partial'] > _W55['site'],
+       'the weights are ordered by specificity', str(_W55))
+
+_sib55 = next(r for s55, r in _mt55._records.items() if s55.startswith('253704'))
+_tgt55 = _mt55._records[_TARGET55]
+_qn55, _qt55, _qd55 = _msrc55._normalise(_url55), _msrc55._tokens(_url55), set()
+report(_mt55._score(_url55, _qn55, _qt55, _qd55, _tgt55)
+       > _mt55._score(_url55, _qn55, _qt55, _qd55, _sib55),
+       'the fuzzy score now agrees: the video-id match outscores the sibling',
+       f"{_mt55._score(_url55,_qn55,_qt55,_qd55,_tgt55):.3f} > "
+       f"{_mt55._score(_url55,_qn55,_qt55,_qd55,_sib55):.3f}")
+
+report(_mt55._match_signals('stepsis friend', _msrc55._normalise('stepsis friend'),
+                            _msrc55._compact('stepsis friend'),
+                            _msrc55._tokens('stepsis friend'), set(), _tgt55)
+       and 'scene' not in _mt55._match_signals(
+           'stepsis friend', _msrc55._normalise('stepsis friend'),
+           _msrc55._compact('stepsis friend'),
+           _msrc55._tokens('stepsis friend'), set(), _tgt55),
+       'two shared title tokens are scene_partial, not a full scene match')
+
+report(_msrc55._candidate_is_high_confidence({'strength': 1.0}) is True
+       and _msrc55._candidate_is_high_confidence({'strength': 0.25}) is False,
+       'the dialog auto-apply gate reads the same strength the matcher sorts by')
+report(_msrc55._candidate_is_high_confidence({'signal_count': 2}) is True
+       and _msrc55._candidate_is_high_confidence({'signal_count': 1}) is False,
+       'and a candidate built before strength existed still gates on two signals')
+report(_msrc55._candidate_is_high_confidence(None) is False
+       and _msrc55._candidate_is_high_confidence({}) is False,
+       'nothing auto-applies on an empty or missing candidate')
+
+# A query carrying nothing but the series name and the site must not
+# auto-apply, while the same query plus the video id must. (Assert the
+# lengths, not just all(): over an empty list all() is trivially True.)
+_weak55 = _mt55.match_candidates('NubilesPorn stepsis friend', limit=5,
+                                 include_weak=False)
+_strong55 = _mt55.match_candidates('NubilesPorn 248755 stepsis friend', limit=5,
+                                   include_weak=False)
+report(len(_weak55) == 0 and len(_strong55) == 1
+       and _strong55[0]['movie']['slug'] == _TARGET55,
+       'match(include_weak=False) drops a series+site-only query but keeps the '
+       'one carrying a video id',
+       f'weak={len(_weak55)} strong={len(_strong55)}')
+
+_src55 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           'metadata_scraper.py'), encoding='utf-8').read()
+report(_src55.count('_candidate_is_high_confidence(top)') == 1
+       and _src55.count('_candidate_is_high_confidence(candidates[0])') == 1,
+       'both linker auto-apply sites use the shared gate, not their own '
+       'signal_count >= 2')
+report('signal_count", 0)) >= 2' not in _src55.replace(
+           'int(candidate.get("signal_count", 0)) >= 2', ''),
+       'and no auto-apply site is left spelling the old rule')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
