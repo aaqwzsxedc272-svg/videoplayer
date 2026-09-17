@@ -13,6 +13,7 @@ import base64
 import json
 import os
 import re
+import threading
 import time
 from html import unescape as html_unescape
 from urllib.parse import urlparse, unquote, urljoin, urlunparse, parse_qs
@@ -5115,21 +5116,23 @@ _ast60 = ast.parse(_main60)
 _cls60 = next(n for n in ast.walk(_ast60)
               if isinstance(n, ast.ClassDef) and n.name == 'DraggableTableWidget')
 _meth60 = {n.name: n for n in _cls60.body if isinstance(n, ast.FunctionDef)}
-report('_schedule_metadata_hover' in _meth60
-       and '_show_metadata_hover_preview' in _meth60
-       and 'leaveEvent' in _meth60,
-       'the playlist widget grew hover-preview handlers')
-report('_schedule_metadata_hover' in ast.dump(_meth60['mouseMoveEvent']),
-       'and mouseMoveEvent schedules them while not dragging')
+# The hover card belongs to the player, not to the table widget: the player's
+# eventFilter drives self.hover_preview and honours the user's hover/click
+# trigger mode. The table only has to keep mouse tracking on so those hover
+# moves arrive.
 report('setMouseTracking(True)' in ast.get_source_segment(_main60, _meth60['__init__']),
        'hover works without a button held, because mouse tracking is on')
 report('preview_info_for_path' in ast.dump(
            next(n for n in ast.walk(_ast60)
                 if isinstance(n, ast.ImportFrom) and n.module == 'metadata_scraper')),
        'main.py imports the lookup rather than reimplementing it')
-_hov60 = ast.get_source_segment(_main60, _meth60['_show_metadata_hover_preview'])
-report('show_for' in _hov60 and 'QToolTip.showText' not in _hov60,
-       'and the hover card it opens paints the cached cover image')
+_vp60 = next(n for n in ast.walk(_ast60)
+             if isinstance(n, ast.ClassDef) and n.name == 'VideoPlayer')
+_meth60v = {n.name: n for n in _vp60.body if isinstance(n, ast.FunctionDef)}
+_hov60 = ast.get_source_segment(_main60, _meth60v['_show_hover_preview'])
+report('preview_info_for_path' in _hov60,
+       'and the player hover card it already had is the one that reads the '
+       'metadata -- the table does not raise a popup of its own')
 
 # ── 61. Update stays cheap, and dead signed URLs are not hoarded ─────────────
 print()
@@ -5278,21 +5281,42 @@ finally:
     _msvc62['teamskeet'] = _orig_sites62
 
 # The background fetch must collapse concurrent requests for one cover.
-_inf62 = _msrc55.save_thumbnail
+# The fetch is gated so the first one is genuinely still in flight when the
+# second hover arrives. Without the gate the daemon thread can finish first,
+# and a completed fetch SHOULD release the slot -- so the test would be
+# asserting the wrong thing rather than the code being wrong.
+#
+# A slug of its own, too: the preview_info_for_path call above already
+# started a real background fetch for 'scene-a', and because the in-flight
+# set is keyed on (site, slug) that older thread's discard can clear the
+# slot the newer one owns. In production that costs at worst a second
+# download of the same cover -- idempotent -- so it is not worth tracking
+# slot ownership for; here it would just make the test flaky.
 _calls62 = []
+_gate62 = threading.Event()
+_orig_fetch62 = _msrc55._fetch_bytes
+
+
+def _slow62(url, timeout=20):
+    _calls62.append(url)
+    _gate62.wait(5)
+    return b'\xff\xd8' + b'0' * 900
+
+
 try:
-    _msrc55._fetch_bytes = lambda url, timeout=20: (_calls62.append(url),
-                                                    b'\xff\xd8' + b'0' * 900)[1]
+    _msrc55._fetch_bytes = _slow62
     _msrc55._THUMB_INFLIGHT.clear()
-    _a62 = _msrc55.ensure_thumbnail_async(_p62, _site62, 'scene-a', 'https://i/c.jpg')
-    _b62 = _msrc55.ensure_thumbnail_async(_p62, _site62, 'scene-a', 'https://i/c.jpg')
+    _a62 = _msrc55.ensure_thumbnail_async(_p62, _site62, 'dedupe-62', 'https://i/c.jpg')
+    _b62 = _msrc55.ensure_thumbnail_async(_p62, _site62, 'dedupe-62', 'https://i/c.jpg')
     report(_a62 is True and _b62 is False,
-           'a second hover on the same row does not start a second download')
+           'a second hover on the same row does not start a second download',
+           f'{len(_calls62)} fetch(es) started')
     report(_msrc55.ensure_thumbnail_async(_p62, _site62, '', 'https://i/c.jpg') is False
            and _msrc55.ensure_thumbnail_async(None, _site62, 'x', 'https://i/c.jpg') is False,
            'and it refuses to run without a slug or a player')
 finally:
-    _msrc55._fetch_bytes = _msrc55._fetch_bytes
+    _gate62.set()
+    _msrc55._fetch_bytes = _orig_fetch62
     _msrc55._THUMB_INFLIGHT.clear()
 
 # Future scrapes must stay lean: the teamskeet builder still produces the fat
@@ -5426,49 +5450,142 @@ for _fn63 in ('teamskeet_metadata.json', 'nubiles_metadata.json',
                for m in _m63.values()),
            f'and the display normaliser is a no-op on it')
 
-# ── 64. Hover card: cover first, then the clip if there is one ────────────────
+# ── 64. The metadata cover and clip go into the EXISTING hover card ────────────
+# The player already had a hover preview card (self.hover_preview, a QFrame
+# with hover_preview_image / hover_preview_text, driven by _show_hover_preview
+# from the playlist eventFilter, honouring the user's hover/click trigger
+# mode). A second popup competing with it on the same widget was wrong, so
+# the cover and clip are added to the card that was already there.
 print()
-print('64. The hover card shows the cover, then the clip when the movie has one')
+print('64. Metadata enriches the existing hover card instead of adding a popup')
 
-_cls64 = next((n for n in TREE.body
-               if isinstance(n, ast.ClassDef) and n.name == 'MetadataHoverPopup'), None)
-report(_cls64 is not None, 'main.py defines MetadataHoverPopup')
-_m64 = {n.name for n in _cls64.body if isinstance(n, ast.FunctionDef)} if _cls64 else set()
-report(all(f in _m64 for f in ('show_for', 'dismiss', '_on_media_status',
-                               '_abandon_clip', '_ensure_player')),
-       'with the cover/clip lifecycle', str(sorted(_m64)))
+report('MetadataHoverPopup' not in SRC,
+       'the second popup is gone')
+_cls64b = next((n for n in TREE.body if isinstance(n, ast.ClassDef)
+                and n.name == 'DraggableTableWidget'), None)
+_m64b = {n.name for n in _cls64b.body if isinstance(n, ast.FunctionDef)}
+report('_show_metadata_hover_preview' not in _m64b
+       and '_schedule_metadata_hover' not in _m64b
+       and 'leaveEvent' not in _m64b,
+       'and the playlist table no longer runs its own competing hover timer')
+report('setMouseTracking(True)' in ast.get_source_segment(SRC, _cls64b),
+       'mouse tracking stays on, because the player eventFilter needs hover moves')
 
-def _src64(name):
-    fn = next((n for n in _cls64.body
-               if isinstance(n, ast.FunctionDef) and n.name == name), None)
+def _vsrc64(name):
+    cls = next(n for n in TREE.body if isinstance(n, ast.ClassDef)
+               and n.name == 'VideoPlayer')
+    fn = next((n for n in cls.body if isinstance(n, ast.FunctionDef)
+               and n.name == name), None)
     return ast.get_source_segment(SRC, fn) if fn is not None else ''
 
-_sf64 = _src64('show_for')
-report('_cover.show()' in _sf64 and 'setSource' in _sf64,
-       'show_for paints the cover and only then asks for the clip')
-report(_sf64.index('_cover.show()') < _sf64.index('setSource'),
-       'and it does so before the media request, so the card is never blank')
-report('preview_live' in _sf64 and 'preview_url' in _sf64,
-       'the clip is requested only when the movie actually has a live one')
-_st64 = _src64('_on_media_status')
-report('_cover.hide()' in _st64 and '_video.show()' in _st64
-       and '_player.play()' in _st64,
-       'the clip swaps over the cover once it is buffered')
-report('LoadedMedia' in _st64 and 'BufferedMedia' in _st64,
-       'and only on a buffered status, never while still loading')
-_ab64 = _src64('_abandon_clip')
-report('_cover.show()' in _ab64,
-       'a row with no working clip falls back to the cover')
-report('LOAD_TIMEOUT_MS' in SRC and '_timeout.start()' in _sf64,
-       'with a timeout, so a dead URL cannot leave the card stuck')
+_show64 = _vsrc64('_show_hover_preview')
+report('preview_info_for_path' in _show64,
+       'the established card consults the metadata linker')
+report('_metadata_cover_pixmap' in _show64 and '_start_metadata_hover_clip' in _show64,
+       'and wires in the cover and the clip')
+report('QVideoWidget(self.hover_preview)' in SRC,
+       'the clip plays in a surface that belongs to that same card')
+report('_cover64' not in SRC and 'frames = [_cover' in _show64,
+       'the cover is prepended to the frame list, so it is what shows first')
 
-_sh64 = ast.get_source_segment(_main60, _meth60['_show_metadata_hover_preview'])
-report('show_for' in _sh64 and 'QToolTip.showText' not in _sh64,
-       'the row hover now drives the popup, not a QToolTip (which cannot hold '
-       'a QVideoWidget)')
-_lv64 = ast.get_source_segment(_main60, _meth60['leaveEvent'])
-report('_dismiss_metadata_hover' in _lv64,
-       'and leaving the table dismisses it, which stops the clip')
+_clip64 = _vsrc64('_start_metadata_hover_clip')
+report('preview_live' in _clip64 and 'preview_url' in _clip64,
+       'the clip is only requested when the movie actually has a live one')
+report('_hover_clip_timer.start()' in _clip64,
+       'with a timeout, so a dead URL cannot leave the card stuck')
+_st64b = _vsrc64('_on_hover_clip_status')
+report('hover_preview_image.hide()' in _st64b and 'hover_preview_video.show()' in _st64b,
+       'the clip swaps over the cover once it is buffered')
+report('LoadedMedia' in _st64b and 'BufferedMedia' in _st64b,
+       'and only on a buffered status')
+_ab64b = _vsrc64('_abandon_hover_clip')
+report('hover_preview_image.show()' in _ab64b,
+       'a row with no working clip falls back to the cover')
+_hide64 = _vsrc64('_hide_hover_preview')
+report('_stop_metadata_hover_clip' in _hide64,
+       'and hiding the card stops the clip')
+
+# ── 65. An Update backfills a cover onto a record that never had one ───────────
+# All 5371 nubiles records predate cover capture, and the dedupe branch used
+# to `continue` without touching them -- so nothing would ever give them a
+# cover, because the signed URL only exists while the gallery page is read.
+print()
+print('65. Update backfills the cover onto records scraped before capture')
+
+_HTML65 = """<html><body><div class="card">
+ <a href="https://nubiles-porn.com/video/watch/256651/my-stepsis-is-a-hot-mess">
+   <img src="https://images.nubiles-porn.com/videos/my_stepsis_is_a_hot_mess/samples/cover960.jpg?st=C5dl1YO4Wv&amp;e=9999999999"></a>
+ <a href="https://nubiles-porn.com/video/watch/256651/my-stepsis-is-a-hot-mess">My Stepsis Is A Hot Mess</a>
+ <a href="https://nubiles-porn.com/model/profile/28550/arin-jones">Arin Jones</a>
+ <a href="https://shesinmybed.com/">ShesInMyBed</a> &ndash; Sep 16, 2026
+</div></body></html>"""
+
+class _Sig65:
+    def emit(self, *a):
+        pass
+
+
+class _Sigs65:
+    progress = _Sig65()
+    tick = _Sig65()
+    finished = _Sig65()
+    error = _Sig65()
+
+
+_d65 = os.path.join(_tf55.mkdtemp(), 'bf65.json')
+with open(_d65, 'w', encoding='utf-8') as _f65:
+    json.dump({'movies': {'256651-my-stepsis-is-a-hot-mess': {
+        'slug': '256651-my-stepsis-is-a-hot-mess', 'title': 'My Stepsis Is A Hot Mess',
+        'series': 'ShesInMyBed', 'models': ['Arin Jones'], 'date': '16/09/2026',
+        'video_id': '256651', 'meta_fetched': True,
+        'url': 'https://nubiles-porn.com/video/watch/256651/my-stepsis-is-a-hot-mess',
+        'source_site': 'shesinmybed', 'sources_seen': ['shesinmybed'],
+    }}}, _f65)
+_db65 = _msrc55.MetadataDB(_d65)
+report(not _db65.movies['256651-my-stepsis-is-a-hot-mess'].get('image'),
+       'the record starts with no cover, like all 5371 shipped nubiles ones')
+
+_site65 = dict(_msrc55.METADATA_SITES['nubiles'])
+_site65['gallery_sources'] = [{'id': 'shesinmybed', 'name': 'ShesInMyBed',
+                               'base_url': 'https://nubiles-porn.com',
+                               'gallery_url': 'https://nubiles-porn.com/video/gallery',
+                               'page_url_template': 'https://nubiles-porn.com/video/gallery/{offset}'}]
+_scr65 = _msrc55.NetworkGalleryScraper(_db65, _site65, mode='update')
+_scr65.signals = _Sigs65()
+_scr65._fetch_gallery_page = lambda page: _HTML65 if page == 1 else ''
+_saved65 = []
+_orig65 = _msrc55.save_thumbnail
+_msrc55.save_thumbnail = lambda p, sl, u: (_saved65.append((sl, u)), '/x/cover.jpg')[1]
+try:
+    _scr65._run()
+finally:
+    _msrc55.save_thumbnail = _orig65
+
+_after65 = _msrc55.MetadataDB(_d65).movies['256651-my-stepsis-is-a-hot-mess']
+report('cover960.jpg' in str(_after65.get('image') or ''),
+       'a known record gains the cover from the card it already appeared on',
+       str(_after65.get('image'))[:64])
+report(int(_after65.get('image_expires') or 0) == 9999999999,
+       'along with its signature expiry, so a dead one can be pruned later')
+report(_saved65 and _saved65[0][0] == '256651-my-stepsis-is-a-hot-mess',
+       'and the bytes are downloaded to thumbnails/ while the URL is alive')
+report(_after65.get('sources_seen') == ['shesinmybed'],
+       'without disturbing the sources_seen bookkeeping')
+
+# Second pass: the record now has a cover, so nothing is rewritten and the
+# "caught up" early-stop can fire again.
+_saved65.clear()
+_scr65b = _msrc55.NetworkGalleryScraper(_msrc55.MetadataDB(_d65), _site65, mode='update')
+_scr65b.signals = _Sigs65()
+_scr65b._fetch_gallery_page = lambda page: _HTML65 if page == 1 else ''
+_msrc55.save_thumbnail = lambda p, sl, u: (_saved65.append((sl, u)), '/x/cover.jpg')[1]
+try:
+    _scr65b._run()
+finally:
+    _msrc55.save_thumbnail = _orig65
+report(not _saved65,
+       'a second pass backfills nothing, so the crawl converges again',
+       f'{len(_saved65)} fetches')
 
 print()
 print('FAILURES:', FAILS)

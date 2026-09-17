@@ -1959,6 +1959,32 @@ class NetworkGalleryScraper(QThread):
                             # four sources.
                         else:
                             duplicate_count += 1
+                        # A record scraped before covers were captured has
+                        # none, and nothing else will ever give it one: the
+                        # signed URL only exists while the gallery page is
+                        # being read. Backfill it here.
+                        #
+                        # This one DOES set page_changed, unlike the
+                        # sources_seen bookkeeping above. A backfill is
+                        # one-time work -- once the record carries an image
+                        # the branch stops firing -- so the first Update
+                        # after this change crawls the whole catalogue to
+                        # fill in 5371 missing covers, and every Update
+                        # after that converges on the first pass again.
+                        if not existing.get("image") and movie.get("image"):
+                            existing = dict(existing)
+                            existing["image"] = movie["image"]
+                            existing["image_expires"] = int(movie.get("image_expires") or 0)
+                            if movie.get("preview"):
+                                existing["preview"] = movie["preview"]
+                                existing["preview_expires"] = int(movie.get("preview_expires") or 0)
+                            self.db.upsert(existing)
+                            page_changed = True
+                            local = save_thumbnail(self.db.db_path, movie["slug"],
+                                                   movie["image"])
+                            if local:
+                                self.signals.progress.emit(
+                                    f"    cover backfilled: {os.path.basename(local)}")
                         continue
                     if _movie_identity_changed(existing, movie):
                         page_changed = True

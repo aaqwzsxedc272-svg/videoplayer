@@ -1769,219 +1769,6 @@ class SourceFilterHeaderView(QHeaderView):
             painter.restore()
 
 
-class MetadataHoverPopup(QWidget):
-    """Frameless hover card for a playlist row: cover first, then the clip.
-
-    Both networks go through the same path. TeamSkeet stores a per-scene
-    trailer_url on images.psmcdn.net that is unsigned and permanently public,
-    so it plays. Nubiles stores a signed preview that expires in about an
-    hour, so most of its rows have none -- those show the cover and nothing
-    else, which is the intended behaviour rather than a player that cannot
-    load. A row with neither shows its text only.
-
-    The clip is loaded, not streamed from the cover: the cover is painted
-    immediately so the card is never blank, and the QVideoWidget only swaps
-    in once the media is buffered. If that does not happen within
-    LOAD_TIMEOUT_MS the card stays on the cover.
-    """
-
-    WIDTH = 360
-    MAX_H = 480
-    LOAD_TIMEOUT_MS = 6000
-
-    def __init__(self, parent=None):
-        flags = (
-            Qt.WindowType.ToolTip
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-        )
-        no_focus = getattr(Qt.WindowType, 'WindowDoesNotAcceptFocus', None)
-        if no_focus is not None:
-            flags |= no_focus
-        super().__init__(None, flags)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-
-        self._cover = QLabel(self)
-        self._cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._cover.setStyleSheet("background:#000;")
-        lay.addWidget(self._cover)
-
-        self._video = QVideoWidget(self)
-        self._video.hide()
-        lay.addWidget(self._video)
-
-        self._text = QLabel(self)
-        self._text.setWordWrap(True)
-        self._text.setTextFormat(Qt.TextFormat.RichText)
-        self._text.setStyleSheet(
-            "background:rgba(18,18,18,235);color:#eee;padding:6px 8px;"
-            "border:1px solid rgba(255,255,255,60);")
-        lay.addWidget(self._text)
-
-        self._player = None
-        self._timeout = QTimer(self)
-        self._timeout.setSingleShot(True)
-        self._timeout.setInterval(self.LOAD_TIMEOUT_MS)
-        self._timeout.timeout.connect(self._abandon_clip)
-        self._wants_clip = False
-
-    # ── lifecycle ────────────────────────────────────────────────────────────
-
-    def _ensure_player(self):
-        """Build the QMediaPlayer lazily, so a crash here cannot take the app
-        down at import time on a Qt build without multimedia backends."""
-        if self._player is not None:
-            return self._player
-        try:
-            player = QMediaPlayer(self)
-            audio = QAudioOutput(self)
-            audio.setMuted(True)
-            audio.setVolume(0.0)
-            player.setAudioOutput(audio)
-            player.setVideoOutput(self._video)
-            try:
-                player.setLoops(-1)
-            except Exception:
-                pass
-            player.mediaStatusChanged.connect(self._on_media_status)
-            self._player = player
-        except Exception:
-            self._player = None
-        return self._player
-
-    def show_for(self, info, global_pos):
-        """Cover immediately; the clip swaps in when it is buffered."""
-        self._wants_clip = False
-        self._timeout.stop()
-        self._stop_clip()
-        self._video.hide()
-
-        thumb = str(info.get("thumbnail") or "")
-        have_cover = thumb and os.path.isfile(thumb)
-        if have_cover:
-            pm = QPixmap(thumb)
-            if pm.isNull():
-                have_cover = False
-            else:
-                pm = pm.scaledToWidth(self.WIDTH,
-                                      Qt.TransformationMode.SmoothTransformation)
-                if pm.height() > self.MAX_H:
-                    pm = pm.scaled(self.WIDTH, self.MAX_H,
-                                   Qt.AspectRatioMode.KeepAspectRatio,
-                                   Qt.TransformationMode.SmoothTransformation)
-                self._cover.setPixmap(pm)
-                self._cover.setFixedSize(pm.size())
-                self._video.setFixedSize(pm.size())
-                self._cover.show()
-        if not have_cover:
-            self._cover.hide()
-
-        self._text.setText(self._rich_text(info))
-        self._text.setMaximumWidth(self.WIDTH)
-        self.adjustSize()
-        self._place(global_pos)
-        self.show()
-        self.raise_()
-
-        url = str(info.get("preview_url") or "")
-        if url and info.get("preview_live") and self._ensure_player() is not None:
-            self._wants_clip = True
-            self._timeout.start()
-            try:
-                self._player.setSource(QUrl(url))
-            except Exception:
-                self._abandon_clip()
-
-    def dismiss(self):
-        self._wants_clip = False
-        self._timeout.stop()
-        self._stop_clip()
-        self.hide()
-
-    # ── clip handling ────────────────────────────────────────────────────────
-
-    def _on_media_status(self, status):
-        if not self._wants_clip:
-            return
-        try:
-            ready = (status == QMediaPlayer.MediaStatus.LoadedMedia
-                     or status == QMediaPlayer.MediaStatus.BufferedMedia)
-            bad = (status == QMediaPlayer.MediaStatus.InvalidMedia)
-        except Exception:
-            return
-        if ready:
-            self._timeout.stop()
-            self._cover.hide()
-            self._video.show()
-            try:
-                self._player.play()
-            except Exception:
-                self._abandon_clip()
-        elif bad:
-            self._abandon_clip()
-
-    def _abandon_clip(self):
-        """No clip: keep the cover up, which is the whole point of showing it
-        first."""
-        self._wants_clip = False
-        self._timeout.stop()
-        self._stop_clip()
-        self._video.hide()
-        if self._cover.pixmap() is not None and not self._cover.pixmap().isNull():
-            self._cover.show()
-
-    def _stop_clip(self):
-        if self._player is None:
-            return
-        try:
-            self._player.stop()
-            self._player.setSource(QUrl(""))
-        except Exception:
-            pass
-
-    # ── presentation ─────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _rich_text(info):
-        def _esc(t):
-            return (str(t or "").replace("&", "&amp;").replace("<", "&lt;")
-                    .replace(">", "&gt;").replace('"', "&quot;"))
-        parts = []
-        if info.get("name"):
-            parts.append(f'<b>{_esc(info["name"])}</b>')
-        detail = []
-        if info.get("site_name"):
-            detail.append(_esc(info["site_name"]))
-        if info.get("slug"):
-            detail.append(_esc(info["slug"]))
-        if detail:
-            parts.append('<br>'.join(detail))
-        if info.get("preview_live"):
-            parts.append("<i>preview</i>")
-        return "<br>".join(parts)
-
-    def _place(self, global_pos):
-        x = int(global_pos.x()) + 18
-        y = int(global_pos.y()) + 14
-        try:
-            screen = QApplication.screenAt(global_pos) or QApplication.primaryScreen()
-            geo = screen.availableGeometry()
-            w = max(self.width(), 1)
-            h = max(self.height(), 1)
-            if x + w > geo.right():
-                x = max(geo.left(), int(global_pos.x()) - w - 12)
-            if y + h > geo.bottom():
-                y = max(geo.top(), geo.bottom() - h)
-        except Exception:
-            pass
-        self.move(x, y)
-
-
 class DraggableTableWidget(QTableWidget):
     """Custom table widget with mouse-based drag-drop"""
     def __init__(self, parent=None):
@@ -2006,73 +1793,11 @@ class DraggableTableWidget(QTableWidget):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
 
-        # Hover preview for rows renamed by the metadata linker. Local data
-        # only, so it is instant; see metadata_scraper.preview_info_for_path.
+        # Mouse tracking stays on so the player's eventFilter sees hover
+        # moves; the hover card itself belongs to the player, not to this
+        # widget, and it is the one that consults the metadata linker.
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
-        self._hover_preview_row = None
-        self._hover_preview_pos = QPoint(0, 0)
-        self._hover_popup = None
-        self._hover_preview_timer = QTimer(self)
-        self._hover_preview_timer.setSingleShot(True)
-        self._hover_preview_timer.setInterval(260)
-        self._hover_preview_timer.timeout.connect(self._show_metadata_hover_preview)
-
-    def _schedule_metadata_hover(self, pos):
-        """Start (or drop) the hover-preview timer for the row under pos."""
-        try:
-            row = self.rowAt(pos.y())
-        except Exception:
-            row = -1
-        if row < 0:
-            self._hover_preview_timer.stop()
-            if self._hover_preview_row is not None:
-                self._hover_preview_row = None
-                self._dismiss_metadata_hover()
-            return
-        self._hover_preview_pos = QPoint(pos)
-        if row != self._hover_preview_row:
-            self._hover_preview_row = row
-            self._hover_preview_timer.start()
-
-    def _show_metadata_hover_preview(self):
-        pp = self.parent_player
-        row = self._hover_preview_row
-        if pp is None or row is None or row < 0:
-            return
-        try:
-            path = pp.playlist[row]
-        except Exception:
-            return
-        try:
-            info = preview_info_for_path(pp, path) or {}
-        except Exception:
-            return
-        if not info:
-            return
-
-        # Cover first, then the clip if this movie has one. A QToolTip cannot
-        # hold a QVideoWidget, so this is a frameless popup instead.
-        try:
-            if self._hover_popup is None:
-                self._hover_popup = MetadataHoverPopup(self)
-            self._hover_popup.show_for(
-                info, self.viewport().mapToGlobal(self._hover_preview_pos))
-        except Exception:
-            pass
-
-    def _dismiss_metadata_hover(self):
-        if self._hover_popup is not None:
-            try:
-                self._hover_popup.dismiss()
-            except Exception:
-                pass
-
-    def leaveEvent(self, event):
-        self._hover_preview_timer.stop()
-        self._hover_preview_row = None
-        self._dismiss_metadata_hover()
-        super().leaveEvent(event)
 
     def show_context_menu(self, position):
         """Show right-click context menu"""
@@ -2300,7 +2025,6 @@ class DraggableTableWidget(QTableWidget):
             
             # Don't call super to avoid unwanted selection highlighting
             return
-        self._schedule_metadata_hover(event.position().toPoint())
         super().mouseMoveEvent(event)
     
     def mouseReleaseEvent(self, event):
@@ -7723,6 +7447,12 @@ class VideoPlayer(QMainWindow):
         self.hover_preview_text.setWordWrap(True)
         self.hover_preview_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.hover_preview_text.setMaximumWidth(280)
+        # The scene's own clip, played inside this same card rather than in a
+        # second popup. Hidden until the media is buffered, so the cover is
+        # what you see first.
+        self.hover_preview_video = QVideoWidget(self.hover_preview)
+        self.hover_preview_video.hide()
+        self.hover_preview_layout.addWidget(self.hover_preview_video)
         self.hover_preview_layout.addWidget(self.hover_preview_image)
         self.hover_preview_layout.addWidget(self.hover_preview_text)
         self.hover_preview.hide()
@@ -7741,6 +7471,12 @@ class VideoPlayer(QMainWindow):
         self._hover_preview_anchor_global_pos = None
         self._hover_preview_target_global_rect = None
         self._hover_preview_display_text = ""
+        self._hover_clip_player = None
+        self._hover_clip_timer = QTimer(self)
+        self._hover_clip_timer.setSingleShot(True)
+        self._hover_clip_timer.setInterval(6000)
+        self._hover_clip_timer.timeout.connect(self._abandon_hover_clip)
+        self._hover_clip_wanted = False
 
         self.pdf_edge_switch_left_btn = QPushButton("< AVN", self)
         self.pdf_edge_switch_right_btn = QPushButton("AVN >", self)
@@ -9338,8 +9074,113 @@ class VideoPlayer(QMainWindow):
         self._hover_preview_anchor_global_pos = None
         self._hover_preview_target_global_rect = QRect()
         self._hover_preview_display_text = ""
+        self._stop_metadata_hover_clip()
         if hasattr(self, 'hover_preview'):
             self.hover_preview.hide()
+
+    # ── metadata cover + clip inside the hover card ──────────────────────────
+
+    def _metadata_cover_pixmap(self, meta):
+        """The cached cover for a matched row, scaled to the card, or None."""
+        thumb = str((meta or {}).get("thumbnail") or "")
+        if not thumb or not os.path.isfile(thumb):
+            return None
+        try:
+            pm = QPixmap(thumb)
+            if pm.isNull():
+                return None
+            return self._scale_preview_pixmap(pm)
+        except Exception:
+            return None
+
+    def _ensure_hover_clip_player(self):
+        """Build the clip player lazily, so a Qt build without a multimedia
+        backend cannot take the app down at startup."""
+        if self._hover_clip_player is not None:
+            return self._hover_clip_player
+        try:
+            player = QMediaPlayer(self)
+            audio = QAudioOutput(self)
+            audio.setMuted(True)
+            audio.setVolume(0.0)
+            player.setAudioOutput(audio)
+            player.setVideoOutput(self.hover_preview_video)
+            try:
+                player.setLoops(-1)
+            except Exception:
+                pass
+            player.mediaStatusChanged.connect(self._on_hover_clip_status)
+            self._hover_clip_player = player
+        except Exception:
+            self._hover_clip_player = None
+        return self._hover_clip_player
+
+    def _start_metadata_hover_clip(self, meta):
+        """Cover first, then the scene's own clip if it has one.
+
+        TeamSkeet keeps a per-scene trailer_url on images.psmcdn.net that is
+        unsigned and permanently public, so it plays. Nubiles stores a signed
+        preview that expires in about an hour, so most of its rows have none
+        and the card stays on the cover -- the intended fallback, not a fault.
+        """
+        self._stop_metadata_hover_clip()
+        url = str((meta or {}).get("preview_url") or "")
+        if not url or not (meta or {}).get("preview_live"):
+            return
+        if self._ensure_hover_clip_player() is None:
+            return
+        self._hover_clip_wanted = True
+        self._hover_clip_timer.start()
+        try:
+            self._hover_clip_player.setSource(QUrl(url))
+        except Exception:
+            self._abandon_hover_clip()
+
+    def _on_hover_clip_status(self, status):
+        if not self._hover_clip_wanted:
+            return
+        try:
+            ready = (status == QMediaPlayer.MediaStatus.LoadedMedia
+                     or status == QMediaPlayer.MediaStatus.BufferedMedia)
+            bad = status == QMediaPlayer.MediaStatus.InvalidMedia
+        except Exception:
+            return
+        if ready:
+            self._hover_clip_timer.stop()
+            self.hover_preview_image.hide()
+            self.hover_preview_video.show()
+            try:
+                self._hover_clip_player.play()
+            except Exception:
+                self._abandon_hover_clip()
+        elif bad:
+            self._abandon_hover_clip()
+
+    def _abandon_hover_clip(self):
+        """No clip: keep the cover up, which is why it is painted first."""
+        self._hover_clip_wanted = False
+        self._hover_clip_timer.stop()
+        self._stop_clip_playback()
+        self.hover_preview_video.hide()
+        if self._hover_preview_frames:
+            self.hover_preview_image.show()
+
+    def _stop_clip_playback(self):
+        if self._hover_clip_player is None:
+            return
+        try:
+            self._hover_clip_player.stop()
+            self._hover_clip_player.setSource(QUrl(""))
+        except Exception:
+            pass
+
+    def _stop_metadata_hover_clip(self):
+        self._hover_clip_wanted = False
+        if hasattr(self, '_hover_clip_timer'):
+            self._hover_clip_timer.stop()
+        self._stop_clip_playback()
+        if hasattr(self, 'hover_preview_video'):
+            self.hover_preview_video.hide()
 
     def _hide_pdf_edge_switch_buttons(self):
         for btn in (
@@ -9990,6 +9831,15 @@ class VideoPlayer(QMainWindow):
         if not hasattr(self, 'hover_preview'):
             return
         display_text = text or os.path.basename(str(path).rstrip('/\\'))
+        # A row the metadata linker has matched carries a cover and sometimes
+        # the scene's own clip. This decorates the existing hover card; it
+        # does not open a second popup.
+        try:
+            meta = preview_info_for_path(self, path) or {}
+        except Exception:
+            meta = {}
+        if meta.get("name"):
+            display_text = str(meta["name"])
         _path_lower = path.lower()
         is_ftp_or_phone = self._is_ftp_url(path) or str(path).startswith('phone://')
         is_video = (is_ftp_or_phone and _path_lower.endswith(VIDEO_EXTENSIONS)) or (
@@ -9998,6 +9848,9 @@ class VideoPlayer(QMainWindow):
         frames = self._hover_preview_cache.get(norm_path)
         if frames is None or not is_video:
             frames = self._load_preview_frames_for_path(path)
+        _cover62 = self._metadata_cover_pixmap(meta)
+        if _cover62 is not None:
+            frames = [_cover62] + [f for f in (frames or []) if f is not None]
         self._hover_preview_display_text = display_text
         self._hover_preview_frames = frames
         self._hover_preview_frame_index = 0
@@ -10016,6 +9869,7 @@ class VideoPlayer(QMainWindow):
         self.hover_preview.show()
         self.hover_preview.raise_()
         self._hover_preview_path = path
+        self._start_metadata_hover_clip(meta)
 
     def _show_pending_hover_preview(self):
         if not self._hover_preview_pending:
