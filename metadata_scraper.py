@@ -218,6 +218,11 @@ _MOVIE_KEEP_FIELDS = (
     # Cover thumbnail. The URL is signed and expires (see _image_expiry_epoch),
     # so the local file under thumbnails/ is what the player should display.
     "image", "image_expires", "preview", "preview_expires",
+    # TeamSkeet's trailer_url is a per-scene mp4 on images.psmcdn.net --
+    # unsigned and permanently public, verified with a real/invented path
+    # pair. At 0.91 MB across 10586 movies it is the cheapest working video
+    # preview either network offers, so it earns its place.
+    "trailer_url",
     # Neither network supplies a runtime today, so this costs nothing on disk;
     # it is kept so the criterion stays wired if a source ever provides one.
     "duration",
@@ -1569,6 +1574,8 @@ class TeamSkeetScraper(QThread):
             if movie:
                 self.db.upsert(movie)
                 enriched += 1
+                if movie.get("image"):
+                    save_thumbnail(self.db.db_path, movie["slug"], movie["image"])
                 self.signals.progress.emit(
                     f"  OK {movie['title']}"
                     + (f" | {movie['series']}" if movie.get('series') else "")
@@ -1673,6 +1680,15 @@ class TeamSkeetScraper(QThread):
                                 changed_slugs.append(slug)
                         movie["sources_seen"] = [source.get("id") or ""] if source.get("id") else []
                         self.db.upsert(movie)
+                        # TeamSkeet covers are unsigned and permanent, so
+                        # caching them here means the hover preview never
+                        # needs the network again.
+                        if movie.get("image"):
+                            local = save_thumbnail(self.db.db_path, movie["slug"],
+                                                   movie["image"])
+                            if local:
+                                self.signals.progress.emit(
+                                    f"    thumbnail saved: {os.path.basename(local)}")
 
                     total_hint = f"/{estimated_pages}" if estimated_pages else ""
                     self.signals.progress.emit(
@@ -2558,14 +2574,52 @@ def _save_links(player):
         print(f"[MetadataScraper] save links error: {e}")
 
 
+def _db_path_for_site(player, site: dict) -> str:
+    return os.path.join(getattr(player, "data_dir", "")
+                        or os.path.dirname(os.path.abspath(__file__)),
+                        (site or {}).get("db_filename") or "")
+
+
+_THUMB_INFLIGHT: set = set()
+_THUMB_LOCK = threading.Lock()
+
+
+def ensure_thumbnail_async(player, site: dict, slug: str, url: str) -> bool:
+    """Fetch a cover in the background the first time a row is hovered.
+
+    TeamSkeet covers (images.psmcdn.net) are unsigned and never expire --
+    verified: a real path serves bytes while an invented one returns an
+    'origin error...' page -- so one download caches the image for good and
+    every later hover is instant from disk. Returns True if a fetch was
+    started; concurrent requests for the same cover are collapsed.
+    """
+    if not url or not slug or player is None:
+        return False
+    key = ((site or {}).get("id"), slug)
+    with _THUMB_LOCK:
+        if key in _THUMB_INFLIGHT:
+            return False
+        _THUMB_INFLIGHT.add(key)
+    db_path = _db_path_for_site(player, site)
+
+    def _work():
+        try:
+            save_thumbnail(db_path, slug, url)
+        except Exception:
+            pass
+        finally:
+            with _THUMB_LOCK:
+                _THUMB_INFLIGHT.discard(key)
+
+    threading.Thread(target=_work, daemon=True).start()
+    return True
+
+
 def _thumbnail_path_for_slug(player, site: dict, slug: str) -> str:
     """The locally cached cover for a movie, if a scrape downloaded it."""
     if not slug:
         return ""
-    db_path = os.path.join(getattr(player, "data_dir", "")
-                           or os.path.dirname(os.path.abspath(__file__)),
-                           site.get("db_filename") or "")
-    folder = thumbnails_dir(db_path)
+    folder = thumbnails_dir(_db_path_for_site(player, site))
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", slug)
     for ext in (".jpg", ".jpeg", ".png", ".webp"):
         candidate = os.path.join(folder, safe + ext)
@@ -2631,10 +2685,24 @@ def preview_info_for_path(player, path: str) -> dict:
     now = time.time()
     slug = str(movie.get("slug") or "")
     thumb = _thumbnail_path_for_slug(player, site, slug)
+    if not thumb and str(movie.get("image") or ""):
+        # First hover on this row: start the download so the next one is
+        # instant. Does not block the tooltip.
+        ensure_thumbnail_async(player, site, slug, str(movie["image"]))
     image = str(movie.get("image") or "")
     preview = str(movie.get("preview") or "")
+    trailer = str(movie.get("trailer_url") or "")
     img_exp = int(movie.get("image_expires") or 0)
     prv_exp = int(movie.get("preview_expires") or 0)
+    # A stored preview is a real asset; TeamSkeet keeps one per scene. The
+    # loop URL derived from title+series is nubiles-shaped and only locates
+    # the asset (unsigned it 403s), so it must never be invented for a
+    # TeamSkeet movie -- that hands the caller a nubiles URL that cannot
+    # exist. Derived URLs are reported as not live.
+    preview_url = preview or trailer
+    if not preview_url and str(site.get("id") or "") != "teamskeet":
+        preview_url = preview_loop_url(movie.get("title") or "",
+                                       movie.get("series") or "")
     info.update({
         "slug":          slug,
         "site":          site.get("id") or "",
@@ -2642,11 +2710,16 @@ def preview_info_for_path(player, path: str) -> dict:
         "name":          format_display_name(movie),
         "thumbnail":     thumb,
         "image":         image,
-        "image_live":    bool(image) and img_exp > now,
+        # exp == 0 means the URL carries no signature at all. TeamSkeet's
+        # covers are like that and stay valid forever, so absence of an
+        # expiry must read as live -- requiring exp > now made every
+        # TeamSkeet row report a dead cover.
+        "image_live":    bool(image) and (img_exp == 0 or img_exp > now),
         "preview":       preview,
-        "preview_live":  bool(preview) and prv_exp > now,
-        "preview_url":   preview or preview_loop_url(movie.get("title") or "",
-                                                     movie.get("series") or ""),
+        # A stored TeamSkeet trailer is unsigned, so prv_exp is 0 and it
+        # reads as live -- it is a permanent asset, not a signed one.
+        "preview_live":  bool(preview or trailer) and (prv_exp == 0 or prv_exp > now),
+        "preview_url":   preview_url,
         "series":        movie.get("series") or "",
         "models":        list(movie.get("models") or []),
         "date":          movie.get("date") or "",

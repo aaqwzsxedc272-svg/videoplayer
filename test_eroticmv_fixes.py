@@ -4781,13 +4781,13 @@ report(set(('slug', 'title', 'series', 'models', 'date')).issubset(set(_K57)),
        'the keep-list holds the four criteria that drive a match, plus the key')
 report(all(k in _K57 for k in ('video_id', 'source_site', 'source_name', 'meta_fetched')),
        'and the tie-breaker, site signal, display-name source and index gate')
-report(not any(k in _K57 for k in ('model_details', 'model_urls', 'trailer_url',
-                                   'description', 'tags', 'stats', '_tags',
-                                   '_categories', 'published_date', 'type')),
+report(not any(k in _K57 for k in ('model_details', 'model_urls', 'description',
+                                   'tags', 'stats', '_tags', '_categories',
+                                   'published_date', 'type')),
        'and none of the fields that were never read or never filled', str(_K57))
-report('sources_seen' in _K57 and 'image' in _K57,
-       'except sources_seen (the update early-stop depends on it) and the '
-       'cover thumbnail, which are both load-bearing')
+report(all(k in _K57 for k in ('sources_seen', 'image', 'trailer_url')),
+       'except the load-bearing ones: sources_seen (the update early-stop '
+       'depends on it), the cover, and the TeamSkeet per-scene trailer')
 
 _fat57 = {
     'slug': 'x-1', 'title': 'Facials For My Stepsis', 'series': 'NubilesPorn',
@@ -4807,9 +4807,8 @@ report(list(_thin57) == _expect57,
        'a record is trimmed to the keep-list in a stable order',
        f'{len(_fat57)} fields -> {len(_thin57)}')
 report(not any(k in _thin57 for k in ('model_details', 'model_urls',
-                                      'trailer_url', 'description', 'tags',
-                                      'stats', '_tags', '_categories',
-                                      'published_date', 'type')),
+                                      'description', 'tags', 'stats', '_tags',
+                                      '_categories', 'published_date', 'type')),
        'no retired field survives the trim',
        f'{len(json.dumps(_fat57))} -> {len(json.dumps(_thin57))} bytes')
 report(_msrc55._trim_movie(None) is None and _msrc55._trim_movie('x') == 'x',
@@ -5149,6 +5148,162 @@ report('preview' in _db61.movies['x-1'] and 'preview_expires' in _db61.movies['x
        'and one still inside its hour is kept')
 report(_msrc55.preview_loop_url('T', 'S').endswith('/videos/t/videos/loops/s_t_loop_480.mp4'),
        'pruning the preview loses nothing -- the path is re-derivable')
+
+# ── 62. TeamSkeet: 90% of the DB was dead weight, and its covers never expire ─
+# The real 74.50 MB / 10586-movie teamskeet DB held _tags 9.13 MB, tags 9.12,
+# seo 8.38, description_html 7.11, description 7.02 and model_details 4.40 --
+# 45 MB read by nothing. Its image and trailer_url, by contrast, are per-scene
+# URLs on images.psmcdn.net with NO signature: a real path serves bytes while
+# an invented one returns an "origin error..." page, so they are public and
+# permanent, unlike nubiles' hour-long signed URLs.
+print()
+print('62. TeamSkeet DB is trimmed to the useful fields and its covers stay live')
+
+report('trailer_url' in _msrc55._MOVIE_KEEP_FIELDS,
+       "teamskeet's per-scene trailer mp4 is kept -- it is the cheapest "
+       'working video preview either network offers')
+
+_ts62p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                      'teamskeet_metadata.json')
+if os.path.isfile(_ts62p):
+    _ts62 = json.load(open(_ts62p, encoding='utf-8'))['movies']
+    _ks62 = set()
+    for _m62 in _ts62.values():
+        _ks62 |= set(_m62)
+    report(_ks62 <= set(_msrc55._MOVIE_KEEP_FIELDS),
+           'every field in the shipped teamskeet DB is on the keep-list',
+           str(sorted(_ks62)))
+    report(not _ks62 & {'tags', '_tags', 'seo', 'description', 'description_html',
+                        'model_details', 'model_urls', 'stats', 'sitelogo',
+                        'published_date', 'series_url', 'item_id', 'type'},
+           'the 45 MB of never-read fields is gone')
+    report(sum(1 for m in _ts62.values() if m.get('image')) > 10000
+           and sum(1 for m in _ts62.values() if m.get('trailer_url')) > 10000,
+           'and the cover plus trailer survived for essentially every movie',
+           f"{sum(1 for m in _ts62.values() if m.get('image'))} covers / "
+           f"{sum(1 for m in _ts62.values() if m.get('trailer_url'))} trailers")
+    report(os.path.getsize(_ts62p) < 12_000_000,
+           'the file is a fraction of the 74.50 MB it was',
+           f'{os.path.getsize(_ts62p)/1e6:.2f} MB')
+    report(all('?' not in str(m.get('image') or '') for m in _ts62.values()
+               if m.get('image')),
+           'no teamskeet cover URL carries a signature, so none can expire')
+
+# An unsigned URL has no expiry, so it must read as live. Requiring
+# exp > now -- correct for nubiles -- made every teamskeet row report a
+# dead cover.
+class _Player62:
+    pass
+
+
+_p62 = _Player62()
+_p62.data_dir = _tf55.mkdtemp()
+_p62._metadata_dbs = {}
+_p62._metadata_links = {}
+_p62._metadata_name_overrides = {}
+_p62._meta_norm_path = _msrc55._meta_norm_path
+_dbp62 = os.path.join(_p62.data_dir, 'ts62.json')
+with open(_dbp62, 'w', encoding='utf-8') as _f62:
+    json.dump({'movies': {'scene-a': {
+        'slug': 'scene-a', 'title': 'Some TeamSkeet Scene', 'series': 'Milfty',
+        'models': ['Christie Stevens'], 'date': '05/23/2026', 'meta_fetched': True,
+        'image': 'https://images.psmcdn.net/teamskeet/mfy/x/shared/med.jpg',
+        'trailer_url': 'https://images.psmcdn.net/mfy/tour/pics/x/bio_small.mp4',
+    }}}, _f62)
+_site62 = dict(_msrc55.METADATA_SITES['teamskeet'])
+_site62['db_filename'] = 'ts62.json'
+_orig_sites62 = _msrc55.METADATA_SITES['teamskeet']
+_msvc62 = _msrc55.METADATA_SITES
+try:
+    _msvc62['teamskeet'] = _site62
+    _row62 = 'https://pixeldrain.com/u/ts_row'
+    _p62._metadata_name_overrides[_msrc55._meta_norm_path(_row62)] = \
+        _msrc55.format_display_name(json.load(open(_dbp62, encoding='utf-8'))['movies']['scene-a'])
+    _i62 = _msrc55.preview_info_for_path(_p62, _row62)
+    report(_i62.get('image_live') is True,
+           'a teamskeet cover with no expiry is reported as live, not dead')
+    report(_i62.get('slug') == 'scene-a' and 'psmcdn.net' in (_i62.get('image') or ''),
+           'and a renamed row resolves to its teamskeet movie and cover',
+           str(_i62.get('slug')))
+finally:
+    _msvc62['teamskeet'] = _orig_sites62
+
+# The background fetch must collapse concurrent requests for one cover.
+_inf62 = _msrc55.save_thumbnail
+_calls62 = []
+try:
+    _msrc55._fetch_bytes = lambda url, timeout=20: (_calls62.append(url),
+                                                    b'\xff\xd8' + b'0' * 900)[1]
+    _msrc55._THUMB_INFLIGHT.clear()
+    _a62 = _msrc55.ensure_thumbnail_async(_p62, _site62, 'scene-a', 'https://i/c.jpg')
+    _b62 = _msrc55.ensure_thumbnail_async(_p62, _site62, 'scene-a', 'https://i/c.jpg')
+    report(_a62 is True and _b62 is False,
+           'a second hover on the same row does not start a second download')
+    report(_msrc55.ensure_thumbnail_async(_p62, _site62, '', 'https://i/c.jpg') is False
+           and _msrc55.ensure_thumbnail_async(None, _site62, 'x', 'https://i/c.jpg') is False,
+           'and it refuses to run without a slug or a player')
+finally:
+    _msrc55._fetch_bytes = _msrc55._fetch_bytes
+    _msrc55._THUMB_INFLIGHT.clear()
+
+# Future scrapes must stay lean: the teamskeet builder still produces the fat
+# record, so upsert has to be what trims it.
+_entry62 = {
+    'id': 'some-scene', 'videoTitle': 'Some Scene', 'publishedDate': '2026-05-23',
+    'models': [{'name': 'Christie Stevens', 'id': 'christie-stevens'}],
+    'site': {'name': 'Milfty', 'nickName': 'mfy'},
+    'tags': ['Blowjob', 'Brunette'], 'description': '<p>a long description</p>',
+    'img': 'https://images.psmcdn.net/x.jpg', 'videoTrailer': 'https://images.psmcdn.net/t.mp4',
+    'stats': {'views': 1}, 'seo': {'title': 'x', 'description': 'y'},
+    'videoSrc': 'abc123', 'itemId': 9, 'type': 'video', 'isUpcoming': 'false',
+}
+_built62 = _msrc55._site_movie_from_entry(_entry62, {'id': 'teamskeet', 'base_url': 'https://www.teamskeet.com'})
+report(len(_built62) > len(_msrc55._MOVIE_KEEP_FIELDS),
+       'the teamskeet builder still produces the fat record',
+       f"{len(_built62)} fields built")
+_thin62 = _msrc55._trim_movie(_built62)
+report(set(_thin62) <= set(_msrc55._MOVIE_KEEP_FIELDS)
+       and _thin62.get('image') == 'https://images.psmcdn.net/x.jpg'
+       and _thin62.get('trailer_url') == 'https://images.psmcdn.net/t.mp4',
+       'and upsert trims it to the keep-list while keeping cover and trailer',
+       f"{len(_built62)} -> {len(_thin62)} fields")
+
+# trailer_url now has a reader. Before this it was kept and nothing consumed
+# it, and worse: preview_url fell through to preview_loop_url(), which mints
+# an images.nubiles-porn.com URL, so a TeamSkeet row was handed a nubiles
+# address that cannot exist.
+report(_i62.get('preview_url') == 'https://images.psmcdn.net/mfy/tour/pics/x/bio_small.mp4',
+       'a TeamSkeet row previews from its own stored trailer',
+       str(_i62.get('preview_url'))[:70])
+report('nubiles-porn.com' not in str(_i62.get('preview_url') or ''),
+       'and is no longer handed a fabricated nubiles loop URL')
+report(_i62.get('preview_live') is True,
+       'the unsigned trailer is reported as a live preview')
+
+_nb62 = os.path.join(_p62.data_dir, 'nb62.json')
+with open(_nb62, 'w', encoding='utf-8') as _f62:
+    json.dump({'movies': {'stepmom-is-a-great-kisser': {
+        'slug': 'stepmom-is-a-great-kisser', 'title': 'Stepmom Is A Great Kisser',
+        'series': 'MomsTeachSex', 'models': [], 'date': '09/12/2026',
+        'meta_fetched': True, 'image': '', 'trailer_url': '',
+    }}}, _f62)
+_nbs62 = dict(_msvc62['nubiles'])
+_nbs62['db_filename'] = 'nb62.json'
+_ob62 = _msvc62['nubiles']
+try:
+    _msvc62['nubiles'] = _nbs62
+    _row62b = 'https://pixeldrain.com/u/nb_row'
+    _p62._metadata_name_overrides[_msrc55._meta_norm_path(_row62b)] = \
+        _msrc55.format_display_name(json.load(open(_nb62, encoding='utf-8'))['movies']['stepmom-is-a-great-kisser'])
+    _j62 = _msrc55.preview_info_for_path(_p62, _row62b)
+    report(_j62.get('preview_url') == (
+               'https://images.nubiles-porn.com/videos/stepmom_is_a_great_kisser/'
+               'videos/loops/momsteachsex_stepmom_is_a_great_kisser_loop_480.mp4'),
+           'a nubiles row still derives its loop URL', str(_j62.get('preview_url'))[-46:])
+    report(_j62.get('preview_live') is False,
+           'and still reports it as not live, since unsigned it 403s')
+finally:
+    _msvc62['nubiles'] = _ob62
 
 print()
 print('FAILURES:', FAILS)
