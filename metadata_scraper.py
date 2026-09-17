@@ -1171,26 +1171,65 @@ _IMG_SRC_RE = re.compile(
     r"""<img\b[^>]*?\bsrc\s*=\s*["\'](?P<src>[^"\']+)["\']""", re.IGNORECASE)
 _MD_IMG_RE = re.compile(r"!\[[^\]]*\]\((?P<src>https?://[^)\s]+)\)")
 
+# A gallery that lazy-loads ships <img data-src="the real cover" src="a 1px
+# placeholder">, and reading only src= then finds nothing -- which is what an
+# empty image field looks like from the outside. Scan the whole tag for any of
+# the attributes the common lazy-load libraries use, plus srcset and a video
+# poster, and a CSS background as a last resort.
+_IMG_TAG_RE = re.compile(r"<(?:img|video|source)\b[^>]*>", re.IGNORECASE)
+_IMG_ATTR_RE = re.compile(
+    r"""\b(?:src|data-src|data-original|data-lazy-src|data-lazy|data-cfsrc|"""
+    r"""data-srcset|srcset|poster)\s*=\s*["\'](?P<src>[^"\']+)["\']""",
+    re.IGNORECASE)
+_BG_URL_RE = re.compile(
+    r"""background(?:-image)?\s*:\s*url\(\s*["\']?(?P<src>https?://[^"\')\s]+)""",
+    re.IGNORECASE)
+_COVER_URL_HINT_RE = re.compile(r"/samples/|/videos/|cover|thumb|/med\.|psmcdn",
+                                re.IGNORECASE)
+
+
+def _cover_url_candidates(region: str):
+    """Every plausible cover URL in a chunk of markup, nearest-first."""
+    out = []
+    for match in _MD_IMG_RE.finditer(region):
+        out.append(match.group("src"))
+    for tag in _IMG_TAG_RE.finditer(region):
+        for attr in _IMG_ATTR_RE.finditer(tag.group(0)):
+            # srcset is a comma-separated list of "url width" candidates.
+            out.append(attr.group("src").split(",")[0].strip().split(" ")[0])
+    for bg in _BG_URL_RE.finditer(region):
+        out.append(bg.group("src"))
+    seen = set()
+    for src in out:
+        src = html_unescape(str(src or "")).strip()
+        if not src or src.startswith("data:") or src in seen:
+            continue
+        seen.add(src)
+        if _COVER_URL_HINT_RE.search(src):
+            yield src
+
 
 def _gallery_cover_image(html: str, title_start: int, window: int = 4000) -> str:
-    """The card's cover image, taken from the markup just BEFORE its title.
+    """The card's cover image, from the markup around its title.
 
-    The gallery card is <a href=watch><img src=cover></a> followed by the title
-    link, so the cover is the last image before the title anchor. Handles both
-    the real HTML the Playwright session returns and the markdown the reader
-    fallback returns.
+    The usual card is <a href=watch><img src=cover></a> followed by the title
+    link, so the cover is the last image before the title anchor -- that is
+    tried first, taking the LAST candidate because it is the nearest. Some
+    layouts put the image after the title instead, so that region is tried
+    too, taking the FIRST candidate for the same reason. Handles the real HTML
+    the Playwright session returns and the markdown the reader fallback
+    returns.
     """
-    region = (html or "")[max(0, title_start - window):title_start]
-    best = ""
-    for pattern in (_IMG_SRC_RE, _MD_IMG_RE):
-        for match in pattern.finditer(region):
-            src = html_unescape(match.group("src") or "").strip()
-            if not src or src.startswith("data:"):
-                continue
-            if not re.search(r"/samples/|/videos/|cover|thumb", src, re.IGNORECASE):
-                continue
-            best = src
-    return best
+    text = html or ""
+    before = text[max(0, title_start - window):title_start]
+    cands = list(_cover_url_candidates(before))
+    if cands:
+        return cands[-1]
+    after = text[title_start:title_start + window]
+    cands = list(_cover_url_candidates(after))
+    if cands:
+        return cands[0]
+    return ""
 
 
 _MEDIA_SRC_RE = re.compile(
@@ -1907,6 +1946,10 @@ class NetworkGalleryScraper(QThread):
             page = 1
             max_pages = 0
             consecutive_unchanged = 0
+            src_covers = 0
+            src_movies = 0
+            src_cover_saved = 0
+            src_cover_failed = 0
             source_name = source.get("name") or self.site.get("name", "site")
 
             while not self._cancel:
@@ -1983,8 +2026,11 @@ class NetworkGalleryScraper(QThread):
                             local = save_thumbnail(self.db.db_path, movie["slug"],
                                                    movie["image"])
                             if local:
+                                src_cover_saved += 1
                                 self.signals.progress.emit(
                                     f"    cover backfilled: {os.path.basename(local)}")
+                            else:
+                                src_cover_failed += 1
                         continue
                     if _movie_identity_changed(existing, movie):
                         page_changed = True
@@ -1999,12 +2045,23 @@ class NetworkGalleryScraper(QThread):
                         local = save_thumbnail(self.db.db_path, movie["slug"],
                                                movie["image"])
                         if local:
+                            src_cover_saved += 1
                             self.signals.progress.emit(
                                 f"    thumbnail saved: {os.path.basename(local)}")
+                        else:
+                            src_cover_failed += 1
 
+                # Cover telemetry: if a gallery changes its markup or starts
+                # lazy-loading, the cover silently stops being captured and
+                # the only symptom is a hover card with nothing in it. Saying
+                # how many were found per page makes that visible at once.
+                covers = sum(1 for m in movies if m.get("image"))
+                src_covers += covers
+                src_movies += len(movies)
                 total_hint = f"/{max_pages}" if max_pages else ""
                 self.signals.progress.emit(
                     f"  {source_name} page {page}{total_hint}: {len(movies)} movies parsed"
+                    + f" | covers {covers}/{len(movies)}"
                     + (f" | {duplicate_count} duplicate(s)" if duplicate_count else "")
                     + f" | DB: {self.db.count()}"
                 )
@@ -2025,6 +2082,16 @@ class NetworkGalleryScraper(QThread):
 
                 page += 1
                 time.sleep(PAGE_DELAY)
+
+            cover_note = ""
+            if src_covers:
+                cover_note = f" | {src_cover_saved} saved to disk"
+                if src_cover_failed:
+                    cover_note += f", {src_cover_failed} download(s) failed"
+            self.signals.progress.emit(
+                f"  {source_name}: {src_covers} cover(s) captured from "
+                f"{src_movies} card(s) across {max(0, page - 1)} page(s)"
+                + cover_note)
 
         self.db.save()
         if parsed_any or self.db.count() > 0:

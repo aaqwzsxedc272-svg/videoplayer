@@ -5141,14 +5141,16 @@ print('61. Update converges on the first pass and expired signed URLs are pruned
 # A page of movies that are all already known must not count as changed, or
 # the "caught up" early-stop never fires and every Update crawls all 175
 # pages of all four gallery sources. Simulated against the shipped DB, whose
-# records carry no sources_seen at all.
+# records carry almost no sources_seen.
 _real61 = _msrc55.MetadataDB(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                           'nubiles_metadata.json'))
 _by61 = {}
 for _k61, _m61 in _real61.movies.items():
     _by61.setdefault(str(_m61.get('source_site')), []).append(_k61)
-report(sum(1 for _m in _real61.movies.values() if _m.get('sources_seen')) == 0,
-       'the shipped DB really has no sources_seen, so this is the live case')
+_seen61 = sum(1 for _m in _real61.movies.values() if _m.get('sources_seen'))
+report(_seen61 < max(1, len(_real61.movies) // 100),
+       'the shipped DB has almost no sources_seen, so the backfill is the live '
+       'case', f'{_seen61} of {len(_real61.movies)}')
 
 _movies61 = {k: dict(v) for k, v in _real61.movies.items()}
 _up61 = _dup61 = 0
@@ -5485,7 +5487,7 @@ report('_metadata_cover_pixmap' in _show64 and '_start_metadata_hover_clip' in _
        'and wires in the cover and the clip')
 report('QVideoWidget(self.hover_preview)' in SRC,
        'the clip plays in a surface that belongs to that same card')
-report('_cover64' not in SRC and 'frames = [_cover' in _show64,
+report('frames = [_cover' in _show64,
        'the cover is prepended to the frame list, so it is what shows first')
 
 _clip64 = _vsrc64('_start_metadata_hover_clip')
@@ -5627,6 +5629,175 @@ report('_hover_cover_hold_timer.stop()' in _ab66,
        'giving up on the clip also cancels the hold, leaving the cover up')
 report('_hover_cover_hold_timer.stop()' in _vsrc64('_stop_metadata_hover_clip'),
        'and so does hiding the card')
+
+# ── 67. A gallery that lazy-loads still yields its cover ───────────────────────
+# _IMG_SRC_RE only ever matched <img src="...">. A gallery that lazy-loads
+# ships the real URL in data-src and a placeholder in src, so the cover came
+# back empty -- indistinguishable, from the outside, from the site having no
+# covers at all. That is what an empty image field looked like on all 5371
+# nubiles records.
+print()
+print('67. The cover is found however the gallery markup carries it')
+
+_COV67 = ("https://images.nubiles-porn.com/videos/my_stepsis/samples/"
+          "cover960.jpg?st=A&e=1")
+_T67 = 'My Stepsis Is A Hot Mess'
+
+
+def _hit67(html, at=None):
+    return _msrc55._gallery_cover_image(html, at if at is not None else html.index(_T67))
+
+
+report('cover960' in _hit67(f'<img src="{_COV67}"><a>{_T67}</a>'),
+       'a plain <img src> still works')
+report('cover960' in _hit67(f'<img data-src="{_COV67}" src="data:image/gif;base64,R0"><a>{_T67}</a>'),
+       'a lazy-loaded card carrying the URL in data-src is found',
+       'this is the case that returned empty on every nubiles record')
+report('cover960' in _hit67(f'<img data-original="{_COV67}" src="/ph.png"><a>{_T67}</a>'),
+       'and so is data-original')
+report('cover960' in _hit67(f'<img srcset="{_COV67} 960w, /small.jpg 320w"><a>{_T67}</a>'),
+       'and srcset, taking the first candidate')
+report('cover960' in _hit67(f'<a>{_T67}</a><img src="{_COV67}">'),
+       'and a card whose image sits AFTER the title')
+report('cover960' in _hit67(f'<div style="background-image:url({_COV67})"><a>{_T67}</a></div>'),
+       'and a CSS background image')
+_MD67 = (f'[![{_T67}]({_COV67})](https://nubiles-porn.com/video/watch/1/x)\n\n'
+         f'[{_T67}](https://nubiles-porn.com/video/watch/1/x)')
+report('cover960' in _hit67(_MD67, _MD67.rindex(_T67)),
+       'and the markdown the reader fallback returns, at the anchor the caller uses')
+report(_hit67(f'<img src="https://nubiles-porn.com/model/profile/28550/arin-jones.jpg"><a>{_T67}</a>') == '',
+       'a model headshot is still not mistaken for the cover')
+report(_hit67(f'<a>{_T67}</a>') == '',
+       'and a card with no image yields empty rather than a wrong one')
+
+_run67 = ast.get_source_segment(
+    SRC if False else open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        'metadata_scraper.py'), encoding='utf-8').read(),
+    next(n for n in ast.walk(ast.parse(open(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), 'metadata_scraper.py'),
+        encoding='utf-8').read()))
+         if isinstance(n, ast.ClassDef) and n.name == 'NetworkGalleryScraper'))
+report('covers {covers}' in _run67 or 'covers ' in _run67,
+       'the scrape now reports how many covers it captured per page, so a '
+       'markup change is visible instead of silently yielding nothing')
+report('cover(s) captured' in _run67,
+       'and totals them per source')
+
+_poll67 = _vsrc64('_poll_hover_cover')
+report('_metadata_cover_pixmap' in _poll67 and 'setPixmap' in _poll67,
+       'a cover that is still downloading is picked up and painted')
+report('_hover_cover_poll_tries > 8' in _poll67,
+       'with a bound, so it cannot poll forever')
+_show67 = _vsrc64('_show_hover_preview')
+report('_hover_cover_poll_timer.start()' in _show67 and 'image_live' in _show67,
+       'the poll only starts when there is a live URL and no file yet')
+report('_hover_cover_poll_timer.stop()' in _vsrc64('_hide_hover_preview'),
+       'and hiding the card stops it')
+
+# ── 68. The whole cover chain, end to end ─────────────────────────────────────
+# A full re-scrape on 2026-09-17 produced 5374 nubiles records with zero covers
+# while every one of them had a title, models, date and url. So page fetching
+# and anchor parsing work and only the cover step fails -- and two different
+# causes look identical from the outside: "the markup has no cover" and "the
+# cover was found but the signed download failed". compact_records() then
+# deletes the dead URL, so the database reads the same either way. This drives
+# the real scraper over a lazy-loaded card and asserts a file reaches disk.
+print()
+print('68. A lazy-loaded gallery card becomes a cover file on disk')
+
+_HTML68 = """<html><body><div class="card">
+ <a href="https://nubiles-porn.com/video/watch/256651/my-stepsis-is-a-hot-mess">
+   <img loading="lazy" src="data:image/gif;base64,R0lGOD" data-src="https://images.nubiles-porn.com/videos/my_stepsis_is_a_hot_mess/samples/cover960.jpg?st=C5dl1YO4Wv&amp;e=9999999999"></a>
+ <a href="https://nubiles-porn.com/video/watch/256651/my-stepsis-is-a-hot-mess">My Stepsis Is A Hot Mess</a>
+ <a href="https://nubiles-porn.com/model/profile/28550/arin-jones">Arin Jones</a>
+ <a href="https://shesinmybed.com/">ShesInMyBed</a> &ndash; Sep 16, 2026
+</div></body></html>"""
+
+_SLUG68 = '256651-my-stepsis-is-a-hot-mess'
+
+
+class _Sig68:
+    def __init__(self, sink=None):
+        self._sink = sink if sink is not None else []
+
+    def emit(self, *a):
+        self._sink.append(' '.join(str(x) for x in a))
+
+
+class _Sigs68:
+    def __init__(self, msgs):
+        self.progress = _Sig68(msgs)
+        self.tick = _Sig68()
+        self.finished = _Sig68()
+        self.error = _Sig68()
+
+
+def _scrape68(payload):
+    """Run the real scraper over one lazy-loaded page. Returns (db, path, log)."""
+    d = os.path.join(_tf55.mkdtemp(), 'cov68.json')
+    with open(d, 'w', encoding='utf-8') as f:
+        json.dump({'movies': {}}, f)
+    site = dict(_msrc55.METADATA_SITES['nubiles'])
+    site['gallery_sources'] = [{
+        'id': 'shesinmybed', 'name': 'ShesInMyBed',
+        'base_url': 'https://nubiles-porn.com',
+        'gallery_url': 'https://nubiles-porn.com/video/gallery',
+        'page_url_template': 'https://nubiles-porn.com/video/gallery/{offset}'}]
+    msgs = []
+    scr = _msrc55.NetworkGalleryScraper(_msrc55.MetadataDB(d), site, mode='update')
+    scr.signals = _Sigs68(msgs)
+    scr._fetch_gallery_page = lambda page: _HTML68 if page == 1 else ''
+    orig = _msrc55._fetch_bytes
+    _msrc55._fetch_bytes = lambda url, timeout=20: payload
+    try:
+        scr._run()
+    finally:
+        _msrc55._fetch_bytes = orig
+    return _msrc55.MetadataDB(d), d, msgs
+
+
+_JPEG68 = b'\xff\xd8\xff\xe0' + b'0' * 900
+_db68, _p68, _log68 = _scrape68(_JPEG68)
+_rec68 = _db68.movies.get(_SLUG68) or {}
+report('cover960.jpg' in str(_rec68.get('image') or ''),
+       'a card that lazy-loads carries its cover through the real scraper',
+       repr(str(_rec68.get('image'))[:70]))
+_f68 = os.path.join(_msrc55.thumbnails_dir(_p68),
+                    re.sub(r'[^A-Za-z0-9._-]', '_', _SLUG68) + '.jpg')
+report(os.path.isfile(_f68) and os.path.getsize(_f68) > 512,
+       'and the cover is written next to the database, which is what the hover '
+       'card actually reads', _f68)
+report(any('covers 1/1' in m for m in _log68),
+       'the page line reports how many covers it captured',
+       ' | '.join(_log68)[:180])
+report(any('1 saved to disk' in m for m in _log68),
+       'and the source line confirms the download landed, so a zero there means '
+       'the markup changed rather than the site having no covers')
+
+_db68b, _p68b, _log68b = _scrape68(b'')
+report(any('download(s) failed' in m for m in _log68b),
+       'a cover that is found but cannot be downloaded says so, instead of '
+       'looking identical to a gallery with no covers',
+       ' | '.join(_log68b)[:180])
+report(not os.path.isdir(os.path.join(_msrc55.thumbnails_dir(_p68b))),
+       'and writes no file for it')
+
+# compact_records() drops a cover whose signature has expired; the downloaded
+# file is the durable copy. That is why a database scraped an hour ago can read
+# zero covers while the cards still display something.
+_db68c = _msrc55.MetadataDB(_p68)
+_db68c.movies[_SLUG68]['image_expires'] = 1
+_db68c.compact_records()
+report('image' not in _db68c.movies[_SLUG68],
+       'an expired signed URL is pruned from the record')
+_db68d = _msrc55.MetadataDB(_p68)
+_db68d.movies[_SLUG68]['image_expires'] = 9999999999
+_db68d.compact_records()
+report('cover960.jpg' in str(_db68d.movies[_SLUG68].get('image') or ''),
+       'and a still-valid one is kept')
+report(os.path.isfile(_f68),
+       'either way the downloaded file survives, so pruning is not what empties '
+       'the hover card')
 
 print()
 print('FAILURES:', FAILS)

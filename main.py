@@ -7490,6 +7490,14 @@ class VideoPlayer(QMainWindow):
         self._hover_cover_hold_timer.setSingleShot(True)
         self._hover_cover_hold_timer.setInterval(self.HOVER_COVER_HOLD_MS)
         self._hover_cover_hold_timer.timeout.connect(self._swap_to_hover_clip)
+        # preview_info_for_path kicks off the cover download on the first
+        # hover of a row. Without this the card stays empty until you hover
+        # the same row a second time, so poll briefly for the file to land.
+        self._hover_cover_poll_timer = QTimer(self)
+        self._hover_cover_poll_timer.setInterval(400)
+        self._hover_cover_poll_timer.timeout.connect(self._poll_hover_cover)
+        self._hover_cover_poll_path = None
+        self._hover_cover_poll_tries = 0
 
         self.pdf_edge_switch_left_btn = QPushButton("< AVN", self)
         self.pdf_edge_switch_right_btn = QPushButton("AVN >", self)
@@ -9097,10 +9105,33 @@ class VideoPlayer(QMainWindow):
         self._hover_preview_target_global_rect = QRect()
         self._hover_preview_display_text = ""
         self._stop_metadata_hover_clip()
+        if hasattr(self, '_hover_cover_poll_timer'):
+            self._hover_cover_poll_timer.stop()
+        self._hover_cover_poll_path = None
         if hasattr(self, 'hover_preview'):
             self.hover_preview.hide()
 
     # ── metadata cover + clip inside the hover card ──────────────────────────
+
+    def _poll_hover_cover(self):
+        """Pick up the cover the first hover started downloading."""
+        self._hover_cover_poll_tries += 1
+        path = self._hover_cover_poll_path
+        if not path or self._hover_cover_poll_tries > 8 or not self.hover_preview.isVisible():
+            self._hover_cover_poll_timer.stop()
+            return
+        try:
+            meta = preview_info_for_path(self, path) or {}
+        except Exception:
+            return
+        pm = self._metadata_cover_pixmap(meta)
+        if pm is None:
+            return
+        self._hover_cover_poll_timer.stop()
+        self.hover_preview_image.setPixmap(pm)
+        self.hover_preview_image.show()
+        self._refresh_hover_preview_layout()
+        self._reposition_hover_preview()
 
     def _metadata_cover_pixmap(self, meta):
         """The cached cover for a matched row, scaled to the card, or None."""
@@ -9186,6 +9217,7 @@ class VideoPlayer(QMainWindow):
             return
         if self._hover_cover_hold_timer.isActive():
             return
+        self._hover_cover_poll_timer.stop()
         self.hover_preview_image.hide()
         self.hover_preview_video.show()
         try:
@@ -9914,6 +9946,14 @@ class VideoPlayer(QMainWindow):
         # Reposition once more or the first hover keeps the pre-layout guess.
         self._reposition_hover_preview()
         self._hover_preview_path = path
+        self._hover_cover_poll_timer.stop()
+        self._hover_cover_poll_tries = 0
+        self._hover_cover_poll_path = None
+        if _cover64 is None and meta.get("image") and meta.get("image_live"):
+            # No cover on disk yet, but there is a live URL and a download is
+            # already on its way -- wait for it instead of showing nothing.
+            self._hover_cover_poll_path = path
+            self._hover_cover_poll_timer.start()
         self._start_metadata_hover_clip(meta)
 
     def _show_pending_hover_preview(self):
