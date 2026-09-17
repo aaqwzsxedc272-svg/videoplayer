@@ -1434,17 +1434,30 @@ def previews_dir(db_path: str) -> str:
     return os.path.join(base, "previews")
 
 
+_PREVIEW_EXTS = (".mp4", ".webm", ".m4v")
+
+
 def _preview_path_for_slug(player, site: dict, slug: str) -> str:
     """The locally cached preview loop for a movie, if one was downloaded."""
     if not slug:
         return ""
     folder = previews_dir(_db_path_for_site(player, site))
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", slug)
-    for ext in (".mp4", ".webm", ".m4v"):
+    for ext in _PREVIEW_EXTS:
         candidate = os.path.join(folder, safe + ext)
         if os.path.isfile(candidate):
             return candidate
     return ""
+
+
+def _preview_file_exists(db_path: str, slug: str) -> bool:
+    """Whether a loop is already on disk, for callers that have no player."""
+    if not slug:
+        return False
+    folder = previews_dir(db_path)
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", slug)
+    return any(os.path.isfile(os.path.join(folder, safe + ext))
+               for ext in _PREVIEW_EXTS)
 
 
 def save_preview(db_path: str, slug: str, url: str, referer: str = "",
@@ -2011,6 +2024,12 @@ class NetworkGalleryScraper(QThread):
         self._active_gallery_url = self._active_source.get("gallery_url", "")
         self._active_page_template = self._active_source.get("page_url_template", "")
         self._browser_session: Optional[_BrowserGallerySession] = None
+        # Slugs whose preview loop should be downloaded while its signature is
+        # fresh. The gallery page is the only place a signed loop can be had --
+        # a watch page fetched over plain HTTP carries none -- and the whole
+        # catalogue would be gigabytes, so this is limited to the rows the
+        # player actually has in its playlist.
+        self.wanted_previews: set = set()
 
     def cancel(self):
         self._cancel = True
@@ -2024,6 +2043,25 @@ class NetworkGalleryScraper(QThread):
             if self._browser_session is not None:
                 self._browser_session.close()
                 self._browser_session = None
+
+    def _cache_wanted_preview(self, movie: dict, source: dict) -> None:
+        """Download a playlist row's loop now, while its signature is valid.
+
+        The gallery page is the only place a signed loop can be had -- a watch
+        page fetched over plain HTTP carries none, which a field log confirmed
+        on six rows out of six -- so a scrape is the only moment it can be
+        saved, exactly as with the cover.
+        """
+        slug = str(movie.get("slug") or "")
+        url = str(movie.get("preview") or "")
+        if not slug or not url or _preview_file_exists(self.db.db_path, slug):
+            return
+        diag: list = []
+        local = save_preview(self.db.db_path, slug, url,
+                             referer=_referer_for(source), diag=diag)
+        self.signals.progress.emit(
+            f"    preview cached: {os.path.basename(local)}" if local else
+            f"    preview FAILED for {slug}: {'; '.join(diag) or 'no data'}")
 
     def _page_url(self, page: int) -> str:
         if page <= 1:
@@ -2123,6 +2161,12 @@ class NetworkGalleryScraper(QThread):
                 page_changed = False
                 duplicate_count = 0
                 for movie in movies:
+                    # Cached before the dedupe branch, because a playlist row
+                    # is almost certainly already in the database and that
+                    # branch continues early. This page's signatures are fresh
+                    # right now and dead in about an hour.
+                    if movie.get("slug") in self.wanted_previews:
+                        self._cache_wanted_preview(movie, source)
                     existing = self.db.movies.get(movie["slug"])
                     if existing and existing.get("meta_fetched"):
                         src_id = source.get("id") or ""
@@ -3044,7 +3088,8 @@ def refresh_preview_async(player, site: dict, slug: str, movie: dict) -> bool:
             if not fresh:
                 if misses is not None:
                     misses.add(slug)
-                print(f"[PREVIEW] {slug}: no signed loop on its watch page")
+                print(f"[PREVIEW] {slug}: no signed loop on its watch page "
+                      f"({len(page)} byte(s) fetched)")
                 return
             diag: list = []
             local = save_preview(db_path, slug, fresh, referer=referer, diag=diag)
@@ -3215,6 +3260,22 @@ def _start_all_background_updates(player, force: bool = False, manual: bool = Fa
     return started
 
 
+def _linked_slugs_for_site(player, site_id: str) -> set:
+    """The slugs this site has linked to rows in the player's playlist.
+
+    Bounds preview caching. A nubiles loop can only be had while the gallery
+    page carrying it is being read, and one per movie across the catalogue
+    would be gigabytes -- for a handful of rows that get hovered.
+    """
+    out: set = set()
+    links = getattr(player, "_metadata_links", None) or {}
+    for link in links.values():
+        if (isinstance(link, dict) and link.get("slug")
+                and link.get("site") == site_id):
+            out.add(str(link["slug"]))
+    return out
+
+
 def _start_background_update(player, site: Optional[dict] = None, db: Optional[MetadataDB] = None,
                              mode: str = "update", manual: bool = False):
     site = site or METADATA_SITES[DEFAULT_SITE_ID]
@@ -3230,6 +3291,10 @@ def _start_background_update(player, site: Optional[dict] = None, db: Optional[M
     ytdlp = _find_ytdlp()
     if site.get("scraper") == "network_gallery":
         scraper = NetworkGalleryScraper(db, site, mode=mode)
+        scraper.wanted_previews = _linked_slugs_for_site(player, site_id)
+        if scraper.wanted_previews:
+            print(f"[MetadataScraper] {site.get('name') or site_id}: caching the "
+                  f"preview loop for {len(scraper.wanted_previews)} playlist row(s)")
     else:
         scraper = TeamSkeetScraper(db, mode=mode, ytdlp_path=ytdlp,
                                    sources=site.get("sources") or REPTYLE_SOURCES)

@@ -6151,6 +6151,121 @@ report('preview_local' in _clip72 and 'fromLocalFile' in _clip72,
 report('preview_live' in _clip72 and 'preview_url' in _clip72,
        'and still falls back to a signed URL while it is alive')
 
+# ── 73. The scrape caches the loop for the rows actually in the playlist ──────
+# A field log settled where a loop can be had: six rows out of six printed "no
+# signed loop on its watch page", so re-minting over plain HTTP does not work
+# and the gallery page read during a scrape is the only source -- with a
+# browser, and a signature that is fresh right then. Downloading one per movie
+# would be gigabytes, so only the slugs linked to playlist rows are fetched.
+print()
+print('73. Update caches the loop for the rows actually in the playlist')
+
+# Same crash-safety as section 72: a falsification run against a build without
+# this has to report its failures, not abort on the first missing name.
+def _lsl73(player, site_id):
+    fn = getattr(_msrc55, '_linked_slugs_for_site', None)
+    return fn(player, site_id) if fn else None
+
+
+def _pfe73(db_path, slug):
+    fn = getattr(_msrc55, '_preview_file_exists', None)
+    return fn(db_path, slug) if fn else False
+
+
+
+
+class _P73:
+    def __init__(self, links):
+        self._metadata_links = links
+
+
+report(_lsl73(_P73({
+           'a': {'site': 'nubiles', 'slug': 'n1'},
+           'b': {'site': 'nubiles', 'slug': 'n2'},
+           'c': {'site': 'teamskeet', 'slug': 't1'},
+           'd': 'not a dict'}), 'nubiles') == {'n1', 'n2'},
+       "only this site's linked rows are asked for, not the whole database")
+report(_lsl73(_P73({}), 'nubiles') == set(),
+       'and an empty playlist asks for nothing')
+
+_mv73 = _msrc55._gallery_movies_from_html(_page70, _site70) if _page70 else []
+_loops73 = [m for m in _mv73 if m.get('preview')]
+_want73 = [m['slug'] for m in _loops73][:3]
+_LOOP73 = b'\x00\x00\x00\x18ftypmp42' + b'0' * 9000
+_hdr73 = {}
+
+
+class _E73:
+    def __init__(self, sink=None):
+        self._sink = sink if sink is not None else []
+
+    def emit(self, *a):
+        self._sink.append(' '.join(str(x) for x in a))
+
+
+def _run73(wanted, db_path=None):
+    d = db_path or os.path.join(
+        _tf55.mkdtemp(), _msrc55.METADATA_SITES['nubiles']['db_filename'])
+    if not os.path.isfile(d):
+        with open(d, 'w', encoding='utf-8') as f:
+            json.dump({'movies': {}}, f)
+    scr = _msrc55.NetworkGalleryScraper(_msrc55.MetadataDB(d), _site70,
+                                        mode='update')
+    sink = []
+    scr.signals.progress = _E73(sink)
+    scr.signals.tick = _E73()
+    scr.signals.finished = _E73()
+    scr.signals.error = _E73()
+    scr._fetch_gallery_page = lambda page: _page70 if page == 1 else ''
+    scr.wanted_previews = set(wanted)
+    _hdr73.clear()
+
+    def _get(url, headers=None, timeout=None, impersonate=None):
+        _hdr73['last'] = dict(headers or {})
+
+        class _R:
+            status_code = 200
+        _R.content = _LOOP73 if '.mp4' in url else b'\xff\xd8' + b'0' * 900
+        return _R
+    mod = _types55.ModuleType('curl_cffi')
+    mod.requests = _types55.SimpleNamespace(get=_get)
+    saved = _sys55.modules.get('curl_cffi')
+    _sys55.modules['curl_cffi'] = mod
+    try:
+        scr._run()
+    finally:
+        if saved is None:
+            _sys55.modules.pop('curl_cffi', None)
+        else:
+            _sys55.modules['curl_cffi'] = saved
+    return d, sink
+
+
+_d73, _sink73 = _run73(_want73)
+_dir73 = _pd72(_d73)
+_files73 = sorted(os.listdir(_dir73)) if os.path.isdir(_dir73) else []
+report(len(_files73) == len(_want73) and all(f.endswith('.mp4') for f in _files73),
+       'a scrape downloads the loop for exactly the rows asked for',
+       f'{len(_files73)} of {len(_want73)}')
+report(_hdr73.get('last', {}).get('Referer') == 'https://nubiles-porn.com/',
+       'asked for as the network that signed it',
+       str(_hdr73.get('last', {}).get('Referer')))
+report(sum(1 for m in _sink73 if 'preview cached:' in m) == len(_want73),
+       'and says so per row, so a failure is attributable')
+report(all(_pfe73(_d73, s) for s in _want73),
+       'the file is where the hover looks for it')
+report(len(_files73) < len(_loops73),
+       'and not the rest of the catalogue, which would be gigabytes',
+       f'{len(_files73)} of {len(_loops73)} loops on this page')
+_d73b, _sink73b = _run73(_want73, _d73)
+report(not any('preview cached:' in m for m in _sink73b),
+       'a second Update does not download them again')
+_msrc73 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'metadata_scraper.py'), encoding='utf-8').read()
+report('byte(s) fetched' in _msrc73,
+       'the re-mint reports whether the watch page arrived at all, so a blocked '
+       'fetch is not mistaken for a page that has no loop')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
