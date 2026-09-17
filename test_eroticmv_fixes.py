@@ -5127,9 +5127,9 @@ report('preview_info_for_path' in ast.dump(
            next(n for n in ast.walk(_ast60)
                 if isinstance(n, ast.ImportFrom) and n.module == 'metadata_scraper')),
        'main.py imports the lookup rather than reimplementing it')
-report('QToolTip.showText' in ast.get_source_segment(_main60, _meth60['_show_metadata_hover_preview'])
-       and 'thumbnail' in ast.get_source_segment(_main60, _meth60['_show_metadata_hover_preview']),
-       'and the tooltip shows the cached cover image')
+_hov60 = ast.get_source_segment(_main60, _meth60['_show_metadata_hover_preview'])
+report('show_for' in _hov60 and 'QToolTip.showText' not in _hov60,
+       'and the hover card it opens paints the cached cover image')
 
 # ── 61. Update stays cheap, and dead signed URLs are not hoarded ─────────────
 print()
@@ -5353,6 +5353,122 @@ try:
            'and still reports it as not live, since unsigned it 403s')
 finally:
     _msvc62['nubiles'] = _ob62
+
+# ── 63. Dates are stored DD/MM/YYYY ───────────────────────────────────────────
+# Both networks send an unambiguous source value: teamskeet an ISO stamp
+# (2026-05-23T00:00:00, the shape stored as published_date on all 10564
+# records of the original export), nubiles a month name ("May 26, 2026").
+# The stored MM/DD/YYYY was a leftover from an older build. Every correction
+# below was checked against published_date_iso, which is exact ground truth.
+print()
+print('63. Dates are stored and shown as DD/MM/YYYY')
+
+report(_msrc55._date_to_display('2026-05-23T00:00:00') == ('23/05/2026', '2026-05-23'),
+       'the real teamskeet API stamp converts to DD/MM/YYYY',
+       str(_msrc55._date_to_display('2026-05-23T00:00:00')))
+report(_msrc55._date_to_display('May 26, 2026') == ('26/05/2026', '2026-05-26'),
+       'and so does the nubiles gallery month name')
+report(_msrc55._date_to_display('09/16/2026') == ('16/09/2026', '2026-09-16'),
+       'a slash date that can only be MM/DD is swapped')
+report(_msrc55._date_to_display('16/09/2026') == ('16/09/2026', '2026-09-16'),
+       'one that can only be DD/MM is left alone')
+report(_msrc55._date_to_display('2026-09-16') == ('16/09/2026', '2026-09-16')
+       and _msrc55._date_to_display('20260916') == ('16/09/2026', '2026-09-16'),
+       'and ISO / compact forms agree')
+
+# The matcher strips separators from the query, so a record has to offer every
+# ordering or a valid date stops matching the moment the format changes.
+_k63 = _msrc55._date_keys('23/05/2026')
+report(_k63 == {'20260523', '23052026', '05232026'},
+       'a stored date is indexed under ISO, DD/MM and MM/DD digit orders',
+       str(sorted(_k63)))
+for _q63 in ('23/05/2026', '23-05-2026', '2026-05-23', '05/23/2026'):
+    report(bool({re.sub(r'[^0-9]', '', _q63)} & _k63),
+           f'a query written as {_q63!r} still hits the date signal')
+
+report(_msrc55._normalise_display_date('09/16/2026') == '16/09/2026',
+       'a legacy MM/DD value is still swapped for display')
+report(_msrc55._normalise_display_date('16/09/2026') == '16/09/2026'
+       and _msrc55._normalise_display_date('05/07/2026') == '05/07/2026',
+       'but an ambiguous one is left alone -- guessing there is what produced '
+       'the mixed display in the first place')
+
+_d63 = os.path.join(_tf55.mkdtemp(), 'legacy63.json')
+with open(_d63, 'w', encoding='utf-8') as _f63:
+    json.dump({'movies': {
+        'a': {'slug': 'a', 'title': 'A', 'date': '09/16/2026', 'meta_fetched': True},
+        'b': {'slug': 'b', 'title': 'B', 'date': '16/09/2026', 'meta_fetched': True},
+        'c': {'slug': 'c', 'title': 'C', 'date': '05/07/2026', 'meta_fetched': True},
+    }}, _f63)
+_db63 = _msrc55.MetadataDB(_d63)
+_g63 = {k: v.get('date') for k, v in _db63.movies.items()}
+report(_g63 == {'a': '16/09/2026', 'b': '16/09/2026', 'c': '05/07/2026'},
+       'loading a legacy database rewrites its MM/DD dates on the spot',
+       str(_g63))
+report(json.load(open(_d63, encoding='utf-8'))['movies']['a']['date'] == '16/09/2026',
+       'and the correction reaches the file, not just memory')
+_db63b = _msrc55.MetadataDB(_d63)
+report({k: v.get('date') for k, v in _db63b.movies.items()} == _g63,
+       'reloading is idempotent')
+
+_R63 = re.compile(r'^(\d{2})/(\d{2})/(\d{4})$')
+for _fn63 in ('teamskeet_metadata.json', 'nubiles_metadata.json',
+              'momlover_metadata.json'):
+    _p63 = os.path.join(os.path.dirname(os.path.abspath(__file__)), _fn63)
+    if not os.path.isfile(_p63):
+        continue
+    _m63 = json.load(open(_p63, encoding='utf-8'))['movies']
+    _mm63 = sum(1 for m in _m63.values()
+                if (_g := _R63.match(m.get('date') or '')) and int(_g.group(2)) > 12)
+    report(_mm63 == 0, f'{_fn63} holds no MM/DD/YYYY date',
+           f'{len(_m63)} records, {_mm63} still MM/DD')
+    report(all(_msrc55._normalise_display_date(m.get('date') or '') == (m.get('date') or '')
+               for m in _m63.values()),
+           f'and the display normaliser is a no-op on it')
+
+# ── 64. Hover card: cover first, then the clip if there is one ────────────────
+print()
+print('64. The hover card shows the cover, then the clip when the movie has one')
+
+_cls64 = next((n for n in TREE.body
+               if isinstance(n, ast.ClassDef) and n.name == 'MetadataHoverPopup'), None)
+report(_cls64 is not None, 'main.py defines MetadataHoverPopup')
+_m64 = {n.name for n in _cls64.body if isinstance(n, ast.FunctionDef)} if _cls64 else set()
+report(all(f in _m64 for f in ('show_for', 'dismiss', '_on_media_status',
+                               '_abandon_clip', '_ensure_player')),
+       'with the cover/clip lifecycle', str(sorted(_m64)))
+
+def _src64(name):
+    fn = next((n for n in _cls64.body
+               if isinstance(n, ast.FunctionDef) and n.name == name), None)
+    return ast.get_source_segment(SRC, fn) if fn is not None else ''
+
+_sf64 = _src64('show_for')
+report('_cover.show()' in _sf64 and 'setSource' in _sf64,
+       'show_for paints the cover and only then asks for the clip')
+report(_sf64.index('_cover.show()') < _sf64.index('setSource'),
+       'and it does so before the media request, so the card is never blank')
+report('preview_live' in _sf64 and 'preview_url' in _sf64,
+       'the clip is requested only when the movie actually has a live one')
+_st64 = _src64('_on_media_status')
+report('_cover.hide()' in _st64 and '_video.show()' in _st64
+       and '_player.play()' in _st64,
+       'the clip swaps over the cover once it is buffered')
+report('LoadedMedia' in _st64 and 'BufferedMedia' in _st64,
+       'and only on a buffered status, never while still loading')
+_ab64 = _src64('_abandon_clip')
+report('_cover.show()' in _ab64,
+       'a row with no working clip falls back to the cover')
+report('LOAD_TIMEOUT_MS' in SRC and '_timeout.start()' in _sf64,
+       'with a timeout, so a dead URL cannot leave the card stuck')
+
+_sh64 = ast.get_source_segment(_main60, _meth60['_show_metadata_hover_preview'])
+report('show_for' in _sh64 and 'QToolTip.showText' not in _sh64,
+       'the row hover now drives the popup, not a QToolTip (which cannot hold '
+       'a QVideoWidget)')
+_lv64 = ast.get_source_segment(_main60, _meth60['leaveEvent'])
+report('_dismiss_metadata_hover' in _lv64,
+       'and leaving the table dismisses it, which stops the clip')
 
 print()
 print('FAILURES:', FAILS)

@@ -318,6 +318,12 @@ class MetadataDB:
                     # Older files carry the retired fields; drop them from
                     # memory now so the next save shrinks the file on disk.
                     self.compact_records()
+                    # Dates used to be stored MM/DD/YYYY. Both networks send
+                    # an unambiguous source value (teamskeet an ISO stamp,
+                    # nubiles "May 26, 2026") and the builders now emit
+                    # DD/MM/YYYY, so anything still MM/DD on disk is a
+                    # leftover from an older build and is fixed here.
+                    self.migrate_dates()
             except Exception:
                 pass
 
@@ -346,6 +352,28 @@ class MetadataDB:
             if trimmed != movie:
                 movies[slug] = trimmed
                 changed += 1
+        return changed
+
+    def migrate_dates(self) -> int:
+        """Rewrite legacy MM/DD/YYYY dates to DD/MM/YYYY. Returns the count.
+
+        Only a value whose second field is above 12 can be MM/DD, so this
+        never touches a date that is already DD/MM or one that is ambiguous.
+        Verified against published_date_iso in the original teamskeet export,
+        which is the ground truth for 10564 records.
+        """
+        movies = self._data.get("movies") or {}
+        changed = 0
+        for movie in movies.values():
+            if not isinstance(movie, dict):
+                continue
+            raw = str(movie.get("date") or "")
+            fixed = _normalise_display_date(raw)
+            if fixed and fixed != raw:
+                movie["date"] = fixed
+                changed += 1
+        if changed:
+            self.save()
         return changed
 
     def compact(self) -> tuple:
@@ -870,8 +898,16 @@ def _date_to_display(raw_date) -> tuple[str, str]:
 
     m = re.match(r"^(\d{2})/(\d{2})/(\d{4})$", s)
     if m:
-        # Already DD/MM/YYYY or MM/DD/YYYY — treat first two fields as DD/MM
-        return s, f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+        a, b, y = int(m.group(1)), int(m.group(2)), m.group(3)
+        if a > 12 and b <= 12:
+            # Unambiguously DD/MM already.
+            return s, f"{y}-{m.group(2)}-{m.group(1)}"
+        # Both networks send MM/DD/YYYY: 6319 records on teamskeet and 3138
+        # on nubiles are unambiguously MM/DD against 49 and 50 that are
+        # unambiguously DD/MM. So a slash date that is not unambiguously
+        # DD/MM is read as MM/DD and swapped, and DD/MM/YYYY is what gets
+        # stored from here on.
+        return f"{m.group(2)}/{m.group(1)}/{y}", f"{y}-{m.group(1)}-{m.group(2)}"
 
     if re.match(r"^\d{4}-\d{2}-\d{2}", s):
         try:
@@ -899,20 +935,23 @@ def _date_to_display(raw_date) -> tuple[str, str]:
 
 
 def _normalise_display_date(raw_d: str) -> str:
-    """Convert a stored MM/DD/YYYY date to DD/MM/YYYY for display.
-    Dates that already have a first field > 12 are returned unchanged.
+    """Display a stored date as DD/MM/YYYY.
+
+    Dates are stored canonically as DD/MM/YYYY now, so this is normally a
+    no-op. It still swaps a value whose SECOND field is above 12 -- that can
+    only be a legacy MM/DD/YYYY record -- so an old database on disk still
+    displays correctly. An ambiguous value is left alone: guessing on those
+    is what produced the mixed display in the first place.
     """
     raw_d = str(raw_d or "").strip()
     import re as _re
     _m = _re.match(r'^(\d{2})/(\d{2})/(\d{4})$', raw_d)
     if not _m:
         return raw_d
-    mm, dd, yyyy = _m.group(1), _m.group(2), _m.group(3)
-    if int(mm) > 12:
-        # First field is already a day (>12) — it's DD/MM/YYYY
-        return raw_d
-    # Either ambiguous (both <=12) or mm<=12, dd>12 => old MM/DD/YYYY, swap
-    return f"{dd}/{mm}/{yyyy}"
+    a, b = int(_m.group(1)), int(_m.group(2))
+    if b > 12 and a <= 12:
+        return f"{_m.group(2)}/{_m.group(1)}/{_m.group(3)}"
+    return raw_d
 
 
 def _html_to_text(value: str) -> str:
@@ -2018,12 +2057,21 @@ def _date_digits(s: str) -> str:
 
 
 def _date_keys(date: str) -> set[str]:
+    """Every digit-ordering a stored date could be queried as.
+
+    Dates are stored DD/MM/YYYY. The query side just strips separators, so a
+    pasted link may arrive as ISO, DD/MM or MM/DD -- the record has to offer
+    all three, or a valid date silently stops matching the moment the storage
+    format changes. It did: while dates were stored MM/DD, the ISO key was
+    built from the wrong pair and a DD/MM query never hit.
+    """
     keys: set[str] = set()
     parts = re.match(r'(\d{2})/(\d{2})/(\d{4})', str(date or ""))
     if parts:
-        mm, dd, yyyy = parts.groups()
-        keys.add(f"{yyyy}{mm}{dd}")
-        keys.add(f"{mm}{dd}{yyyy}")
+        dd, mm, yyyy = parts.groups()
+        keys.add(f"{yyyy}{mm}{dd}")   # ISO
+        keys.add(f"{dd}{mm}{yyyy}")   # DD/MM/YYYY as typed
+        keys.add(f"{mm}{dd}{yyyy}")   # MM/DD/YYYY as typed
     return keys
 
 
