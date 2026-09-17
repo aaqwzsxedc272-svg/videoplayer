@@ -532,6 +532,91 @@ def _has_next_page(html: str, current_page: int) -> bool:
 # Phase 2 — yt-dlp metadata enrichment
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _duration_seconds(value) -> int:
+    """Normalise any runtime representation to whole seconds (0 = unknown).
+
+    Accepts plain seconds, milliseconds, "mm:ss", "hh:mm:ss" and "12m34s".
+    """
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        v = float(value)
+        if v <= 0:
+            return 0
+        # Values this large are milliseconds, not a 3-hour scene.
+        return int(round(v / 1000.0)) if v > 20000 else int(round(v))
+    text = str(value).strip()
+    if not text:
+        return 0
+    m = re.match(r'^(\d{1,2}):(\d{1,2}):(\d{1,2})$', text)
+    if m:
+        return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+    m = re.match(r'^(\d{1,3}):(\d{1,2})$', text)
+    if m:
+        return int(m.group(1)) * 60 + int(m.group(2))
+    m = re.match(r'^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m(?:in)?(?:s)?)?\s*(?:(\d+)\s*s)?$',
+                 text, re.IGNORECASE)
+    if m and any(m.groups()):
+        return (int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60
+                + int(m.group(3) or 0))
+    try:
+        return _duration_seconds(float(text))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _query_durations(raw: str) -> set:
+    """Runtime candidates spelled out in a title/filename, in seconds.
+
+    Only explicit mm:ss / hh:mm:ss forms are read, so resolution markers like
+    '1080p' or a year are never mistaken for a runtime.
+    """
+    out = set()
+    for h, m, sec in re.findall(r'(?<![\d:])(\d{1,2}):([0-5]\d):([0-5]\d)(?![\d:])',
+                                str(raw or "")):
+        out.add(int(h) * 3600 + int(m) * 60 + int(sec))
+    for m, sec in re.findall(r'(?<![\d:])(\d{1,3}):([0-5]\d)(?![\d:])', str(raw or "")):
+        out.add(int(m) * 60 + int(sec))
+    return {d for d in out if d > 0}
+
+
+def _durations_agree(a: int, b: int) -> bool:
+    """Same runtime, allowing for re-encode drift: 10 s or 3%, whichever is more."""
+    if a <= 0 or b <= 0:
+        return False
+    return abs(a - b) <= max(10, int(0.03 * max(a, b)))
+
+
+def _player_duration_ms(player, path: str) -> int:
+    """The runtime the player already knows for a playlist row, in ms.
+
+    video_durations is populated by the local probe and by
+    _schedule_remote_duration_probes, and _stream_resolution_cache keeps the
+    same value for rows restored from a saved playlist.
+    """
+    if player is None:
+        return 0
+    for key in (path, _unwrap_path(path)):
+        if not key:
+            continue
+        try:
+            v = int((getattr(player, "video_durations", {}) or {}).get(key) or 0)
+        except Exception:
+            v = 0
+        if v > 0:
+            return v
+        try:
+            cached = (getattr(player, "_stream_resolution_cache", {}) or {}).get(key) or {}
+            v = int(cached.get("duration_ms") or 0)
+        except Exception:
+            v = 0
+        if v > 0:
+            return v
+    return 0
+
+
 def _clean_ws(value) -> str:
     return re.sub(r"\s+", " ", html_unescape(str(value or ""))).strip()
 
@@ -806,6 +891,15 @@ def _site_movie_from_entry(entry: dict, source: Optional[dict] = None) -> Option
         "description":        _html_to_text(description_html),
         "tags":               tags,
         "stats":              entry.get("stats") if isinstance(entry.get("stats"), dict) else {},
+        # Runtime is a first-class match criterion: it survives re-hosting,
+        # which the site's own video_id does not.
+        "duration":           _duration_seconds(
+                                  entry.get("duration")
+                                  or entry.get("durationSeconds")
+                                  or entry.get("length")
+                                  or entry.get("runtime")
+                                  or (seo.get("duration") if isinstance(seo, dict) else None)
+                              ),
         "item_id":            entry.get("itemId"),
         "type":               entry.get("type") or "video",
         "is_upcoming":        bool(entry.get("isUpcoming")),
@@ -1164,6 +1258,7 @@ def _parse_ytdlp_movie(data: dict, slug: str, source: Optional[dict] = None) -> 
         "url":          f"{BASE}/movies/{slug}",
         "source_site":  source.get("id") or "",
         "source_name":  source.get("name") or "",
+        "duration":     _duration_seconds(data.get("duration")),
         "scraped_at":   _utc_now(),
         "meta_fetched": True,
         # preserve raw yt-dlp tags for richer matching
@@ -1637,11 +1732,17 @@ class TitleMatcher:
     # The exact movie lost to a same-series one because _score had NO term
     # for the video id and none for a whole-title match, so the two
     # decisive signals were invisible to the ranking.
+    # Weighted by how well each criterion survives being re-hosted. A video
+    # id only exists on the creator's own site, so it is useless for the
+    # links actually pasted in (pixeldrain, bunkr, gofile, tube mirrors) and
+    # is held down to a tie-breaker; name, actors, series, date and runtime
+    # all carry across to a mirror, so they drive the decision.
     _SIGNAL_WEIGHTS = {
-        'id':            1.00,  # unique numeric video id -- decisive
         'scene':         0.60,  # the whole scene title appears in the query
+        'duration':      0.55,  # runtime survives any re-host, near-exact
         'date':          0.45,
         'model':         0.35,  # per model, capped by _MODEL_SIGNAL_CAP
+        'id':            0.35,  # creator-site-only; tie-breaker, not a driver
         'series':        0.20,
         'scene_partial': 0.15,  # only two or more overlapping title tokens
         'site':          0.05,  # near-free: every movie from that source
@@ -1656,7 +1757,7 @@ class TitleMatcher:
     # user to confirm rather than auto-applied. A real source URL always
     # carries the site and/or the scene title alongside the id, so it is
     # unaffected.
-    _LONE_ID_STRENGTH = 0.55
+    _LONE_ID_STRENGTH = 0.30
     # Auto-apply threshold: 'id' or 'scene' alone clears it, while the
     # ('series','site') pair at 0.25 does not.
     HIGH_CONFIDENCE_STRENGTH = 0.60
@@ -1708,6 +1809,7 @@ class TitleMatcher:
                 "model_norms": [_normalise(m) for m in models if m],
                 "model_compacts": [_compact(m) for m in models if m],
                 "video_id": movie.get("video_id", ""),
+                "duration": int(movie.get("duration") or 0),
                 "site_norm": _compact(movie.get("source_site", "") or movie.get("source_name", "")),
             }
             self._records[slug] = record
@@ -1717,11 +1819,13 @@ class TitleMatcher:
             for key in _date_keys(record["date"]):
                 self._date_index.setdefault(key, set()).add(slug)
 
-    def match(self, raw: str) -> Optional[dict]:
-        matches = self.match_candidates(raw, limit=1, include_weak=False)
+    def match(self, raw: str, duration_ms: int = 0) -> Optional[dict]:
+        matches = self.match_candidates(raw, limit=1, include_weak=False,
+                                        duration_ms=duration_ms)
         return matches[0]["movie"] if matches else None
 
-    def match_candidates(self, raw: str, limit: int = 5, include_weak: bool = True) -> list[dict]:
+    def match_candidates(self, raw: str, limit: int = 5, include_weak: bool = True,
+                         duration_ms: int = 0) -> list[dict]:
         if not raw or not self._records:
             return []
 
@@ -1730,6 +1834,13 @@ class TitleMatcher:
         q_tokens = _tokens(raw)
         q_date   = re.findall(r'\d{8}|\d{4}[-/]\d{2}[-/]\d{2}|\d{2}[-/]\d{2}[-/]\d{4}', raw)
         q_date_d = set(_date_digits(d) for d in q_date if len(_date_digits(d)) == 8)
+        q_dur = _query_durations(raw)
+        try:
+            if int(duration_ms or 0) > 0:
+                q_dur = q_dur | {int(int(duration_ms) / 1000)}
+        except (TypeError, ValueError):
+            pass
+
         candidate_slugs = self._candidate_slugs(q_tokens, q_date_d)
         # Deliberately NOT falling back to every record when the inverted
         # index turns up nothing. _candidate_slugs indexes title, series,
@@ -1749,8 +1860,9 @@ class TitleMatcher:
             record = self._records.get(slug)
             if not record:
                 continue
-            score = self._score(raw, q_norm, q_tokens, q_date_d, record)
-            signals = self._match_signals(raw, q_norm, q_compact, q_tokens, q_date_d, record)
+            score = self._score(raw, q_norm, q_tokens, q_date_d, record, q_dur)
+            signals = self._match_signals(raw, q_norm, q_compact, q_tokens, q_date_d,
+                                          record, q_dur)
             strength = self._signal_strength(signals)
             if score < MATCH_THRESHOLD and not signals:
                 continue
@@ -1778,7 +1890,7 @@ class TitleMatcher:
         return matches[:max(1, int(limit or 1))]
 
     def _match_signals(self, raw: str, q_norm: str, q_compact: str, q_tokens: set,
-                       q_date_d: set, record: dict) -> list[str]:
+                       q_date_d: set, record: dict, q_dur: set = ()) -> list[str]:
         signals = []
         if record["series_norm"] and (
             record["series_norm"] in q_norm or record["series_compact"] in q_compact
@@ -1802,6 +1914,10 @@ class TitleMatcher:
 
         if record["date"] and q_date_d and (q_date_d & _date_keys(record["date"])):
             signals.append("date")
+
+        rec_dur = int(record.get("duration") or 0)
+        if rec_dur > 0 and any(_durations_agree(rec_dur, d) for d in (q_dur or ())):
+            signals.append("duration")
 
         if record.get("video_id") and record["video_id"] in q_norm.split():
             signals.append("id")
@@ -1855,7 +1971,7 @@ class TitleMatcher:
         return candidates
 
     def _score(self, raw: str, q_norm: str, q_tokens: set,
-               q_date_d: set, record: dict) -> float:
+               q_date_d: set, record: dict, q_dur: set = ()) -> float:
         title   = record["title"]
         series  = record["series"]
         date    = record["date"]
@@ -1909,6 +2025,13 @@ class TitleMatcher:
         if vid and (vid in q_norm.split() or f"/{vid}/" in str(raw)):
             s_id = 0.55
 
+        # S8: runtime. Kept in the sum for the same reason the video id had
+        # to be -- a signal that is invisible to the score cannot rank.
+        s_dur = 0.0
+        rec_dur = int(record.get("duration") or 0)
+        if rec_dur > 0 and any(_durations_agree(rec_dur, d) for d in (q_dur or ())):
+            s_dur = 0.45
+
         score = (
             s_slug      * 0.30 +
             s_title     * 0.20 +
@@ -1916,6 +2039,7 @@ class TitleMatcher:
             s_series    +
             s_model     +
             s_date      +
+            s_dur       +
             s_id
         )
         return score
@@ -2790,7 +2914,10 @@ class MetadataScraperDialog(QDialog):
 
         for fp in self.file_paths:
             raw = _best_match_raw_title(self.player, fp)
-            candidates = self.matcher.match_candidates(raw, limit=5, include_weak=True)
+            candidates = self.matcher.match_candidates(
+                raw, limit=5, include_weak=True,
+                duration_ms=_player_duration_ms(self.player, fp),
+            )
             movie = None
             auto_apply = False
             if candidates:

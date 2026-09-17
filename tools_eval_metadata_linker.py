@@ -10,6 +10,7 @@ auto-apply path) returns that same movie.
 
 Usage: python3 tools_eval_metadata_linker.py [db.json] [sample]
 """
+import hashlib
 import os
 import random
 import sys
@@ -41,21 +42,43 @@ if 'PyQt6' not in sys.modules:
 import metadata_scraper as ms
 
 
+def synth_duration(slug):
+    """A stable stand-in runtime, in seconds.
+
+    The shipped databases carry NO duration at all (every record's field is
+    absent), so the harness derives one from the slug to exercise the
+    matcher's use of runtime. This measures the matching logic; it is not a
+    measurement of real scraped data.
+    """
+    return 240 + (int(hashlib.md5(slug.encode('utf-8')).hexdigest(), 16) % 1500)
+
+
 def query_forms(slug, movie):
-    """The shapes a real row presents to the matcher."""
+    """The shapes a real row presents to the matcher.
+
+    Returns {kind: (query_text, kwargs)} -- kwargs go to TitleMatcher.match,
+    which is how the linker passes a probed runtime.
+    """
     out = {}
-    out['display_name'] = ms.format_display_name(movie)
-    out['page_url'] = movie.get('url') or ''
-    out['slug'] = slug
+    out['display_name'] = (ms.format_display_name(movie), {})
+    out['page_url'] = (movie.get('url') or '', {})
+    out['slug'] = (slug, {})
     vid = str(movie.get('video_id') or '')
     title = movie.get('title') or ''
     if vid and title:
-        # what a file host / remote row usually looks like
-        out['host_style'] = f"{movie.get('source_site') or 'nubiles-porn'} {vid} {title}"
+        # a source-site URL: carries the creator's own video id
+        out['host_style'] = (f"{movie.get('source_site') or 'nubiles-porn'} {vid} {title}", {})
     models = [m for m in (movie.get('models') or []) if not ms._is_male_performer(m)]
     if models and title:
-        out['scene_only'] = f"{title} {models[0]}"
-    return {k: v for k, v in out.items() if v and v.strip()}
+        out['scene_only'] = (f"{title} {models[0]}", {})
+        # what a MIRROR row actually is: name + actors + runtime, and neither
+        # a site name nor a creator video id anywhere in it
+        dur = int(movie.get('duration') or 0)
+        if dur > 0:
+            stamp = f"{dur // 60}:{dur % 60:02d}"
+            out['mirror_text'] = (f"{title} {models[0]} {stamp}", {})
+            out['mirror_probed'] = (f"{title} {models[0]}", {'duration_ms': dur * 1000})
+    return {k: v for k, v in out.items() if v[0] and v[0].strip()}
 
 
 def main():
@@ -66,6 +89,10 @@ def main():
     matcher = ms.TitleMatcher(db)
     build = time.time() - t
     slugs = [s for s in db.movies if db.movies[s].get('meta_fetched')]
+    if '--synth-duration' in sys.argv:
+        for _s in db.movies:
+            db.movies[_s]['duration'] = synth_duration(_s)
+        print("  (runtimes synthesised from the slug -- see synth_duration)")
     random.seed(1234)
     if len(slugs) > sample:
         slugs = random.sample(slugs, sample)
@@ -75,9 +102,9 @@ def main():
     totals = {}
     for slug in slugs:
         movie = db.movies[slug]
-        for kind, q in query_forms(slug, movie).items():
+        for kind, (q, kw) in query_forms(slug, movie).items():
             t = time.time()
-            hit = matcher.match(q)
+            hit = matcher.match(q, **kw)
             ms_per = (time.time() - t) * 1000
             st = totals.setdefault(kind, {'n': 0, 'ok': 0, 'dup': 0, 'bad': 0,
                                      'ms': 0.0, 'miss': []})

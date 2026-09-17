@@ -4568,9 +4568,14 @@ _HIGH55 = _msrc55.TitleMatcher.HIGH_CONFIDENCE_STRENGTH
 report(_mt55._signal_strength(['series', 'site']) < _HIGH55,
        "the near-free ('series','site') pair is NOT high confidence",
        f"{_mt55._signal_strength(['series','site'])} < {_HIGH55}")
-report(_mt55._signal_strength(['scene']) >= _HIGH55
-       and _mt55._signal_strength(['id', 'site']) >= _HIGH55,
-       'while the whole scene title, or an id corroborated by the site, is')
+# An id only exists on the creator's own site, so even corroborated by the
+# site name it is no longer allowed to carry a match by itself -- the name,
+# actors, series, date or runtime has to.
+report(_mt55._signal_strength(['scene']) >= _HIGH55,
+       'while the whole scene title is')
+report(_mt55._signal_strength(['id', 'site']) < _HIGH55,
+       'and a creator-site id, even with the site name, is not',
+       f"{_mt55._signal_strength(['id','site'])} < {_HIGH55}")
 # Video ids are only 5-6 digits, so an unrelated URL or filename carrying such
 # a number must NOT be enough to rename a row on its own.
 report(_msrc55.TitleMatcher._LONE_ID_STRENGTH < _HIGH55
@@ -4583,9 +4588,10 @@ report(_mt55._signal_strength(['model:a'] * 9)
        == _mt55._signal_strength(['model:a', 'model:b']),
        'model matches are capped, so cast size cannot outvote a video id',
        str(_mt55._signal_strength(['model:a'] * 9)))
-report(_W55['id'] > _W55['scene'] > _W55['date'] > _W55['model']
-       > _W55['series'] > _W55['scene_partial'] > _W55['site'],
-       'the weights are ordered by specificity', str(_W55))
+report(_W55['scene'] > _W55['duration'] > _W55['date'] > _W55['model']
+       >= _W55['id'] > _W55['series'] > _W55['scene_partial'] > _W55['site'],
+       'the weights are ordered by how well each survives being re-hosted',
+       str(_W55))
 
 _sib55 = next(r for s55, r in _mt55._records.items() if s55.startswith('253704'))
 _tgt55 = _mt55._records[_TARGET55]
@@ -4673,6 +4679,93 @@ report('signal_count", 0)) >= 2' not in _src55.replace(
 report('key=lambda item: (-item[1], item[0])' in _src55
        and 'item["strength"], -item["score"]' in _src55,
        'both ranking sorts carry an explicit deterministic tie-break')
+
+# ── 56. Metadata Linker: runtime is a criterion, a creator-site id is not ────
+# A video id only exists on the creator's own site. The links actually pasted
+# in -- pixeldrain, bunkr, gofile, tube mirrors -- carry neither one, so the
+# only criteria that survive re-hosting are name, actors, series, date and
+# runtime. 'duration' did not exist anywhere in the scraper or the shipped
+# data before this; 'id' was weighted 1.00 and dominated the ranking.
+print()
+print('56. Metadata Linker matches on runtime, and no longer on a creator-site id')
+
+report(_msrc55._duration_seconds(754) == 754 and _msrc55._duration_seconds(754000) == 754
+       and _msrc55._duration_seconds('12:34') == 754
+       and _msrc55._duration_seconds('1:02:03') == 3723
+       and _msrc55._duration_seconds('12m34s') == 754,
+       'a runtime is normalised from seconds, ms, mm:ss, hh:mm:ss and 12m34s')
+report(all(_msrc55._duration_seconds(v) == 0 for v in (None, '', 'abc', 0, True)),
+       'and unknown or non-numeric runtimes normalise to 0, never a false match')
+
+report(_msrc55._query_durations('Facials For My Stepsis 12:34') == {754}
+       and _msrc55._query_durations('scene [1:02:03] x264') == {3723},
+       'a runtime spelled out in a title or filename is read from the text')
+report(_msrc55._query_durations('movie.1080p.2020.mp4') == set(),
+       'but 1080p and a year are never mistaken for one')
+report(_msrc55._durations_agree(754, 760) and not _msrc55._durations_agree(754, 800)
+       and not _msrc55._durations_agree(0, 754),
+       'runtimes match within re-encode drift (10 s or 3%), and 0 never matches')
+
+# The case that justifies the criterion: same name, same actors, same series
+# and same date, so nothing but the runtime can separate them.
+_d56 = os.path.join(_tf55.mkdtemp(), 'dur56.json')
+_rows56 = {}
+for _sl56, _vid56, _dur56 in (('cut-scene-1', '111111', 754), ('full-scene-2', '222222', 1812)):
+    _rows56[_sl56] = {
+        'slug': _sl56, 'title': 'Facials For My Stepsis', 'series': 'NubilesPorn',
+        'series_url': '', 'series_slug': '', 'models': ['Axel Haze'], 'model_urls': [],
+        'model_details': [], 'date': '08/04/2026', 'published_date': '',
+        'published_date_iso': '', 'video_id': _vid56, 'type': 'video',
+        'url': f'https://nubiles-porn.com/video/watch/{_vid56}/x',
+        'source_site': '', 'source_name': '', 'duration': _dur56,
+        'scraped_at': '', 'meta_fetched': True,
+    }
+with open(_d56, 'w', encoding='utf-8') as _f56:
+    json.dump({'movies': _rows56}, _f56)
+_md56 = _msrc55.TitleMatcher(_msrc55.MetadataDB(_d56))
+_q56 = 'Facials For My Stepsis Axel Haze'
+_sig56 = _md56.match_candidates(_q56, limit=1, include_weak=True,
+                                duration_ms=1812000)[0]['signals']
+report('duration' in _sig56, 'a matching runtime raises a duration signal', str(_sig56))
+report(_md56.match(_q56, duration_ms=1812000)['slug'] == 'full-scene-2'
+       and _md56.match(_q56, duration_ms=754000)['slug'] == 'cut-scene-1',
+       'and picks the right scene when name, actors, series and date all tie',
+       f"{_md56.match(_q56, duration_ms=1812000)['slug']} / "
+       f"{_md56.match(_q56, duration_ms=754000)['slug']}")
+report(_md56.match(_q56 + ' 12:34')['slug'] == 'cut-scene-1',
+       'the same works from a runtime written into the filename itself')
+report(_md56._score(_q56, _msrc55._normalise(_q56), _msrc55._tokens(_q56), set(),
+                    _md56._records['full-scene-2'], {1812})
+       > _md56._score(_q56, _msrc55._normalise(_q56), _msrc55._tokens(_q56), set(),
+                      _md56._records['full-scene-2'], {754}),
+       'and the fuzzy score sees the runtime too, so it can rank on it')
+
+class _Player56:
+    def __init__(self):
+        self.video_durations = {'/a/x.mp4': 754000}
+        self._stream_resolution_cache = {'https://h/y': {'duration_ms': 1812000}}
+
+_p56 = _Player56()
+report(_msrc55._player_duration_ms(_p56, '/a/x.mp4') == 754000
+       and _msrc55._player_duration_ms(_p56, 'https://h/y') == 1812000
+       and _msrc55._player_duration_ms(_p56, '/a/unknown.mp4') == 0
+       and _msrc55._player_duration_ms(None, '/a/x.mp4') == 0,
+       "the linker reads the runtime the player already probed for that row")
+
+_W56 = _msrc55.TitleMatcher._SIGNAL_WEIGHTS
+report(_W56['duration'] > _W56['id'],
+       'runtime now outweighs the creator-site video id',
+       f"duration {_W56['duration']} > id {_W56['id']}")
+report(_W56['id'] < _msrc55.TitleMatcher.HIGH_CONFIDENCE_STRENGTH,
+       'and an id on its own can no longer auto-apply')
+
+_src56 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           'metadata_scraper.py'), encoding='utf-8').read()
+report('_duration_seconds(' in _src56.split('def _site_movie_from_entry')[1].split('def ')[0]
+       and '"duration":     _duration_seconds(data.get("duration"))' in _src56,
+       'both scrapers store a runtime, so the criterion has something to read')
+report(_src56.count('duration_ms=_player_duration_ms(self.player, fp)') == 1,
+       'and the linker passes each row runtime into the match')
 
 print()
 print('FAILURES:', FAILS)
