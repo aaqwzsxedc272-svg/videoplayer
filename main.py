@@ -9949,7 +9949,7 @@ class VideoPlayer(QMainWindow):
         self._hover_cover_poll_timer.stop()
         self._hover_cover_poll_tries = 0
         self._hover_cover_poll_path = None
-        if _cover64 is None and meta.get("image") and meta.get("image_live"):
+        if _cover62 is None and meta.get("image") and meta.get("image_live"):
             # No cover on disk yet, but there is a live URL and a download is
             # already on its way -- wait for it instead of showing nothing.
             self._hover_cover_poll_path = path
@@ -38257,11 +38257,11 @@ try {
             # hand it straight back as the playback URL, which mpv then
             # failed on three different ways down the load-failed ladder.
             _self_pages = [c for c in normalized_candidates
-                           if self._capture_candidate_is_source_page(c, source_url)]
+                           if self._capture_candidate_is_source_page(c, page_url)]
             if _self_pages:
                 normalized_candidates = [
                     c for c in normalized_candidates
-                    if not self._capture_candidate_is_source_page(c, source_url)]
+                    if not self._capture_candidate_is_source_page(c, page_url)]
                 print(f"[BROWSER_CLICK] dropped {len(_self_pages)} candidate(s) "
                       f"that are the source page itself: {_self_pages[0][:120]}")
 

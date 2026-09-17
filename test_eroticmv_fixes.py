@@ -3344,8 +3344,16 @@ report('and not (0.1 <= _measured_duration(url) < 45.0)' in _src44
 report('0.1 <= _measured_duration(c) < 20' not in _src44
        and '0.1 <= _m_dur < 20' not in _src44,
        'no 20-second ad ceiling left behind')
-report(_src44.count('self._capture_candidate_is_source_page(c, source_url)') >= 4,
-       'the source-page filter is wired into both ranking blocks')
+report(_src44.count('self._capture_candidate_is_source_page(c, ') >= 4,
+       'the source-page filter is wired into both ranking blocks',
+       str(_src44.count('self._capture_candidate_is_source_page(c, ')))
+# Two of those four passed a bare `source_url` that no enclosing scope bound --
+# the page URL is the parameter `page_url` there -- so the filter raised
+# NameError instead of filtering, and nothing caught it. Section 69 is what
+# keeps that from happening again.
+report(_src44.count('self._capture_candidate_is_source_page(c, page_url)') == 2
+       and _src44.count('self._capture_candidate_is_source_page(c, source_url)') == 2,
+       'and each block passes the page URL it actually has in scope')
 report("manifest captured and capture idle, closing browser" in _src44,
        'the idle-after-manifest browser close exists')
 report("_pw_manifest_at is not None\n                            and _now - _pw_last_line_at > 12" in _src44,
@@ -5798,6 +5806,100 @@ report('cover960.jpg' in str(_db68d.movies[_SLUG68].get('image') or ''),
 report(os.path.isfile(_f68),
        'either way the downloaded file survives, so pruning is not what empties '
        'the hover card')
+
+# ── 69. No name is read before it is bound ────────────────────────────────────
+# _show_hover_preview tested `_cover64 is None` where the function's own cover
+# variable is _cover62 -- a leftover of the scratch name used while writing the
+# cover poll. py_compile cannot see that: an unassigned name is a legal global
+# lookup right up until the line runs, so it shipped and raised NameError on
+# every single hover. A guard of mine did report the name and I deleted the
+# guard as a false positive instead of reading what it said. This checks every
+# name in the file rather than one.
+print()
+print('69. Nothing reads a name that is never bound anywhere')
+
+import builtins as _bi69
+import symtable as _st69
+
+_BI69 = set(dir(_bi69)) | {'__file__', '__name__', '__doc__', '__builtins__',
+                           '__spec__', '__package__', '__loader__'}
+
+
+def _undef69(src, name):
+    """Names read in a function but bound nowhere: not local, not a parameter,
+    not imported, not a closure cell, not a module global, not a builtin.
+    symtable files these as implicit globals, which is what a typo becomes."""
+    top = _st69.symtable(src, name, 'exec')
+    module = {s.get_name() for s in top.get_symbols()
+              if s.is_assigned() or s.is_imported()}
+    hits = []
+
+    def walk(t, qual):
+        if t.get_type() == 'function':
+            local = {s.get_name() for s in t.get_symbols()
+                     if s.is_assigned() or s.is_parameter() or s.is_imported()}
+            for s in t.get_symbols():
+                n = s.get_name()
+                if (s.is_referenced() and n not in local and not s.is_free()
+                        and n not in _BI69 and n not in module):
+                    hits.append(f'{n} in {qual}')
+        for c in t.get_children():
+            walk(c, qual + '.' + c.get_name())
+
+    walk(top, name)
+    return hits
+
+
+_msrc69 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'metadata_scraper.py'), encoding='utf-8').read()
+_bad69 = _undef69(SRC, 'main')
+report(not _bad69,
+       'main.py binds every name it reads, so a typo cannot take the hover card '
+       'down at runtime', '; '.join(_bad69[:6]))
+_bad69b = _undef69(_msrc69, 'metadata_scraper')
+report(not _bad69b,
+       'and neither does metadata_scraper.py', '; '.join(_bad69b[:6]))
+report(_undef69('def f(a):\n    x = 1\n    if _nope is None:\n        return x\n', 'p')
+       == ['_nope in p.f'],
+       'the check still fires on the bug it was written for, so it cannot rot '
+       'into a no-op')
+report('_cover64' not in SRC and '_cover62 is None' in _vsrc64('_show_hover_preview'),
+       'the cover poll reads the cover the function actually built')
+
+# ── 70. The real nubiles gallery page, as captured from the site ──────────────
+# nubiles.txt is the markup a Playwright session actually returns. Each card
+# carries its cover ONLY in data-srcset: src and data-src are both the same
+# inline-SVG placeholder. An extractor that read <img src> therefore found
+# nothing on any card, which is exactly what the full re-scrape of 2026-09-17
+# stored -- 5374 records, zero covers.
+print()
+print('70. The real nubiles gallery markup yields a cover for every card')
+
+_HTML70 = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nubiles.txt')
+report(os.path.isfile(_HTML70), 'the captured gallery page is present', _HTML70)
+_page70 = open(_HTML70, encoding='utf-8', errors='replace').read() if os.path.isfile(_HTML70) else ''
+_site70 = dict(_msrc55.METADATA_SITES['nubiles'])
+_site70['gallery_sources'] = [{
+    'id': 'nubilesporn', 'name': 'NubilesPorn',
+    'base_url': 'https://nubiles-porn.com',
+    'gallery_url': 'https://nubiles-porn.com/video/gallery',
+    'page_url_template': 'https://nubiles-porn.com/video/gallery/{offset}'}]
+_mv70 = _msrc55._gallery_movies_from_html(_page70, _site70) if _page70 else []
+_cov70 = [m for m in _mv70 if m.get('image')]
+report(bool(_mv70) and len(_cov70) == len(_mv70),
+       'every card on the page yields a cover', f'{len(_cov70)}/{len(_mv70)}')
+report(bool(_cov70) and all('/samples/cover960.jpg' in str(m['image']) for m in _cov70),
+       'and it is the widest of the three variants, not the 320 px one')
+report(bool(_cov70) and all(int(m.get('image_expires') or 0) > 0 for m in _cov70),
+       'each carrying the signature expiry its URL was minted with')
+report(bool(_cov70) and not any(str(m['image']).startswith('data:') for m in _cov70),
+       'and no card is handed the inline-SVG placeholder sitting in src')
+report(_msrc55._best_srcset_url(
+    'https://x/samples/cover320.jpg 320w,https://x/samples/cover960.jpg 960w,'
+).endswith('cover960.jpg'),
+       'a srcset resolves to its widest entry')
+report(_msrc55._best_srcset_url('https://x/shared/med.jpg') == 'https://x/shared/med.jpg',
+       'and an unlabelled one still resolves to its only URL')
 
 print()
 print('FAILURES:', FAILS)

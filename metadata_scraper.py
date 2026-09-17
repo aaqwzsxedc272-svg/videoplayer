@@ -1178,9 +1178,32 @@ _MD_IMG_RE = re.compile(r"!\[[^\]]*\]\((?P<src>https?://[^)\s]+)\)")
 # poster, and a CSS background as a last resort.
 _IMG_TAG_RE = re.compile(r"<(?:img|video|source)\b[^>]*>", re.IGNORECASE)
 _IMG_ATTR_RE = re.compile(
-    r"""\b(?:src|data-src|data-original|data-lazy-src|data-lazy|data-cfsrc|"""
+    r"""\b(?P<name>src|data-src|data-original|data-lazy-src|data-lazy|data-cfsrc|"""
     r"""data-srcset|srcset|poster)\s*=\s*["\'](?P<src>[^"\']+)["\']""",
     re.IGNORECASE)
+_SRCSET_ENTRY_RE = re.compile(r"^(?P<url>\S+)(?:\s+(?P<w>\d+)w)?", re.IGNORECASE)
+
+
+def _best_srcset_url(value: str) -> str:
+    """The widest URL in a srcset list, or its first when none are labelled.
+
+    The real nubiles card carries three variants in one data-srcset --
+    cover320, cover640 and cover960 -- so taking the first would cache a
+    320 px image for a card that is wider than that.
+    """
+    best_url, best_w = "", -1
+    for part in str(value or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        m = _SRCSET_ENTRY_RE.match(part)
+        if not m:
+            continue
+        url = m.group("url")
+        w = int(m.group("w") or 0)
+        if w > best_w:
+            best_url, best_w = url, w
+    return best_url
 _BG_URL_RE = re.compile(
     r"""background(?:-image)?\s*:\s*url\(\s*["\']?(?P<src>https?://[^"\')\s]+)""",
     re.IGNORECASE)
@@ -1195,8 +1218,10 @@ def _cover_url_candidates(region: str):
         out.append(match.group("src"))
     for tag in _IMG_TAG_RE.finditer(region):
         for attr in _IMG_ATTR_RE.finditer(tag.group(0)):
-            # srcset is a comma-separated list of "url width" candidates.
-            out.append(attr.group("src").split(",")[0].strip().split(" ")[0])
+            value = attr.group("src")
+            if str(attr.group("name") or "").lower().endswith("srcset"):
+                value = _best_srcset_url(value)
+            out.append(value)
     for bg in _BG_URL_RE.finditer(region):
         out.append(bg.group("src"))
     seen = set()
