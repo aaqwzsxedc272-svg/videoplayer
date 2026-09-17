@@ -57,6 +57,7 @@ REPTYLE_SOURCES = [
 ]
 DB_FILENAME          = "teamskeet_metadata.json"
 OVERRIDES_FILENAME   = "metadata_name_overrides.json"
+LINKS_FILENAME       = "metadata_links.json"
 MATCH_THRESHOLD      = 0.32
 SCRAPE_DELAY         = 0.8     # seconds between yt-dlp calls
 PAGE_DELAY           = 0.4     # seconds between listing page fetches
@@ -2477,7 +2478,9 @@ def init_metadata_scraper(player):
     player._metadata_dbs            = {}
     player._metadata_db             = _metadata_db_for_site(player, site)
     player._metadata_overrides_path = over_path
+    player._metadata_links_path     = os.path.join(app_dir, LINKS_FILENAME)
     player._metadata_name_overrides = {}
+    player._metadata_links          = {}
     player._meta_norm_path          = _meta_norm_path
     player._metadata_sites          = METADATA_SITES
     player._metadata_active_site    = DEFAULT_SITE_ID
@@ -2487,6 +2490,15 @@ def init_metadata_scraper(player):
         try:
             with open(over_path, "r", encoding="utf-8") as f:
                 player._metadata_name_overrides = json.load(f)
+        except Exception:
+            pass
+
+    if os.path.exists(player._metadata_links_path):
+        try:
+            with open(player._metadata_links_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    player._metadata_links = loaded
         except Exception:
             pass
 
@@ -2505,6 +2517,115 @@ def init_metadata_scraper(player):
     timer.timeout.connect(player._metadata_check_auto_update)
     timer.start()
     player._metadata_auto_update_timer = timer
+
+
+def _save_links(player):
+    try:
+        with open(player._metadata_links_path, "w", encoding="utf-8") as f:
+            json.dump(getattr(player, "_metadata_links", {}) or {}, f,
+                      ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[MetadataScraper] save links error: {e}")
+
+
+def _thumbnail_path_for_slug(player, site: dict, slug: str) -> str:
+    """The locally cached cover for a movie, if a scrape downloaded it."""
+    if not slug:
+        return ""
+    db_path = os.path.join(getattr(player, "data_dir", "")
+                           or os.path.dirname(os.path.abspath(__file__)),
+                           site.get("db_filename") or "")
+    folder = thumbnails_dir(db_path)
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", slug)
+    for ext in (".jpg", ".jpeg", ".png", ".webp"):
+        candidate = os.path.join(folder, safe + ext)
+        if os.path.isfile(candidate):
+            return candidate
+    return ""
+
+
+def preview_info_for_path(player, path: str) -> dict:
+    """Everything needed to preview a playlist row, from local data only.
+
+    Deliberately makes no network call: hover has to be instant, and the
+    signed cover/preview URLs minted during a scrape are dead within about
+    an hour anyway. Returns {} when the row is not linked to any movie.
+
+    Rows linked before metadata_links.json existed are recovered by matching
+    the saved display name back through the matcher, so previously renamed
+    rows preview too.
+    """
+    info: dict = {}
+    if player is None:
+        return info
+    norm = _meta_norm_path(path or "")
+    links = getattr(player, "_metadata_links", {}) or {}
+    link = links.get(norm) or links.get(_meta_norm_path(_unwrap_path(path or "")))
+
+    site = None
+    movie = None
+    if isinstance(link, dict) and link.get("slug"):
+        site = METADATA_SITES.get(link.get("site") or DEFAULT_SITE_ID)
+        if site:
+            db = _metadata_db_for_site(player, site)
+            movie = (getattr(db, "movies", {}) or {}).get(link["slug"])
+
+    if movie is None:
+        # Fall back to re-matching the stored display name.
+        name = str(_get_name_override(player, path) or "").strip()
+        if not name:
+            return info
+        cache = getattr(player, "_metadata_preview_matchers", None)
+        if cache is None:
+            cache = {}
+            player._metadata_preview_matchers = cache
+        for site_id, cand_site in METADATA_SITES.items():
+            try:
+                db = _metadata_db_for_site(player, cand_site)
+                if not db.count():
+                    continue
+                matcher = cache.get(site_id)
+                if matcher is None or matcher_db_sig(matcher) != _db_signature(db):
+                    matcher = TitleMatcher(db)
+                    matcher._sig = _db_signature(db)
+                    cache[site_id] = matcher
+                hit = matcher.match(name)
+            except Exception:
+                continue
+            if hit:
+                site, movie = cand_site, hit
+                break
+    if movie is None or site is None:
+        return info
+
+    now = time.time()
+    slug = str(movie.get("slug") or "")
+    thumb = _thumbnail_path_for_slug(player, site, slug)
+    image = str(movie.get("image") or "")
+    preview = str(movie.get("preview") or "")
+    img_exp = int(movie.get("image_expires") or 0)
+    prv_exp = int(movie.get("preview_expires") or 0)
+    info.update({
+        "slug":          slug,
+        "site":          site.get("id") or "",
+        "site_name":     site.get("name") or "",
+        "name":          format_display_name(movie),
+        "thumbnail":     thumb,
+        "image":         image,
+        "image_live":    bool(image) and img_exp > now,
+        "preview":       preview,
+        "preview_live":  bool(preview) and prv_exp > now,
+        "preview_url":   preview or preview_loop_url(movie.get("title") or "",
+                                                     movie.get("series") or ""),
+        "series":        movie.get("series") or "",
+        "models":        list(movie.get("models") or []),
+        "date":          movie.get("date") or "",
+    })
+    return info
+
+
+def matcher_db_sig(matcher) -> tuple:
+    return getattr(matcher, "_sig", ())
 
 
 def _save_overrides(player):
@@ -3228,6 +3349,20 @@ class MetadataScraperDialog(QDialog):
         target_key = old_key or self.player._meta_norm_path(file_path)
         self.player._metadata_name_overrides[target_key] = name
         _save_overrides(self.player)
+
+        # Remember WHICH movie this row was linked to, so the hover preview
+        # can find it without re-matching. Keyed the same way as the override.
+        try:
+            if not hasattr(self.player, "_metadata_links"):
+                self.player._metadata_links = {}
+            self.player._metadata_links[target_key] = {
+                "site": self.site.get("id") or DEFAULT_SITE_ID,
+                "slug": movie.get("slug") or "",
+                "name": name,
+            }
+            _save_links(self.player)
+        except Exception as e:
+            print(f"[MetadataScraper] link record error: {e}")
 
         # Record in rename undo stack & persist
         if not hasattr(self.player, "_rename_undo_stack"):

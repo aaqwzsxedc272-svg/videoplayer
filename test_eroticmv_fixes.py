@@ -4986,6 +4986,103 @@ report('preview' in _msrc55._MOVIE_KEEP_FIELDS
        and 'preview_expires' in _msrc55._MOVIE_KEEP_FIELDS,
        'and both survive the field trim')
 
+# ── 60. Instant hover preview for linked rows ────────────────────────────────
+# Hover must not touch the network: the signed cover/preview URLs minted
+# during a scrape die in about an hour. preview_info_for_path reads local
+# data only, and rows renamed before metadata_links.json existed are
+# recovered by matching the saved display name back through the matcher.
+print()
+print('60. Hover preview resolves a linked row from local data only')
+
+import shutil as _sh60
+
+_work60 = _tf55.mkdtemp()
+_sh60.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        'nubiles_metadata.json'),
+           os.path.join(_work60, 'nubiles_metadata.json'))
+
+
+class _Player60:
+    pass
+
+
+_p60 = _Player60()
+_p60.data_dir = _work60
+_p60._metadata_dbs = {}
+_p60._metadata_links = {}
+_p60._metadata_name_overrides = {}
+_p60._metadata_overrides_path = os.path.join(_work60, 'metadata_name_overrides.json')
+_p60._metadata_links_path = os.path.join(_work60, 'metadata_links.json')
+_p60._meta_norm_path = _msrc55._meta_norm_path
+
+_db60 = _msrc55._metadata_db_for_site(_p60, _msrc55.METADATA_SITES['nubiles'])
+_slug60 = '256294-stepmom-is-a-great-kisser-s27e1'
+_name60 = _msrc55.format_display_name(_db60.movies[_slug60])
+_row60 = 'https://pixeldrain.com/u/ksbtnekh'
+_key60 = _msrc55._meta_norm_path(_row60)
+
+report(_msrc55.preview_info_for_path(_p60, _row60) == {}
+       and _msrc55.preview_info_for_path(None, _row60) == {}
+       and _msrc55.preview_info_for_path(_p60, 'https://gofile.io/d/zzz') == {},
+       'an unlinked row, a missing player and an unknown row all yield nothing')
+
+# Legacy path: renamed before metadata_links.json existed, so only the
+# display name is on disk. It has to be recovered by re-matching.
+_p60._metadata_name_overrides[_key60] = _name60
+_leg60 = _msrc55.preview_info_for_path(_p60, _row60)
+report(_leg60.get('slug') == _slug60 and _leg60.get('site') == 'nubiles',
+       'a row renamed before links were recorded is recovered by re-matching '
+       'its saved display name', str(_leg60.get('slug')))
+report(_leg60.get('preview_url', '').endswith(
+           'momsteachsex_stepmom_is_a_great_kisser_loop_480.mp4'),
+       'and its preview loop path is derived from the recovered record')
+
+# New path: the linker recorded the movie it matched.
+_p60._metadata_links[_key60] = {'site': 'nubiles', 'slug': _slug60, 'name': _name60}
+os.makedirs(os.path.join(_work60, 'thumbnails'), exist_ok=True)
+_thumb60 = os.path.join(_work60, 'thumbnails', _slug60 + '.jpg')
+with open(_thumb60, 'wb') as _f60:
+    _f60.write(b'\xff\xd8' + b'0' * 900)
+_new60 = _msrc55.preview_info_for_path(_p60, _row60)
+report(_new60.get('slug') == _slug60 and _new60.get('thumbnail') == _thumb60
+       and os.path.isfile(_new60.get('thumbnail') or ''),
+       'a linked row resolves straight to its movie and its cached cover',
+       os.path.basename(_new60.get('thumbnail') or 'NONE'))
+report(_new60.get('name') == _name60 and _new60.get('site_name') == 'Nubiles-Porn',
+       'and carries the display name and network for the tooltip')
+report(_new60.get('image_live') is False and _new60.get('preview_live') is False,
+       'a signed URL past its expiry is reported as dead, not offered')
+
+import time as _t60
+_fut60 = int(_t60.time()) + 3600
+_db60.movies[_slug60]['preview'] = 'https://images.nubiles-porn.com/x.mp4?st=a&e=%d' % _fut60
+_db60.movies[_slug60]['preview_expires'] = _fut60
+report(_msrc55.preview_info_for_path(_p60, _row60).get('preview_live') is True,
+       'and one still inside its hour is reported as live')
+
+# The playlist side, checked structurally: main.py is too large to import.
+_main60 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'main.py'), encoding='utf-8').read()
+_ast60 = ast.parse(_main60)
+_cls60 = next(n for n in ast.walk(_ast60)
+              if isinstance(n, ast.ClassDef) and n.name == 'DraggableTableWidget')
+_meth60 = {n.name: n for n in _cls60.body if isinstance(n, ast.FunctionDef)}
+report('_schedule_metadata_hover' in _meth60
+       and '_show_metadata_hover_preview' in _meth60
+       and 'leaveEvent' in _meth60,
+       'the playlist widget grew hover-preview handlers')
+report('_schedule_metadata_hover' in ast.dump(_meth60['mouseMoveEvent']),
+       'and mouseMoveEvent schedules them while not dragging')
+report('setMouseTracking(True)' in ast.get_source_segment(_main60, _meth60['__init__']),
+       'hover works without a button held, because mouse tracking is on')
+report('preview_info_for_path' in ast.dump(
+           next(n for n in ast.walk(_ast60)
+                if isinstance(n, ast.ImportFrom) and n.module == 'metadata_scraper')),
+       'main.py imports the lookup rather than reimplementing it')
+report('QToolTip.showText' in ast.get_source_segment(_main60, _meth60['_show_metadata_hover_preview'])
+       and 'thumbnail' in ast.get_source_segment(_main60, _meth60['_show_metadata_hover_preview']),
+       'and the tooltip shows the cached cover image')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

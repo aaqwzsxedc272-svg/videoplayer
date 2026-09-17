@@ -215,7 +215,7 @@ for _f in _kb_pyc.glob('keybindings_dialog*.pyc') if _kb_pyc.exists() else []:
 from keybindings_dialog import KeybindingsEditorDialog
 from settings_dialog import SettingsDialog
 from metadata_scraper import (init_metadata_scraper, _metadata_context_menu_hook,
-                               _meta_norm_path)
+                               _meta_norm_path, preview_info_for_path)
 import socket
 import http.server
 import threading
@@ -1792,7 +1792,79 @@ class DraggableTableWidget(QTableWidget):
         # Enable context menu
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
-    
+
+        # Hover preview for rows renamed by the metadata linker. Local data
+        # only, so it is instant; see metadata_scraper.preview_info_for_path.
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
+        self._hover_preview_row = None
+        self._hover_preview_pos = QPoint(0, 0)
+        self._hover_preview_timer = QTimer(self)
+        self._hover_preview_timer.setSingleShot(True)
+        self._hover_preview_timer.setInterval(260)
+        self._hover_preview_timer.timeout.connect(self._show_metadata_hover_preview)
+
+    def _schedule_metadata_hover(self, pos):
+        """Start (or drop) the hover-preview timer for the row under pos."""
+        try:
+            row = self.rowAt(pos.y())
+        except Exception:
+            row = -1
+        if row < 0:
+            self._hover_preview_timer.stop()
+            if self._hover_preview_row is not None:
+                self._hover_preview_row = None
+                QToolTip.hideText()
+            return
+        self._hover_preview_pos = QPoint(pos)
+        if row != self._hover_preview_row:
+            self._hover_preview_row = row
+            self._hover_preview_timer.start()
+
+    def _show_metadata_hover_preview(self):
+        pp = self.parent_player
+        row = self._hover_preview_row
+        if pp is None or row is None or row < 0:
+            return
+        try:
+            path = pp.playlist[row]
+        except Exception:
+            return
+        try:
+            info = preview_info_for_path(pp, path) or {}
+        except Exception:
+            return
+        if not info:
+            return
+
+        def _esc(text):
+            return (str(text or "").replace("&", "&amp;").replace("<", "&lt;")
+                    .replace(">", "&gt;").replace('"', "&quot;"))
+
+        parts = []
+        thumb = info.get("thumbnail") or ""
+        if thumb and os.path.isfile(thumb):
+            parts.append(f'<img src="{QUrl.fromLocalFile(thumb).toString()}" width="360">')
+        if info.get("name"):
+            parts.append(f'<b>{_esc(info["name"])}</b>')
+        detail = []
+        if info.get("site_name"):
+            detail.append(_esc(info["site_name"]))
+        if info.get("slug"):
+            detail.append(_esc(info["slug"]))
+        if detail:
+            parts.append('<br>'.join(detail))
+        if info.get("preview_live"):
+            parts.append("<i>hover preview available</i>")
+        QToolTip.showText(self.viewport().mapToGlobal(self._hover_preview_pos),
+                          "<br>".join(parts), self)
+
+    def leaveEvent(self, event):
+        self._hover_preview_timer.stop()
+        self._hover_preview_row = None
+        QToolTip.hideText()
+        super().leaveEvent(event)
+
     def show_context_menu(self, position):
         """Show right-click context menu"""
         if not self.parent_player:
@@ -2019,6 +2091,7 @@ class DraggableTableWidget(QTableWidget):
             
             # Don't call super to avoid unwanted selection highlighting
             return
+        self._schedule_metadata_hover(event.position().toPoint())
         super().mouseMoveEvent(event)
     
     def mouseReleaseEvent(self, event):
