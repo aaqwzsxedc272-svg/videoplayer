@@ -5083,6 +5083,73 @@ report('QToolTip.showText' in ast.get_source_segment(_main60, _meth60['_show_met
        and 'thumbnail' in ast.get_source_segment(_main60, _meth60['_show_metadata_hover_preview']),
        'and the tooltip shows the cached cover image')
 
+# ── 61. Update stays cheap, and dead signed URLs are not hoarded ─────────────
+print()
+print('61. Update converges on the first pass and expired signed URLs are pruned')
+
+# A page of movies that are all already known must not count as changed, or
+# the "caught up" early-stop never fires and every Update crawls all 175
+# pages of all four gallery sources. Simulated against the shipped DB, whose
+# records carry no sources_seen at all.
+_real61 = _msrc55.MetadataDB(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                          'nubiles_metadata.json'))
+_by61 = {}
+for _k61, _m61 in _real61.movies.items():
+    _by61.setdefault(str(_m61.get('source_site')), []).append(_k61)
+report(sum(1 for _m in _real61.movies.values() if _m.get('sources_seen')) == 0,
+       'the shipped DB really has no sources_seen, so this is the live case')
+
+_movies61 = {k: dict(v) for k, v in _real61.movies.items()}
+_up61 = _dup61 = 0
+for _k61 in _by61['nubilefilms'][:50]:
+    _ex = _movies61[_k61]
+    _seen = _ex.get('sources_seen')
+    if _seen is None:
+        _seed = str(_ex.get('source_site') or 'nubilefilms')
+        _seen = [_seed] if _seed else []
+    else:
+        _seen = list(_seen)
+    if 'nubilefilms' not in _seen:
+        _up61 += 1
+    else:
+        _dup61 += 1
+report(_up61 == 0 and _dup61 == 50,
+       'a page of known movies is all duplicates, so page_changed stays False '
+       'and the early-stop can fire', f'{_up61} upserts / {_dup61} duplicates')
+
+_run61 = ast.get_source_segment(
+    open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                      'metadata_scraper.py'), encoding='utf-8').read(),
+    next(n for n in ast.walk(ast.parse(open(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), 'metadata_scraper.py'),
+        encoding='utf-8').read()))
+         if isinstance(n, ast.ClassDef) and n.name == 'NetworkGalleryScraper'))
+report('sources_seen' in _run61 and 'source_site' in _run61,
+       'the gallery loop backfills sources_seen from source_site so the '
+       'bookkeeping converges instead of being re-added every scrape')
+
+# A signed URL past its expiry 403s forever, so keeping it is dead weight:
+# about 280 bytes per record, which on a 45k-movie database is ~12 MB of
+# strings that can never be used again.
+_now61 = int(time.time())
+_p61 = os.path.join(_tf55.mkdtemp(), 'prune61.json')
+with open(_p61, 'w', encoding='utf-8') as _f61:
+    json.dump({'movies': {'x-1': {
+        'slug': 'x-1', 'title': 'T', 'series': 'S', 'models': ['A'],
+        'date': '08/04/2026', 'meta_fetched': True,
+        'image': 'https://i/c.jpg?st=a&e=%d' % (_now61 - 3600),
+        'image_expires': _now61 - 3600,
+        'preview': 'https://i/v.mp4?st=a&e=%d' % (_now61 + 3600),
+        'preview_expires': _now61 + 3600,
+    }}}, _f61)
+_db61 = _msrc55.MetadataDB(_p61)
+report('image' not in _db61.movies['x-1'] and 'image_expires' not in _db61.movies['x-1'],
+       'an expired signed cover URL is dropped on load')
+report('preview' in _db61.movies['x-1'] and 'preview_expires' in _db61.movies['x-1'],
+       'and one still inside its hour is kept')
+report(_msrc55.preview_loop_url('T', 'S').endswith('/videos/t/videos/loops/s_t_loop_480.mp4'),
+       'pruning the preview loses nothing -- the path is re-derivable')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

@@ -274,15 +274,29 @@ class MetadataDB:
                 pass
 
     def compact_records(self) -> int:
-        """Strip retired fields from every record in memory. Returns how many
-        records changed."""
+        """Strip retired fields and dead signed URLs. Returns how many records
+        changed."""
         movies = self._data.get("movies") or {}
+        now = time.time()
         changed = 0
         for slug, movie in list(movies.items()):
             if not isinstance(movie, dict):
                 continue
-            if len(movie) != len(_trim_movie(movie)):
-                movies[slug] = _trim_movie(movie)
+            trimmed = _trim_movie(movie)
+            # A signed cover/preview URL past its e= expiry returns 403
+            # forever, so keeping it is dead weight -- roughly 280 bytes per
+            # record, which on a 45k-movie database is ~12 MB of strings that
+            # can never be used. The cover survives as the file a scrape
+            # downloaded, and the preview path is re-derivable from title and
+            # series at any time via preview_loop_url().
+            for url_key, exp_key in (("image", "image_expires"),
+                                     ("preview", "preview_expires")):
+                exp = int(trimmed.get(exp_key) or 0)
+                if exp and exp < now:
+                    trimmed.pop(url_key, None)
+                    trimmed.pop(exp_key, None)
+            if trimmed != movie:
+                movies[slug] = trimmed
                 changed += 1
         return changed
 
@@ -1817,14 +1831,30 @@ class NetworkGalleryScraper(QThread):
                 for movie in movies:
                     existing = self.db.movies.get(movie["slug"])
                     if existing and existing.get("meta_fetched"):
-                        sources_seen = list(existing.get("sources_seen") or [])
                         src_id = source.get("id") or ""
+                        sources_seen = existing.get("sources_seen")
+                        if sources_seen is None:
+                            # Record predates the field (the DBs shipped
+                            # before it was on the keep-list). Seed it from
+                            # source_site so the bookkeeping converges
+                            # instead of being re-added on every scrape.
+                            seed = str(existing.get("source_site") or src_id or "")
+                            sources_seen = [seed] if seed else []
+                        else:
+                            sources_seen = list(sources_seen)
                         if src_id and src_id not in sources_seen:
                             existing = dict(existing)
                             sources_seen.append(src_id)
                             existing["sources_seen"] = sources_seen
                             self.db.upsert(existing)
-                            page_changed = True
+                            # Deliberately NOT page_changed. Recording which
+                            # source a known movie also appears on is
+                            # bookkeeping, not new content -- flagging it
+                            # meant a page of entirely-known movies still
+                            # counted as changed, so the "caught up - no new
+                            # listing metadata" early-stop could never fire
+                            # and every Update crawled all 175 pages of all
+                            # four sources.
                         else:
                             duplicate_count += 1
                         continue
