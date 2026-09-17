@@ -6003,6 +6003,154 @@ report(_run71.count('referer=src_referer') == 2,
        'both gallery cover saves pass the network referer through',
        str(_run71.count('referer=src_referer')))
 
+# ── 72. A nubiles preview outlives the hour its signature lives ───────────────
+# The real gallery page carries a signed loop for 10 of its 12 cards, so the
+# preview was always obtainable -- but the signature dies in about an hour,
+# which is why nubiles rows had nothing to play while TeamSkeet's unsigned
+# trailer played forever. The loop is now cached on disk like the cover, and
+# re-minted from the watch page once the stored signature has expired.
+print()
+print('72. A nubiles preview is cached, so it outlives its signature')
+
+# Access through these so a falsification run against a build without the
+# preview cache reports its failures instead of aborting on the first one.
+def _slu72(html, hint=''):
+    fn = getattr(_msrc55, 'signed_loop_url', None)
+    return fn(html, hint) if fn else None
+
+
+def _sp72(*a, **k):
+    fn = getattr(_msrc55, 'save_preview', None)
+    return fn(*a, **k) if fn else ''
+
+
+def _pd72(db_path):
+    fn = getattr(_msrc55, 'previews_dir', None)
+    return fn(db_path) if fn else ''
+
+
+
+_mv72 = _msrc55._gallery_movies_from_html(_page70, _site70) if _page70 else []
+_loops72 = [m for m in _mv72 if m.get('preview')]
+report(len(_mv72) == 12 and len(_loops72) == 10,
+       'the real gallery page carries a signed loop for the cards that have one',
+       f'{len(_loops72)} of {len(_mv72)}')
+report(bool(_mv72) and all(
+    _slu72(_page70, m.get('title')) == str(m.get('preview') or '')
+    for m in _mv72),
+       'and re-minting from a page reproduces exactly the loop the scrape stored')
+report(bool(_mv72) and all(
+    _slu72(_page70, m.get('title')) == ''
+    for m in _mv72 if not m.get('preview')),
+       "a card with no loop yields nothing rather than another scene's clip")
+_ONE72 = ('https://images.nubiles-porn.com/videos/only_this_one/videos/loops/'
+          'series_only_this_one_loop_480.mp4?st=A&e=9999999999')
+report(_slu72(f'<x data-src="{_ONE72}">', 'Only This One') == _ONE72
+       and _slu72(f'<x data-src="{_ONE72}">', 'Some Other Scene') == '',
+       'the hint is a hard filter, so caching the wrong scene is not possible')
+
+
+class _P72:
+    def __init__(self, data_dir):
+        self.data_dir = data_dir
+        self._metadata_links = {}
+
+
+def _fakecurl72(content, status=200):
+    class _R:
+        status_code = status
+    _R.content = content
+    mod = _types55.ModuleType('curl_cffi')
+    mod.requests = _types55.SimpleNamespace(
+        get=lambda url, headers=None, timeout=None, impersonate=None: _R)
+    return mod
+
+
+_LOOPBYTES72 = b'\x00\x00\x00\x18ftypmp42' + b'0' * 9000
+_saved72 = _sys55.modules.get('curl_cffi')
+try:
+    _sys55.modules['curl_cffi'] = _fakecurl72(_LOOPBYTES72)
+    # The path is derived from the site's db_filename, not chosen here.
+    _dbp72 = os.path.join(_tf55.mkdtemp(),
+                          _msrc55.METADATA_SITES['nubiles']['db_filename'])
+    _p72 = _sp72(_dbp72, 'pv72-slug', _ONE72,
+                                referer='https://nubiles-porn.com/')
+    report(bool(_p72) and os.path.isfile(_p72) and _p72.endswith('.mp4'),
+           'a loop is written under previews/ next to the database',
+           os.path.basename(_p72) if _p72 else 'NOT SAVED')
+    report(_pd72(_dbp72).endswith('previews'),
+           'in its own folder, not mixed in with the covers')
+    _tiny72 = []
+    _sys55.modules['curl_cffi'] = _fakecurl72(b'nope')
+    report(_sp72(_dbp72, 'pv72-tiny', _ONE72, diag=_tiny72) == '',
+           'a stub or an error page is not cached as a video', str(_tiny72))
+    _sys55.modules['curl_cffi'] = _fakecurl72(b'0' * (26 * 1024 * 1024))
+    _big72 = []
+    report(_sp72(_dbp72, 'pv72-big', _ONE72, diag=_big72) == '',
+           'and neither is a whole scene mistaken for a loop', str(_big72))
+
+    # A row whose loop is already on disk: the hover must be handed the file,
+    # not the dead signed URL.
+    _dir72 = os.path.dirname(_dbp72)
+    with open(_dbp72, 'w', encoding='utf-8') as f:
+        json.dump({'movies': {
+            '256652-stepmom-is-a-great-kisser': {
+                'slug': '256652-stepmom-is-a-great-kisser',
+                'title': 'Stepmom Is A Great Kisser', 'series': 'MomsTeachSex',
+                'models': [], 'date': '16/09/2026', 'video_id': '256652',
+                'meta_fetched': True,
+                'url': 'https://nubiles-porn.com/video/watch/256652/x'},
+            '256653-no-loop-here': {
+                'slug': '256653-no-loop-here', 'title': 'No Loop Here',
+                'series': 'MomsTeachSex', 'models': [], 'date': '16/09/2026',
+                'video_id': '256653', 'meta_fetched': True,
+                'url': 'https://nubiles-porn.com/video/watch/256653/y'},
+        }}, f)
+    _pvdir72 = _pd72(_dbp72)
+    if _pvdir72:
+        os.makedirs(_pvdir72, exist_ok=True)
+        with open(os.path.join(_pvdir72,
+                               '256652-stepmom-is-a-great-kisser.mp4'), 'wb') as f:
+            f.write(_LOOPBYTES72)
+    _pl72 = _P72(_dir72)
+    _row72 = 'https://watchporn.to/video/39488/some-row/'
+    _pl72._metadata_links[_msrc55._meta_norm_path(_row72)] = {
+        'site': 'nubiles', 'slug': '256652-stepmom-is-a-great-kisser'}
+    _info72 = _msrc55.preview_info_for_path(_pl72, _row72)
+    report(str(_info72.get('preview_local') or '').endswith('.mp4'),
+           'a hover on that row is handed the cached loop',
+           os.path.basename(str(_info72.get('preview_local'))))
+    report(not _info72.get('preview_live') and bool(_info72.get('preview_local')),
+           'so a row whose signature has expired still previews')
+
+    _calls72 = []
+    _orig72 = _msrc55._fetch_html
+    _msrc55._fetch_html = lambda url, timeout=20: (
+        _calls72.append(url), '<html>no loops here</html>')[1]
+    try:
+        _row72b = 'https://watchporn.to/video/1/no-loop/'
+        _pl72._metadata_links[_msrc55._meta_norm_path(_row72b)] = {
+            'site': 'nubiles', 'slug': '256653-no-loop-here'}
+        _msrc55.preview_info_for_path(_pl72, _row72b)
+        _msrc55.preview_info_for_path(_pl72, _row72b)
+        time.sleep(0.5)
+        report(len(_calls72) == 1,
+               'a row that turns out to have no loop is fetched once, not on '
+               'every hover', f'{len(_calls72)} fetch(es)')
+    finally:
+        _msrc55._fetch_html = _orig72
+finally:
+    if _saved72 is None:
+        _sys55.modules.pop('curl_cffi', None)
+    else:
+        _sys55.modules['curl_cffi'] = _saved72
+
+_clip72 = _vsrc64('_start_metadata_hover_clip')
+report('preview_local' in _clip72 and 'fromLocalFile' in _clip72,
+       'the card plays the cached file ahead of a signed URL')
+report('preview_live' in _clip72 and 'preview_url' in _clip72,
+       'and still falls back to a signed URL while it is alive')
+
 print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

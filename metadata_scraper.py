@@ -1288,6 +1288,35 @@ def preview_loop_url(title: str, series: str, height: int = 480) -> str:
     return f"https://images.nubiles-porn.com/videos/{t}/videos/loops/{name}"
 
 
+_SIGNED_LOOP_RE = re.compile(
+    r"""https?://[^"'\s)<>]+?/loops/[^"'\s)<>]+?\.mp4(?:\?[^"'\s)<>]*)?""",
+    re.IGNORECASE)
+
+
+def signed_loop_url(html: str, hint: str = "") -> str:
+    """The signed preview loop in a page, '' if there is none.
+
+    The gallery carries one per card in a data-* attribute, and a watch page
+    mints a fresh signature for the same asset -- which is how a preview is
+    recovered once the signature a scrape stored has expired.
+
+    `hint` is a title or series. When it is given it is a hard filter, not a
+    preference: two of every twelve gallery cards have no loop at all, and
+    falling back to the longest-lived loop on the page would cache another
+    scene's clip against this row.
+    """
+    needle = _cdn_folder_name(hint) if hint else ""
+    best, best_exp = "", -1
+    for match in _SIGNED_LOOP_RE.finditer(html or ""):
+        url = html_unescape(match.group(0))
+        if needle and needle not in url.lower():
+            continue
+        exp = _image_expiry_epoch(url)
+        if exp > best_exp:
+            best, best_exp = url, exp
+    return best
+
+
 def _gallery_preview_video(html: str, title_start: int, window: int = 4000) -> str:
     """The hover-preview mp4 for a card, from the markup just before its title.
 
@@ -1384,6 +1413,65 @@ def save_thumbnail(db_path: str, slug: str, url: str, referer: str = "",
     if m:
         ext = "." + m.group(1).lower().replace("jpeg", "jpg")
     dest_dir = thumbnails_dir(db_path)
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, re.sub(r"[^A-Za-z0-9._-]", "_", slug) + ext)
+        with open(dest, "wb") as f:
+            f.write(data)
+        return dest
+    except Exception:
+        return ""
+
+
+# A nubiles loop is a few seconds of 480p, so a couple of megabytes. Anything
+# much larger means the URL was not a loop, and pulling a whole scene down on a
+# hover is not what was asked for.
+_PREVIEW_MAX_BYTES = 25 * 1024 * 1024
+
+
+def previews_dir(db_path: str) -> str:
+    base = os.path.dirname(os.path.abspath(db_path or "")) or "."
+    return os.path.join(base, "previews")
+
+
+def _preview_path_for_slug(player, site: dict, slug: str) -> str:
+    """The locally cached preview loop for a movie, if one was downloaded."""
+    if not slug:
+        return ""
+    folder = previews_dir(_db_path_for_site(player, site))
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", slug)
+    for ext in (".mp4", ".webm", ".m4v"):
+        candidate = os.path.join(folder, safe + ext)
+        if os.path.isfile(candidate):
+            return candidate
+    return ""
+
+
+def save_preview(db_path: str, slug: str, url: str, referer: str = "",
+                 diag: list | None = None) -> str:
+    """Download a preview loop now, while its signature is valid.
+
+    Returns the local path, or '' if it could not be saved. The signed URL
+    dies in about an hour, so the file is the only durable copy -- the same
+    trade the cover makes, and the only way a nubiles hover can show a clip
+    more than an hour after the scrape that found it.
+    """
+    if not url or not slug:
+        return ""
+    data = _fetch_bytes(url, referer=referer, diag=diag)
+    if len(data) < 4096:
+        if diag is not None and (not diag or diag[-1] == "HTTP 200"):
+            diag.append(f"{len(data)} byte(s)")
+        return ""
+    if len(data) > _PREVIEW_MAX_BYTES:
+        if diag is not None:
+            diag.append(f"not a loop ({len(data)} bytes)")
+        return ""
+    ext = ".mp4"
+    m = re.search(r"\.(mp4|webm|m4v)(?:[?#]|$)", url, re.IGNORECASE)
+    if m:
+        ext = "." + m.group(1).lower()
+    dest_dir = previews_dir(db_path)
     try:
         os.makedirs(dest_dir, exist_ok=True)
         dest = os.path.join(dest_dir, re.sub(r"[^A-Za-z0-9._-]", "_", slug) + ext)
@@ -2879,6 +2967,101 @@ def ensure_thumbnail_async(player, site: dict, slug: str, url: str) -> bool:
     return True
 
 
+_PREVIEW_INFLIGHT: set = set()
+_PREVIEW_LOCK = threading.Lock()
+
+
+def ensure_preview_async(player, site: dict, slug: str, url: str) -> bool:
+    """Cache a preview loop in the background while its signature is alive.
+
+    The hover plays the signed URL itself the first time; this makes every
+    later hover instant and permanent, since the URL is dead within an hour.
+    Concurrent requests for the same loop are collapsed.
+    """
+    if not url or not slug or player is None:
+        return False
+    key = ((site or {}).get("id"), slug)
+    with _PREVIEW_LOCK:
+        if key in _PREVIEW_INFLIGHT:
+            return False
+        _PREVIEW_INFLIGHT.add(key)
+    db_path = _db_path_for_site(player, site)
+    referer = _referer_for(site)
+
+    def _work():
+        diag: list = []
+        try:
+            local = save_preview(db_path, slug, url, referer=referer, diag=diag)
+            print(f"[PREVIEW] {slug}: cached {os.path.basename(local)}" if local
+                  else f"[PREVIEW] {slug}: cache failed "
+                       f"({'; '.join(diag) or 'no data'})")
+        except Exception as exc:
+            print(f"[PREVIEW] {slug}: {type(exc).__name__}: {exc}")
+        finally:
+            with _PREVIEW_LOCK:
+                _PREVIEW_INFLIGHT.discard(key)
+
+    threading.Thread(target=_work, daemon=True).start()
+    return True
+
+
+def refresh_preview_async(player, site: dict, slug: str, movie: dict) -> bool:
+    """Re-mint an expired preview signature and cache the loop.
+
+    A stored nubiles loop URL is dead within about an hour, so an hour after
+    the scrape there is nothing to play. The movie's own watch page mints a
+    fresh signature for the same asset, so one background fetch turns a row
+    that will never preview into one that previews from disk forever.
+    """
+    page_url = str((movie or {}).get("url") or "")
+    if not page_url or not slug or player is None:
+        return False
+    # Two of every twelve gallery cards have no loop at all. Remembering the
+    # ones that turned out not to is what stops a hover from fetching the same
+    # watch page every single time the pointer crosses that row.
+    misses = getattr(player, "_metadata_preview_misses", None)
+    if misses is None:
+        misses = set()
+        try:
+            player._metadata_preview_misses = misses
+        except Exception:
+            misses = None
+    if misses is not None and slug in misses:
+        return False
+    key = ((site or {}).get("id"), slug)
+    with _PREVIEW_LOCK:
+        if key in _PREVIEW_INFLIGHT:
+            return False
+        _PREVIEW_INFLIGHT.add(key)
+    db_path = _db_path_for_site(player, site)
+    referer = _referer_for(site)
+    hint = str((movie or {}).get("title") or "") or str((movie or {}).get("series") or "")
+
+    def _work():
+        try:
+            page = _fetch_html(page_url) or ""
+            fresh = signed_loop_url(page, hint)
+            if not fresh:
+                if misses is not None:
+                    misses.add(slug)
+                print(f"[PREVIEW] {slug}: no signed loop on its watch page")
+                return
+            diag: list = []
+            local = save_preview(db_path, slug, fresh, referer=referer, diag=diag)
+            print(f"[PREVIEW] {slug}: re-minted and cached {os.path.basename(local)}"
+                  if local else
+                  f"[PREVIEW] {slug}: re-mint download failed "
+                  f"({'; '.join(diag) or 'no data'})")
+        except Exception as exc:
+            print(f"[PREVIEW] {slug}: {type(exc).__name__}: {exc}")
+        finally:
+            with _PREVIEW_LOCK:
+                _PREVIEW_INFLIGHT.discard(key)
+
+    threading.Thread(target=_work, daemon=True).start()
+    return True
+
+
 def _thumbnail_path_for_slug(player, site: dict, slug: str) -> str:
     """The locally cached cover for a movie, if a scrape downloaded it."""
     if not slug:
@@ -2958,6 +3141,19 @@ def preview_info_for_path(player, path: str) -> dict:
     trailer = str(movie.get("trailer_url") or "")
     img_exp = int(movie.get("image_expires") or 0)
     prv_exp = int(movie.get("preview_expires") or 0)
+    preview_local = _preview_path_for_slug(player, site, slug)
+    if not preview_local and str(site.get("id") or "") != "teamskeet":
+        # A nubiles loop is signed for about an hour, so the downloaded file is
+        # the only durable copy -- the same trade the cover makes. A URL that
+        # is still alive is played as-is and cached on the side; one that has
+        # expired is re-minted from the movie's watch page. Both run on a
+        # daemon thread, so the hover itself never waits on the network.
+        # TeamSkeet's trailer is unsigned and permanent, so it needs none of
+        # this and is left alone.
+        if preview and prv_exp > now:
+            ensure_preview_async(player, site, slug, preview)
+        else:
+            refresh_preview_async(player, site, slug, movie)
     # A stored preview is a real asset; TeamSkeet keeps one per scene. The
     # loop URL derived from title+series is nubiles-shaped and only locates
     # the asset (unsigned it 403s), so it must never be invented for a
@@ -2984,6 +3180,9 @@ def preview_info_for_path(player, path: str) -> dict:
         # reads as live -- it is a permanent asset, not a signed one.
         "preview_live":  bool(preview or trailer) and (prv_exp == 0 or prv_exp > now),
         "preview_url":   preview_url,
+        # The cached loop on disk, if one was ever downloaded. Unlike
+        # preview_url this never expires, so it is what the card should play.
+        "preview_local": preview_local,
         "series":        movie.get("series") or "",
         "models":        list(movie.get("models") or []),
         "date":          movie.get("date") or "",
