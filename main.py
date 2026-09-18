@@ -7487,6 +7487,11 @@ class VideoPlayer(QMainWindow):
         self._hover_clip_timer.setSingleShot(True)
         self._hover_clip_timer.setInterval(6000)
         self._hover_clip_timer.timeout.connect(self._abandon_hover_clip)
+        # Runs after the swap: the clip either plays, or the cover comes back.
+        self._hover_clip_watchdog = QTimer(self)
+        self._hover_clip_watchdog.setSingleShot(True)
+        self._hover_clip_watchdog.setInterval(2500)
+        self._hover_clip_watchdog.timeout.connect(self._check_hover_clip_started)
         self._hover_clip_wanted = False
         self._hover_clip_ready = False
         # The cover is held on screen for this long before the clip takes
@@ -9274,16 +9279,37 @@ class VideoPlayer(QMainWindow):
         self.hover_preview_image.hide()
         self.hover_preview_video.show()
         try:
-            # From the top: a swap can happen after the clip already ran, and
-            # re-asserting the loop count costs nothing.
-            self._hover_clip_player.setPosition(0)
-            try:
-                self._hover_clip_player.setLoops(-1)
-            except Exception:
-                pass
+            # Plain play(). Seeking here looked harmless and was not: at this
+            # point the player has parsed the header but not opened the stream,
+            # and setPosition(0) on the FFmpeg backend aborts the open --
+            # "Immediate exit requested", "partial file", "Demuxing failed" --
+            # leaving the video surface up and showing nothing. The loop is
+            # driven from EndOfMedia instead, where a seek is safe.
             self._hover_clip_player.play()
         except Exception:
             self._abandon_hover_clip()
+        self._hover_clip_watchdog.start()
+
+    def _check_hover_clip_started(self):
+        """Never leave a black rectangle where the cover was.
+
+        Swapping to the video surface hides the cover, so a clip that parses
+        its header and then fails to demux shows nothing at all. Ask whether
+        anything is actually playing, and hand the cover back if not.
+        """
+        if not (self._hover_clip_wanted and self._hover_clip_ready):
+            return
+        playing = False
+        try:
+            playing = (self._hover_clip_player is not None
+                       and self._hover_clip_player.playbackState()
+                       == QMediaPlayer.PlaybackState.PlayingState)
+        except Exception:
+            playing = False
+        if playing:
+            return
+        print("[HOVER] clip never started playing, keeping the cover instead")
+        self._abandon_hover_clip()
 
     def _abandon_hover_clip(self):
         """No clip: keep the cover up, which is why it is painted first."""
@@ -9291,6 +9317,8 @@ class VideoPlayer(QMainWindow):
         self._hover_clip_ready = False
         self._hover_cover_hold_timer.stop()
         self._hover_clip_timer.stop()
+        if hasattr(self, '_hover_clip_watchdog'):
+            self._hover_clip_watchdog.stop()
         self._stop_clip_playback()
         self.hover_preview_video.hide()
         if self._hover_preview_frames:

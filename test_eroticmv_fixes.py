@@ -7516,19 +7516,58 @@ class _MS83:
     InvalidMedia = 'InvalidMedia'
 
 
+class _PS83:
+    StoppedState = 'StoppedState'
+    PlayingState = 'PlayingState'
+    PausedState = 'PausedState'
+
+
 class _QMP83:
     MediaStatus = _MS83
+    PlaybackState = _PS83
 
 
 class _Player83:
     def __init__(self):
         self.calls = []
+        self.state = _PS83.PlayingState
 
     def setPosition(self, v):
         self.calls.append(('setPosition', v))
 
     def play(self):
         self.calls.append(('play',))
+
+    def playbackState(self):
+        return self.state
+
+
+class _Hold83:
+    def __init__(self, active=False):
+        self._active = active
+        self.stopped = 0
+
+    def isActive(self):
+        return self._active
+
+    def stop(self):
+        self.stopped += 1
+        self._active = False
+
+    def start(self, *a):
+        self._active = True
+
+
+class _W83:
+    def __init__(self):
+        self.hidden = 0
+        self.shown = 0
+
+    def hide(self):
+        self.hidden += 1
+
+    def show(self):
+        self.shown += 1
 
 
 class _Timer83:
@@ -7545,22 +7584,35 @@ class _Clip83:
         self._hover_clip_ready = True
         self._hover_clip_player = _Player83()
         self._hover_clip_timer = _Timer83()
+        self._hover_cover_hold_timer = _Hold83(False)
+        self._hover_cover_poll_timer = _Timer83()
+        self._hover_clip_watchdog = _Hold83(False)
+        self.hover_preview_image = _W83()
+        self.hover_preview_video = _W83()
         self.events = []
 
-    def _swap_to_hover_clip(self):
-        self.events.append('swap')
-
+    # No stub for _swap_to_hover_clip: the real one is bound below, so a fake
+    # here would just be shadowed and quietly stop proving anything.
     def _abandon_hover_clip(self):
         self.events.append('abandon')
 
 
 _Clip83._on_hover_clip_status = _vfn83('_on_hover_clip_status')
 _Clip83._restart_hover_clip = _vfn83('_restart_hover_clip')
+_Clip83._swap_to_hover_clip = _vfn83('_swap_to_hover_clip')
+_Clip83._check_hover_clip_started = _vfn83('_check_hover_clip_started')
 
-_have83 = (_Clip83._on_hover_clip_status is not None
-           and _Clip83._restart_hover_clip is not None)
-report(_have83, 'the clip status handler and its restart path are in main.py',
-       'missing one of _on_hover_clip_status / _restart_hover_clip')
+# Gated separately on purpose. One gate for the whole section meant that a
+# missing watchdog silently skipped the swap test too -- and the swap is the
+# one that regressed into the black screen, so it has to fail on its own.
+_core83 = ('_on_hover_clip_status', '_restart_hover_clip', '_swap_to_hover_clip')
+_have83 = all(getattr(_Clip83, n, None) is not None for n in _core83)
+report(_have83, 'the clip status, swap and restart paths are in main.py',
+       'missing: ' + ', '.join(n for n in _core83
+                               if getattr(_Clip83, n, None) is None))
+_have_watch83 = getattr(_Clip83, '_check_hover_clip_started', None) is not None
+report(_have_watch83,
+       'and there is a watchdog to give the cover back when a clip fails')
 
 if _have83:
     _c83 = _Clip83()
@@ -7574,10 +7626,14 @@ if _have83:
     _c83 = _Clip83()
     _c83._hover_clip_ready = False
     _c83._on_hover_clip_status(_MS83.EndOfMedia)
-    report(_c83.events == ['swap'] and _c83._hover_clip_ready is True,
+    report(_c83._hover_clip_ready is True
+           and _c83.hover_preview_video.shown == 1
+           and _c83._hover_clip_player.calls == [('play',)],
        'and a clip that runs out before the cover hold is up is taken as '
-       'ready and started from the top rather than dropped',
-       f'{_c83.events}, ready={_c83._hover_clip_ready}')
+       'ready and swapped in rather than dropped',
+       f'ready={_c83._hover_clip_ready}, '
+       f'surface shown={_c83.hover_preview_video.shown}, '
+       f'{_c83._hover_clip_player.calls}')
 
     _c83 = _Clip83()
     _c83._on_hover_clip_status(_MS83.InvalidMedia)
@@ -7597,9 +7653,49 @@ if _have83:
     _c83._on_hover_clip_status(_MS83.EndOfMedia)
     report(True, 'a restart with no player left is a no-op rather than a crash')
 
-    _swap83 = _fn_body(SRC, '    def _swap_to_hover_clip(')
-    report('setPosition(0)' in _swap83 and 'setLoops(-1)' in _swap83,
-       'the swap itself starts at the top and re-asserts the loop count')
+    # The swap must hand the stream to play() and nothing else. A seek here
+    # aborts the open on the FFmpeg backend, which is what the black screen was.
+    _c83 = _Clip83()
+    _c83._swap_to_hover_clip()
+    report(_c83._hover_clip_player.calls == [('play',)],
+       'the swap asks for playback and does not seek -- setPosition(0) at this '
+       'point aborts the open ("Immediate exit requested", "partial file", '
+       '"Demuxing failed") and leaves the video surface showing nothing',
+       str(_c83._hover_clip_player.calls))
+    report(_c83.hover_preview_image.hidden == 1
+           and _c83.hover_preview_video.shown == 1,
+       'and it really does put the clip surface up in place of the cover')
+    report(_c83._hover_clip_watchdog.isActive(),
+       'a watchdog is armed at the swap, so a clip that parses and then fails '
+       'cannot leave a black rectangle behind')
+
+if _have_watch83:
+    _c83 = _Clip83()
+    _c83._hover_clip_player.state = _PS83.StoppedState
+    _c83._check_hover_clip_started()
+    report(_c83.events == ['abandon'],
+       'a clip that never reached PlayingState gives the cover back',
+       str(_c83.events))
+
+    _c83 = _Clip83()
+    _c83._hover_clip_player.state = _PS83.PlayingState
+    _c83._check_hover_clip_started()
+    report(_c83.events == [],
+       'and one that is playing is left alone', str(_c83.events))
+
+    _c83 = _Clip83()
+    _c83._hover_clip_player = None
+    _c83._check_hover_clip_started()
+    report(_c83.events == ['abandon'],
+       'a released player counts as not playing rather than raising',
+       str(_c83.events))
+
+    _c83 = _Clip83()
+    _c83._hover_clip_wanted = False
+    _c83._hover_clip_player.state = _PS83.StoppedState
+    _c83._check_hover_clip_started()
+    report(_c83.events == [],
+       'once the card is gone the watchdog does nothing', str(_c83.events))
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
