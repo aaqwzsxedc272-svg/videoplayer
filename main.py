@@ -6733,7 +6733,11 @@ class VideoPlayer(QMainWindow):
     # How long the scene cover stays on screen in the hover card before the
     # clip takes over. Buffering runs during the hold, so this is purely how
     # long the cover is visible, not added latency before the clip.
-    HOVER_COVER_HOLD_MS = 700
+    HOVER_COVER_HOLD_MS = 1000
+    # Card width. Fixed rather than derived from the pixmap, so positioning
+    # never depends on what has been painted yet.
+    HOVER_PREVIEW_W = 340
+    HOVER_PREVIEW_MEDIA_H = 190
 
     video_info_updated = pyqtSignal(str, float, float)
     stream_resolved = pyqtSignal(str, object)
@@ -7447,15 +7451,17 @@ class VideoPlayer(QMainWindow):
         self.hover_preview_layout.setSpacing(6)
         self.hover_preview_image = QLabel(self.hover_preview)
         self.hover_preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hover_preview_image.setMinimumWidth(220)
+        self.hover_preview_image.setFixedWidth(self.HOVER_PREVIEW_W - 16)
         self.hover_preview_text = QLabel(self.hover_preview)
         self.hover_preview_text.setWordWrap(True)
         self.hover_preview_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self.hover_preview_text.setMaximumWidth(280)
+        self.hover_preview_text.setFixedWidth(self.HOVER_PREVIEW_W - 16)
         # The scene's own clip, played inside this same card rather than in a
         # second popup. Hidden until the media is buffered, so the cover is
         # what you see first.
         self.hover_preview_video = QVideoWidget(self.hover_preview)
+        self.hover_preview_video.setFixedSize(self.HOVER_PREVIEW_W - 16,
+                                              self.HOVER_PREVIEW_MEDIA_H)
         self.hover_preview_video.hide()
         self.hover_preview_layout.addWidget(self.hover_preview_video)
         self.hover_preview_layout.addWidget(self.hover_preview_image)
@@ -8959,22 +8965,29 @@ class VideoPlayer(QMainWindow):
     def _move_preview_widget(self, global_pos):
         if not hasattr(self, 'hover_preview'):
             return
-        # The very first time this runs the card has never been shown, so
-        # width()/height() are pre-layout defaults rather than the size the
-        # frame will actually take. Measuring those made both flip branches
-        # fire and clamp to (8, 8) -- the card appeared in the top-left
-        # corner on the first hover and correctly on every one after.
-        w = self.hover_preview.width()
-        h = self.hover_preview.height()
-        w = max(1, min(w, self.width() - 16))
-        h = max(1, min(h, self.height() - 16))
+        # sizeHint, not width()/height(). Before the card has been shown once
+        # those are pre-layout values, and a height that reads too large makes
+        # both flip branches fire and clamp to (8, 8) -- the card lands in the
+        # top-left corner on the first hover and correctly on every one after.
+        # The layout can compute its hint on demand, shown or not.
+        hint = self.hover_preview.sizeHint()
+        w = int(hint.width()) or self.hover_preview.width() or self.HOVER_PREVIEW_W
+        h = int(hint.height()) or self.hover_preview.height() or 160
+        edge = 8
+        w = max(1, min(w, max(1, self.width() - 2 * edge)))
+        h = max(1, min(h, max(1, self.height() - 2 * edge)))
         local_pos = self.mapFromGlobal(global_pos)
         x = local_pos.x() + 18
         y = local_pos.y() + 18
-        if x + w > self.width() - 8:
-            x = max(8, local_pos.x() - w - 18)
-        if y + h > self.height() - 8:
-            y = max(8, local_pos.y() - h - 18)
+        if x + w > self.width() - edge:
+            x = local_pos.x() - w - 18
+        if y + h > self.height() - edge:
+            y = local_pos.y() - h - 18
+        # Clamped last and on both axes. The old max(8, ...) only ran inside
+        # the flip branches, so an overshoot parked the card at the corner
+        # instead of beside the row.
+        x = max(edge, min(x, max(edge, self.width() - w - edge)))
+        y = max(edge, min(y, max(edge, self.height() - h - edge)))
         self.hover_preview.move(x, y)
 
     def _get_preview_trigger_mode(self):
@@ -9644,7 +9657,9 @@ class VideoPlayer(QMainWindow):
     def _scale_preview_pixmap(self, pixmap):
         if pixmap.isNull():
             return pixmap
-        return pixmap.scaled(220, 160, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        return pixmap.scaled(self.HOVER_PREVIEW_W - 20, self.HOVER_PREVIEW_MEDIA_H,
+                             Qt.AspectRatioMode.KeepAspectRatio,
+                             Qt.TransformationMode.SmoothTransformation)
 
     def _extract_video_preview_frame(self, path, timestamp_seconds):
         pixmap = QPixmap()
@@ -9882,7 +9897,8 @@ class VideoPlayer(QMainWindow):
             return
 
         margins = self.hover_preview_layout.contentsMargins()
-        max_content_width = max(140, min(220, self.width() - 80))
+        max_content_width = max(140, min(self.HOVER_PREVIEW_W - 20,
+                                         self.width() - 80))
         pixmap = self.hover_preview_image.pixmap()
         image_width = 0
         if pixmap is not None and not pixmap.isNull():

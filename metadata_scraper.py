@@ -65,7 +65,7 @@ LINKS_FILENAME       = "metadata_links.json"
 # manually, so "is the running player the one that was just pushed?" has been
 # an open question more than once and has cost whole test runs. This answers it
 # from the first line of the log.
-BUILD = "link3-allnet"
+BUILD = "link4-cast"
 print(f"[MetadataScraper] build {BUILD}")
 MATCH_THRESHOLD      = 0.32
 SCRAPE_DELAY         = 0.8     # seconds between yt-dlp calls
@@ -3350,6 +3350,25 @@ MALE_PERFORMERS = {
     'kieran lee', 'tommy pistol', 'jax slayher', 'barrett blade', 'michael vegas',
     'markus dupree', 'troy francisco', 'jmac', 'j-mac', 'christian clay',
     'danny mountain', 'john strong', 'keiran lee', 'aaron wilcoxxx', 'alberto blanco',
+    # Extended from the shipped nubiles database: these are the credited male
+    # performers it actually carries that the list above was missing, ordered
+    # by how often they turn up. 1916 distinct performers appear there and the
+    # curated list covered 81, so most men still reached the display name.
+    # Only names read off that data, and only ones that are unambiguously men
+    # -- a false positive hides a performer the user does want to see, which
+    # is worse than a man slipping through and being hidden by hand.
+    'charlie dean', 'anthony pierce', 'marcus london', 'kristof cale',
+    'victor ray', 'apollo banks', 'rico hernandez', 'matt denae',
+    'clarke kent', 'johnny', 'thomas stone', 'roman knight', 'ken feels',
+    'murgur', 'gunnar bishop', 'brick danger', 'matthew meier', 't stone',
+    'mike ox', 'angelo godshack', 'tommy gold', 'zac wild', 'richard glaze',
+    'tyler steel', 'denis reed', 'tysen rich', 'danny steele',
+    'ralf christian', 'charlie red', 'nade nasty',
+    # Well-known names that turn up lower down the same casts.
+    'ricky sinz', 'evan stone', 'lexington steele', 'mandingo', 'nacho vidal',
+    'erik everhard', 'jon jon', 'mr pete', 'scott nails', 'danny wylde',
+    'kurt lockwood', 'tony everready', 'dale dabone', 'sean michaels',
+    'johnny thrust', 'wesley pipes', 'mark wood', 'robby blake',
     'adam black', 'adam ocelot', 'derrick pierce', 'jedd harris', 'steve holmes',
     'mike adriano', 'rocco siffredi', 'trenton eclipse', 'toni ribas', 'bill bailey',
     'tommy gunn', 'chad white', 'sterling cooper', 'alex puller', 'models'

@@ -5639,13 +5639,14 @@ report(int(_after65b.get('image_expires') or 0) == 9999999999
        and 'cover960.jpg' in str(_after65b.get('image') or ''),
        'and the cover it already had is left exactly as it was')
 
-# ── 66. Card placement on first show, and a 0.7 s hold on the cover ───────────
+# ── 66. Card placement on first show, and a 1 s hold on the cover ─────────────
 print()
-print('66. The card is placed correctly the first time and holds the cover 0.7 s')
+print('66. The card is placed correctly the first time and holds the cover 1 s')
 
 _mv66 = _vsrc64('_move_preview_widget')
-report('min(w, self.width() - 16)' in _mv66 and 'min(h, self.height() - 16)' in _mv66,
-       'the card size is clamped before the edge test, so a pre-layout size '
+report('sizeHint()' in _mv66 and '2 * edge' in _mv66,
+       'the card size is taken from its size hint and clamped before the edge '
+       'test, so a pre-layout size '
        'cannot flip it into the top-left corner')
 report('self.hover_preview.width() > ' not in _mv66,
        'and the raw pre-layout size is no longer compared directly')
@@ -5655,8 +5656,8 @@ report('hover_preview.show()' in _show66
        and _show66.index('hover_preview.show()') < _show66.index('_reposition_hover_preview()'),
        'it is repositioned once more after show(), when the layout is live')
 
-report(lift_attr('VideoPlayer', 'HOVER_COVER_HOLD_MS') == 700,
-       'the cover is held for 0.7 s before the clip takes over',
+report(lift_attr('VideoPlayer', 'HOVER_COVER_HOLD_MS') == 1000,
+       'the cover is held for a full second before the clip takes over',
        str(lift_attr('VideoPlayer', 'HOVER_COVER_HOLD_MS')))
 _init66 = _vsrc64('__init__')
 report('HOVER_COVER_HOLD_MS' in _init66 and '_hover_cover_hold_timer.setSingleShot(True)' in _init66,
@@ -7422,6 +7423,64 @@ if _have81:
        'the card carries that network back when it is applied')
     report('_hide_performer_menu' in _txt81 and 'male_performers.json' in _txt81,
        'and the card has a way to hide a performer without editing JSON')
+
+# ---------------------------------------------------------------------------
+# 82. Cast list coverage, and the hover card's size / position / clip rules.
+# ---------------------------------------------------------------------------
+print()
+print('--- 82: cast list and hover card ---')
+
+_new82 = ['charlie dean', 'marcus london', 'mike ox', 'anthony pierce',
+          'kristof cale', 'apollo banks', 'nade nasty', 't stone']
+report(all(n in _msrc55.MALE_PERFORMERS for n in _new82),
+   'the credited men the shipped nubiles database actually carries are on the '
+   'list -- it covered 81 of 1916 performers, so most reached the name',
+   'missing: ' + ', '.join(n for n in _new82 if n not in _msrc55.MALE_PERFORMERS))
+
+_women82 = ['Molly Little', 'Kyler Quinn', 'Alex Coal', 'Riley Reid',
+            'Lulu Chu', 'Amirah Adara', 'Chloe Temple', 'Jodie Johnson',
+            'Tiffany Tatum', 'Haley Reed', 'Anya Olsen', 'Kiara Cole',
+            'Lexi Luna', 'Eliza Ibarra', 'Elsa Jean', 'Piper Perri']
+report(not any(_msrc55._is_male_performer(w) for w in _women82),
+   'and the most prolific women in that database are not caught by it -- '
+   'hiding a performer the user wants is worse than one slipping through',
+   'wrongly hidden: ' + ', '.join(
+       w for w in _women82 if _msrc55._is_male_performer(w)))
+
+_mov82 = {'title': 'Stepsis Loves Sex Games', 'series': 'BrattySis',
+          'models': ['Bianca Bangs', 'Charlie Dean'], 'date': '29/11/2024'}
+report(_msrc55.format_display_name(_mov82)
+       == 'BrattySis - Bianca Bangs - Stepsis Loves Sex Games - 29/11/2024',
+   'so a man credited alongside a woman no longer reaches the new name',
+   _msrc55.format_display_name(_mov82))
+
+# -- the hover card ----------------------------------------------------------
+_main82 = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.py')
+if os.path.isfile(_main82):
+    _txt82 = open(_main82, encoding='utf-8').read()
+    _mv82 = _fn_body(_txt82, '    def _move_preview_widget(')
+    report('sizeHint()' in _mv82 and '.width()\n' not in _mv82[:200],
+       'the card is positioned from its size hint, not from width()/height() '
+       '-- before it has been shown once those are pre-layout values, and a '
+       'height that reads too large parks it in the top-left corner',
+       'no sizeHint in _move_preview_widget')
+    report(_mv82.count('max(edge, min(') == 2,
+       'and both axes are clamped into the window afterwards, so a flip that '
+       'overshoots cannot leave it at the corner')
+    report('HOVER_COVER_HOLD_MS = 1000' in _txt82,
+       'the cover holds for a full second before the clip takes over',
+       re.search(r'HOVER_COVER_HOLD_MS = \d+', _txt82).group(0)
+       if re.search(r'HOVER_COVER_HOLD_MS = \d+', _txt82) else 'not found')
+    report('setLoops(-1)' in _txt82,
+       'and the clip loops rather than playing once and freezing on its last '
+       'frame')
+    report('HOVER_PREVIEW_W = 340' in _txt82,
+       'the card is wider than it was (220 px of media)')
+    report('setFixedSize(self.HOVER_PREVIEW_W - 16' in _txt82,
+       'the clip surface is sized to the card instead of taking the layout '
+       'default, which is what made the card change shape on the swap')
+else:
+    report(False, 'main.py is present to check the hover card against', 'missing')
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
