@@ -65,7 +65,7 @@ LINKS_FILENAME       = "metadata_links.json"
 # manually, so "is the running player the one that was just pushed?" has been
 # an open question more than once and has cost whole test runs. This answers it
 # from the first line of the log.
-BUILD = "cov8-turnstile-loud"
+BUILD = "cov9-one-request"
 print(f"[MetadataScraper] build {BUILD}")
 MATCH_THRESHOLD      = 0.32
 SCRAPE_DELAY         = 0.8     # seconds between yt-dlp calls
@@ -938,9 +938,14 @@ def _fetch_page(site: dict, page_url: str, db=None, session=None,
 
     # A gate we can solve ourselves beats launching a browser for one, by
     # about three orders of magnitude.
-    solved = solve_turnstile_challenge(page_url)
+    solved = solve_turnstile_challenge(page_url, html=html)
     if solved:
         return solved, "turnstile", _ms()
+    if _turnstile_config(html):
+        # The gate only starts on a click -- addEventListener('click',
+        # startChallenge) -- and a headless browser is not going to make one.
+        # Ten seconds to rediscover that, per row, is not a good trade.
+        return html, "turnstile-failed", _ms()
 
     if not _site_needs_browser(site, page_url):
         return html, ("http" if html else "none"), waited
@@ -1900,6 +1905,7 @@ def _is_challenge_page(html) -> bool:
 _TURNSTILE_CONFIG_RE = re.compile(
     r"var\s+turnstileConfig\s*=\s*(\{.*?\})\s*;", re.DOTALL)
 _TURNSTILE_SESSION = None
+_TURNSTILE_PAUSE = 0.4      # s before re-reading; these sites 429 on a burst
 _TURNSTILE_MAX_NONCE = 4_000_000
 
 
@@ -1979,12 +1985,17 @@ def _environment_checks() -> dict:
     }
 
 
-def solve_turnstile_challenge(url: str, timeout: int = 15) -> str:
+def solve_turnstile_challenge(url: str, html=None, timeout: int = 15) -> str:
     """Walk a page's own proof-of-work gate and return the page behind it.
 
     '' when there is no such gate, the proof cannot be solved, or the server
-    refuses it. One session carries the whole exchange, because the clearance
-    lives in a cookie that the follow-up request has to present.
+    refuses it.
+
+    `html` is the challenge page the caller has already fetched, and passing it
+    is the whole point: these sites answer a second request from the same IP
+    with HTTP 429 and an empty body. A run that re-fetched logged exactly that
+    -- "no gate config in what came back (0 byte(s), HTTP 429)" -- and gave up
+    holding a perfectly good challenge page it had already been handed.
     """
     global _TURNSTILE_SESSION
     try:
@@ -1997,14 +2008,20 @@ def solve_turnstile_challenge(url: str, timeout: int = 15) -> str:
         _TURNSTILE_SESSION.headers.update(REQUEST_HEADERS)
     session = _TURNSTILE_SESSION
     try:
-        first = session.get(url, timeout=timeout)
-        cfg = _turnstile_config(first.text)
+        if html:
+            held = str(html)
+            origin = "already fetched"
+        else:
+            first = session.get(url, timeout=timeout)
+            held = first.text or ""
+            origin = f"HTTP {first.status_code}"
+        cfg = _turnstile_config(held)
         challenge = str(cfg.get("challenge") or "")
         difficulty = int(cfg.get("difficulty") or 0)
         if not challenge or not difficulty:
-            print(f"[TURNSTILE] no gate config in what came back "
-                  f"({len(first.text or '')} byte(s), HTTP {first.status_code},"
-                  f" title {_page_title(first.text)!r}) -- nothing to solve")
+            print(f"[TURNSTILE] no gate config in the page ({origin}, "
+                  f"{len(held)} byte(s), title {_page_title(held)!r}) "
+                  "-- nothing to solve")
             return ""
         print(f"[TURNSTILE] gate on {urlparse(url).netloc}: "
               f"difficulty {difficulty}, solving")
@@ -2030,6 +2047,7 @@ def solve_turnstile_challenge(url: str, timeout: int = 15) -> str:
             print(f"[TURNSTILE] verify refused: "
                   f"{verdict.get('error') or reply.status_code}")
             return ""
+        time.sleep(_TURNSTILE_PAUSE)
         again = session.get(url, timeout=timeout)
         page = again.text or ""
         solved_ms = int((time.time() - started) * 1000)

@@ -6551,6 +6551,47 @@ report(len(json.load(open(_d75c, encoding='utf-8'))['movies']) == 1,
 # ── 76. A site that challenges a plain HTTP client has to be read in a browser ──
 print()
 print("76. reading a challenged watch page")
+def _fn_body(text, signature, ends=('\n\ndef ',)):
+    """One function's source, or '' when it cannot be located.
+
+    Never raises. A missing substring has to read as a failed assertion, not
+    abort the section -- a ValueError here has silently hidden real failures
+    four separate times, because everything below it stops running and the
+    FAIL count comes out looking small.
+    """
+    try:
+        i = text.index(signature)
+    except ValueError:
+        return ''
+    # Only the markers the caller names, deliberately: a module-level function
+    # can contain a nested def, and cutting at the nearest of both markers
+    # silently dropped the last half of _fetch_page.
+    cut = len(text)
+    for stop in ends:
+        j = text.find(stop, i + len(signature))
+        if j != -1:
+            cut = min(cut, j)
+    return text[i:cut]
+
+
+def _pos(text, needle, start=0):
+    try:
+        return text.index(needle, start)
+    except ValueError:
+        return -1
+
+
+def _before(text, first, second, start=0):
+    """True only when both appear and `first` comes first. Never raises."""
+    if start < 0:
+        return False
+    try:
+        i = text.index(first, start)
+        return text.index(second, i) > i
+    except ValueError:
+        return False
+
+
 if hasattr(_msrc55, '_fetch_page'):
     _FOLDER76 = 'stepmom_is_a_great_kisser'
     _URL76 = ('https://images.nubiles-porn.com/videos/' + _FOLDER76 +
@@ -6673,8 +6714,7 @@ if hasattr(_msrc55, '_fetch_page'):
        'and a site with no browser-flagged networks is not sent through one')
     _txt76 = open(_msrc55.__file__, encoding='utf-8').read()
     for _fn76 in ('_browser_page_html', '_fetch_page'):
-        _i76 = _txt76.index('def ' + _fn76 + '(')
-        _body76 = _txt76[_i76:_txt76.index('\n\ndef ', _i76 + 10)]
+        _body76 = _fn_body(_txt76, 'def ' + _fn76 + '(')
         report(('_BROWSER_FETCH_LOCK' in _body76
                 or '_browser_fetch_guard' in _body76),
            f'{_fn76} serializes browser fetches -- each one starts a Chromium, '
@@ -6954,8 +6994,7 @@ if _have77:
 
     # -- fetched at link time, not an hour later -----------------------------
     _txt77 = open(_msrc55.__file__, encoding='utf-8').read()
-    _i77 = _txt77.index('def _apply_to_file(')
-    _body77 = _txt77[_i77:_txt77.index('\n    def ', _i77 + 10)]
+    _body77 = _fn_body(_txt77, 'def _apply_to_file(', ends=('\n    def ',))
     report('refresh_signed_assets_async(' in _body77
            and 'force=True' in _body77,
        'linking a row fetches its cover then and there -- the user is sitting '
@@ -7005,17 +7044,15 @@ if hasattr(_msrc55, '_storage_state_cookie_count'):
        'a missing state reads as 0 too')
 
     _txt78 = open(_msrc55.__file__, encoding='utf-8').read()
-    _i78 = _txt78.index('def _ensure_started(')
-    _body78 = _txt78[_i78:_txt78.index('\n    def ', _i78 + 10)]
+    _body78 = _fn_body(_txt78, 'def _ensure_started(', ends=('\n    def ',))
     report('_storage_state_cookie_count(' in _body78
            and 'starting cold' in _body78,
        'the browser now says out loud whether it reused a clearance or started '
        'cold -- the last log could not tell those apart, and they have '
        'opposite conclusions')
-    _i78b = _txt78.index('    def get(self, url')
-    _body78b = _txt78[_i78b:_txt78.index('\n    def close(')]
-    report(_body78b.index('_is_challenge_page(')
-           < _body78b.index('wait_for_selector('),
+    _body78b = _fn_body(_txt78, '    def get(self, url',
+                        ends=('\n    def ',))
+    report(_before(_body78b, '_is_challenge_page(', 'wait_for_selector('),
        'an interstitial is returned as soon as it is recognised, instead of '
        'spending the whole timeout waiting for a selector that will never '
        'appear on it -- that wait is what turned a page into 16919 ms',
@@ -7105,10 +7142,11 @@ if _HAVE79:
        str(sorted(_env79)))
 
     _txt79 = open(_msrc55.__file__, encoding='utf-8').read()
-    _fp79 = _txt79.index('def _fetch_page(')
-    report(_txt79.index('solve_turnstile_challenge(page_url)')
-           < _txt79.index('_browser_fetch_guard():', _fp79),
-       'the solver is tried before any browser is even considered')
+    report(_before(_txt79, 'solve_turnstile_challenge(page_url, html=html)',
+                   '_browser_fetch_guard():',
+                   _pos(_txt79, 'def _fetch_page(')),
+       'the solver is tried before any browser is even considered, and is '
+       'handed the page rather than the bare URL')
 
     _site79 = dict(_msrc55.METADATA_SITES['nubiles'])
     _url79 = 'https://nubiles-porn.com/video/watch/244784/x'
@@ -7128,19 +7166,42 @@ if _HAVE79:
                 pass
 
         _msrc55._BrowserGallerySession = _S79
+        _got79 = []
         _msrc55._fetch_html = lambda url, timeout=20: _page79
         _msrc55.solve_turnstile_challenge = (
-            lambda url, timeout=15: '<html><title>The Real Page</title></html>')
+            lambda url, html=None, timeout=15: (
+                _got79.append(html),
+                '<html><title>The Real Page</title></html>')[1])
         _h, _t, _m = _msrc55._fetch_page(_site79, _url79, None)
         report(_t == 'turnstile' and not _open79 and 'Real Page' in _h,
            'so a gate we can solve ourselves is solved, and no browser is '
            'launched for it', f'{_t!r}, {len(_open79)} browser(s)')
+        report(bool(_got79) and _got79[0] == _page79,
+           'and the page already fetched is handed to the solver instead of '
+           'being fetched a second time -- a second request from the same IP '
+           'comes back as HTTP 429 with an empty body, which is what a run '
+           'reported as "no gate config"',
+           f'{len(_got79[0] or "") if _got79 else 0} byte(s) passed on')
 
-        _msrc55.solve_turnstile_challenge = lambda url, timeout=15: ''
+        # A gate the solver cannot crack is not worth a browser: it only
+        # starts on a click, which a headless browser will not make.
+        _msrc55.solve_turnstile_challenge = (
+            lambda url, html=None, timeout=15: '')
+        _h, _t, _m = _msrc55._fetch_page(_site79, _url79, None)
+        report(_t == 'turnstile-failed' and not _open79,
+           'a proof-of-work gate that refuses us is reported as such rather '
+           "than handed to a browser that would spend 10 s failing to click "
+           'a checkbox', f'{_t!r}, {len(_open79)} browser(s)')
+
+        # A challenge that is NOT this gate still gets the browser.
+        _other79 = '<html><head><title>Just a moment...</title></head></html>'
+        _msrc55._fetch_html = lambda url, timeout=20: _other79
+        _msrc55.solve_turnstile_challenge = (
+            lambda url, html=None, timeout=15: '')
         _h, _t, _m = _msrc55._fetch_page(_site79, _url79, None)
         report(_t == 'browser' and len(_open79) == 1,
-           'and a gate that refuses us still falls through to the browser '
-           'rather than giving up', f'{_t!r}, {len(_open79)} browser(s)')
+           'and some other kind of interstitial still escalates to the '
+           'browser', f'{_t!r}, {len(_open79)} browser(s)')
     finally:
         _msrc55._fetch_html = _oh79
         _msrc55._BrowserGallerySession = _osess79
@@ -7169,8 +7230,7 @@ report('print(f"[MetadataScraper] build {BUILD}")' in _txt80,
        'is actually running -- files here are copied by hand, and "did the new '
        'code even run?" has burned test runs before')
 
-_i80 = _txt80.index('def solve_turnstile_challenge(')
-_body80 = _txt80[_i80:_txt80.index('\n\ndef ', _i80 + 10)]
+_body80 = _fn_body(_txt80, 'def solve_turnstile_challenge(')
 _lines80 = _body80.split('\n')
 _silent80 = []
 for _n80, _ln80 in enumerate(_lines80):
