@@ -7482,5 +7482,124 @@ if os.path.isfile(_main82):
 else:
     report(False, 'main.py is present to check the hover card against', 'missing')
 
+# ---------------------------------------------------------------------------
+# 83. The hover clip loops. Compiled out of main.py and driven for real, with a
+#     stub media player -- grep would only prove the call exists, which is
+#     exactly the mistake that shipped "it already loops".
+# ---------------------------------------------------------------------------
+print()
+print('--- 83: the hover clip loops ---')
+
+
+def _vfn83(name):
+    cls = next(n for n in TREE.body if isinstance(n, ast.ClassDef)
+               and n.name == 'VideoPlayer')
+    fn = next((n for n in cls.body if isinstance(n, ast.FunctionDef)
+               and n.name == name), None)
+    if fn is None:
+        return None
+    mod = ast.Module(body=[fn], type_ignores=[])
+    ast.fix_missing_locations(mod)
+    ns = dict(G)
+    ns['QMediaPlayer'] = _QMP83
+    exec(compile(mod, f'<VideoPlayer.{name}>', 'exec'), ns)
+    return ns[name]
+
+
+class _MS83:
+    NoMedia = 'NoMedia'
+    LoadingMedia = 'LoadingMedia'
+    LoadedMedia = 'LoadedMedia'
+    BufferingMedia = 'BufferingMedia'
+    BufferedMedia = 'BufferedMedia'
+    EndOfMedia = 'EndOfMedia'
+    InvalidMedia = 'InvalidMedia'
+
+
+class _QMP83:
+    MediaStatus = _MS83
+
+
+class _Player83:
+    def __init__(self):
+        self.calls = []
+
+    def setPosition(self, v):
+        self.calls.append(('setPosition', v))
+
+    def play(self):
+        self.calls.append(('play',))
+
+
+class _Timer83:
+    def __init__(self):
+        self.stopped = 0
+
+    def stop(self):
+        self.stopped += 1
+
+
+class _Clip83:
+    def __init__(self):
+        self._hover_clip_wanted = True
+        self._hover_clip_ready = True
+        self._hover_clip_player = _Player83()
+        self._hover_clip_timer = _Timer83()
+        self.events = []
+
+    def _swap_to_hover_clip(self):
+        self.events.append('swap')
+
+    def _abandon_hover_clip(self):
+        self.events.append('abandon')
+
+
+_Clip83._on_hover_clip_status = _vfn83('_on_hover_clip_status')
+_Clip83._restart_hover_clip = _vfn83('_restart_hover_clip')
+
+_have83 = (_Clip83._on_hover_clip_status is not None
+           and _Clip83._restart_hover_clip is not None)
+report(_have83, 'the clip status handler and its restart path are in main.py',
+       'missing one of _on_hover_clip_status / _restart_hover_clip')
+
+if _have83:
+    _c83 = _Clip83()
+    _c83._on_hover_clip_status(_MS83.EndOfMedia)
+    report(_c83._hover_clip_player.calls == [('setPosition', 0), ('play',)],
+       'when the clip reaches its end it is wound back to the start and played '
+       'again -- setLoops(-1) alone does not loop a remote stream on the '
+       'FFmpeg backend, which is why it played once and froze',
+       str(_c83._hover_clip_player.calls))
+
+    _c83 = _Clip83()
+    _c83._hover_clip_ready = False
+    _c83._on_hover_clip_status(_MS83.EndOfMedia)
+    report(_c83.events == ['swap'] and _c83._hover_clip_ready is True,
+       'and a clip that runs out before the cover hold is up is taken as '
+       'ready and started from the top rather than dropped',
+       f'{_c83.events}, ready={_c83._hover_clip_ready}')
+
+    _c83 = _Clip83()
+    _c83._on_hover_clip_status(_MS83.InvalidMedia)
+    report(_c83.events == ['abandon'] and not _c83._hover_clip_player.calls,
+       'a clip that will not decode is still given up on, not restarted '
+       'forever', f'{_c83.events}, {_c83._hover_clip_player.calls}')
+
+    _c83 = _Clip83()
+    _c83._hover_clip_wanted = False
+    _c83._on_hover_clip_status(_MS83.EndOfMedia)
+    report(not _c83._hover_clip_player.calls and not _c83.events,
+       'and once the card is gone nothing is restarted behind it',
+       f'{_c83._hover_clip_player.calls}, {_c83.events}')
+
+    _c83 = _Clip83()
+    _c83._hover_clip_player = None
+    _c83._on_hover_clip_status(_MS83.EndOfMedia)
+    report(True, 'a restart with no player left is a no-op rather than a crash')
+
+    _swap83 = _fn_body(SRC, '    def _swap_to_hover_clip(')
+    report('setPosition(0)' in _swap83 and 'setLoops(-1)' in _swap83,
+       'the swap itself starts at the top and re-asserts the loop count')
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

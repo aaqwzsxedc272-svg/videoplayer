@@ -9223,17 +9223,45 @@ class VideoPlayer(QMainWindow):
             ready = (status == QMediaPlayer.MediaStatus.LoadedMedia
                      or status == QMediaPlayer.MediaStatus.BufferedMedia)
             bad = status == QMediaPlayer.MediaStatus.InvalidMedia
+            ended = status == QMediaPlayer.MediaStatus.EndOfMedia
         except Exception:
             return
         if ready:
             self._hover_clip_timer.stop()
             self._hover_clip_ready = True
             self._swap_to_hover_clip()
+        elif ended:
+            if not self._hover_clip_ready:
+                # It loaded and ran to the end while still hidden, before the
+                # cover hold was up. Take it as ready and start from the top.
+                self._hover_clip_timer.stop()
+                self._hover_clip_ready = True
+                self._swap_to_hover_clip()
+                return
+            self._restart_hover_clip()
         elif bad:
             self._abandon_hover_clip()
 
+    def _restart_hover_clip(self):
+        """Wind the hover clip back to the start and play it again.
+
+        The player is built with setLoops(-1), but the FFmpeg backend does not
+        honour that for a remote stream, so the clip played once and froze on
+        its last frame. The loop is driven from the status signal instead of
+        being left to a flag the backend may ignore.
+        """
+        if not (self._hover_clip_wanted and self._hover_clip_ready):
+            return
+        if self._hover_clip_player is None:
+            return
+        try:
+            self._hover_clip_player.setPosition(0)
+            self._hover_clip_player.play()
+        except Exception:
+            self._abandon_hover_clip()
+
     def _swap_to_hover_clip(self):
-        """Cover has had its 0.7 s and the clip is buffered: swap over.
+        """Cover has had its second and the clip is buffered: swap over.
 
         Called from both sides -- the status signal and the hold timer --
         because either can arrive last. Whichever comes second does the swap.
@@ -9246,6 +9274,13 @@ class VideoPlayer(QMainWindow):
         self.hover_preview_image.hide()
         self.hover_preview_video.show()
         try:
+            # From the top: a swap can happen after the clip already ran, and
+            # re-asserting the loop count costs nothing.
+            self._hover_clip_player.setPosition(0)
+            try:
+                self._hover_clip_player.setLoops(-1)
+            except Exception:
+                pass
             self._hover_clip_player.play()
         except Exception:
             self._abandon_hover_clip()
