@@ -593,6 +593,21 @@ def _discard_storage_state(path) -> None:
         pass
 
 
+def _storage_state_cookie_count(path) -> int:
+    """How many cookies a saved browser state carries, 0 if it cannot be read.
+
+    The count is the whole point of logging it: a state with cf_clearance in it
+    is a browser that has already been waved through, and one without is a
+    browser facing the challenge from scratch. Those two look identical from
+    the outside, and they have opposite conclusions.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return len(json.load(fh).get("cookies") or [])
+    except Exception:
+        return 0
+
+
 def _storage_state_usable(path) -> bool:
     """Is this saved browser state something Playwright can actually load?
 
@@ -685,8 +700,15 @@ class _BrowserGallerySession:
         self._pw = sync_playwright().start()
         self._browser = self._pw.chromium.launch(headless=True)
 
-        storage_state = self._cookie_path if _storage_state_usable(
-            self._cookie_path) else None
+        storage_state = None
+        if _storage_state_usable(self._cookie_path):
+            storage_state = self._cookie_path
+            print(f"[Scraper] browser state: {self._cookie_path} "
+                  f"({_storage_state_cookie_count(storage_state)} cookie(s))")
+        else:
+            print(f"[Scraper] browser state: nothing usable at "
+                  f"{self._cookie_path or '(no path)'} -- starting cold, so "
+                  "any challenge has to be solved from scratch")
 
         self._context = self._browser.new_context(
             storage_state=storage_state,
@@ -699,6 +721,23 @@ class _BrowserGallerySession:
         self._ensure_started()
         try:
             self._page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+            html = self._page.content()
+            if _is_challenge_page(html):
+                deadline = time.time() + _CHALLENGE_GRACE
+                while time.time() < deadline:
+                    try:
+                        self._page.wait_for_load_state("networkidle",
+                                                       timeout=1000)
+                    except Exception:
+                        pass
+                    html = self._page.content()
+                    if not _is_challenge_page(html):
+                        break
+                else:
+                    print(f"[Scraper] browser still on the challenge page "
+                          f"after {_CHALLENGE_GRACE:.0f}s: {url}")
+                _save_storage_state(self._context, self._cookie_path)
+                return html
             try:
                 self._page.wait_for_selector(wait_selector, timeout=timeout)
             except Exception:
@@ -781,6 +820,7 @@ def _browser_state_path(db, site: dict, url) -> str:
 
 _PROBE_TIMEOUT = 8          # plain HTTP gets this long before we give up
 _BROWSER_TIMEOUT = 12000    # ms; 25000 measured 27 s of dead air per row
+_CHALLENGE_GRACE = 5.0      # s to let an auto-solving interstitial clear
 # Short on purpose. This exists to stop eleven rows re-proving the same dead
 # host eleven times in a row, not to remember a verdict for the session -- the
 # nubiles block is an IP ban that a VPN lifts, and the user switches one on

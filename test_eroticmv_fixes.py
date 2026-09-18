@@ -6969,5 +6969,63 @@ if _have77:
        'browser timeouts across every row and was neither of the two moments '
        'that matter')
 
+# ---------------------------------------------------------------------------
+# 78. Did the browser reuse a clearance, or face the challenge cold?
+#
+# The field log answered the question it was asked -- "via browser, 16919 ms,
+# BOT CHALLENGE, not the page" -- and raised the one that decides whether the
+# browser approach is salvageable at all. A context carrying cf_clearance is a
+# browser that has already been waved through; a cold one is not. _ensure_started
+# printed nothing about which it had built.
+# ---------------------------------------------------------------------------
+print()
+print('--- 78: browser state reuse / challenge short-circuit ---')
+
+if hasattr(_msrc55, '_storage_state_cookie_count'):
+    _d78 = _tf55.mkdtemp()
+    _st78 = os.path.join(_d78, 'nubiles-porn_browser_state.json')
+    with open(_st78, 'w', encoding='utf-8') as _f78:
+        json.dump({'cookies': [{'name': 'cf_clearance', 'value': 'x'},
+                               {'name': '__cf_bm', 'value': 'y'}],
+                   'origins': []}, _f78)
+    report(_msrc55._storage_state_cookie_count(_st78) == 2,
+       'a saved state reports how many cookies it carries',
+       str(_msrc55._storage_state_cookie_count(_st78)))
+    with open(_st78, 'w', encoding='utf-8') as _f78:
+        _f78.write('{"cookies": []}')
+    report(_msrc55._storage_state_cookie_count(_st78) == 0,
+       'an empty state says so, which is the cold-start case')
+    with open(_st78, 'w', encoding='utf-8') as _f78:
+        _f78.write('')
+    report(_msrc55._storage_state_cookie_count(_st78) == 0,
+       'and a truncated one reads as 0 rather than raising -- this is the same '
+       '0-byte file that took the whole refresh path down two commits ago')
+    report(_msrc55._storage_state_cookie_count(
+        os.path.join(_d78, 'absent.json')) == 0,
+       'a missing state reads as 0 too')
+
+    _txt78 = open(_msrc55.__file__, encoding='utf-8').read()
+    _i78 = _txt78.index('def _ensure_started(')
+    _body78 = _txt78[_i78:_txt78.index('\n    def ', _i78 + 10)]
+    report('_storage_state_cookie_count(' in _body78
+           and 'starting cold' in _body78,
+       'the browser now says out loud whether it reused a clearance or started '
+       'cold -- the last log could not tell those apart, and they have '
+       'opposite conclusions')
+    _i78b = _txt78.index('    def get(self, url')
+    _body78b = _txt78[_i78b:_txt78.index('\n    def close(')]
+    report(_body78b.index('_is_challenge_page(')
+           < _body78b.index('wait_for_selector('),
+       'an interstitial is returned as soon as it is recognised, instead of '
+       'spending the whole timeout waiting for a selector that will never '
+       'appear on it -- that wait is what turned a page into 16919 ms',
+       f'grace {_msrc55._CHALLENGE_GRACE:.0f}s')
+    report(0 < _msrc55._CHALLENGE_GRACE <= 5.0,
+       'and the grace given to an auto-solving challenge is bounded',
+       f'{_msrc55._CHALLENGE_GRACE:.0f} s')
+else:
+    report(False, 'the browser-state diagnostic is present',
+           'missing: _storage_state_cookie_count')
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
