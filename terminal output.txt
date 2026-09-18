@@ -2,6 +2,7 @@
 C:\Users\Mouad\Desktop>cd /d "C:\Users\Mouad\Desktop\video_player"
 
 C:\Users\Mouad\Desktop\video_player>python main.py
+[MetadataScraper] build cov8-turnstile-loud
 [JAVGURU] VideoPlayer patched — jav.guru URL detection active.
 [GENERIC_JAV] VideoPlayer patched — URL detection active. (build R63-page-row)
 [JAVHD] VideoPlayer patched — javhd.today URL detection active.
@@ -13,121 +14,18 @@ qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.3 LGPL version
 [video_backend] mpv renderer: native D3D11 window
 [PASSWORDS] Loaded 41 cached passwords from disk
 No headphones detected at startup, using default audio output
-qt.multimedia.ffmpeg.mediadataholder: Could not open media. FFmpeg error description: Immediate exit requested
 [FAVICON] watchporn.to: 1 declared icon(s) — https://watchporn.to/favicon.ico
 [FAVICON] watchporn.to: got site icon from https://watchporn.to/favicon.ico
-[tls @ 00000238911D8C80] Unable to read from socket
-[tls @ 00000238911D8C80] Failed to send close message
-qt.multimedia.ffmpeg.mediadataholder: Could not open media. FFmpeg error description: Immediate exit requested
-qt.multimedia.ffmpeg.mediadataholder: Could not open media. FFmpeg error description: Immediate exit requested
-Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'https://images.psmcdn.net/pvm/tour/pics/sheena_ryder3/bio_small.mp4':
-  Metadata:
-    major_brand     : mp42
-    minor_version   : 0
-    compatible_brands: mp42mp41
-    creation_time   : 2021-07-02T21:01:16.000000Z
-  Duration: 00:00:11.09, start: 0.000000, bitrate: 715 kb/s
-  Stream #0:0[0x1](eng): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv, smpte170m, progressive), 500x282, 696 kb/s, 23.98 fps, 23.98 tbr, 24k tbn (default)
-      Metadata:
-        creation_time   : 2021-07-02T21:01:16.000000Z
-        handler_name    : ?Mainconcept Video Media Handler
-        vendor_id       : [0][0][0][0]
-        encoder         : AVC Coding
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::VideoRenderer::unnamed
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::StreamDecoder::unnamed
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::Demuxer::unnamed
-[tls @ 00000238B4949BC0] Failed to send close message
-[PLAYLIST][INFO] path='https://watchporn.to/video/110138/angel-gostosa-stepsis-wants-to-make-babies-myfamilypies/' rows=[0] duration='21:27' quality='Stream'
-[PLAYLIST][INFO] path='https://watchporn.to/video/38053/brookie-blair-and-gracie-gates-adding-stepsis-and-her-friend-to-the-spank-bank-brattysis/' rows=[1] duration='36:25' quality='Stream'
-[PLAYLIST][INFO] path='https://watchporn.to/video/111350/lulu-chu-a-lesson-in-discipline-for-stepsis-lilsis/' rows=[2] duration='23:35' quality='Stream'
-[PLAYLIST][INFO] path='https://watchporn.to/video/163072/amirah-adara-erika-mori-stepmom-is-a-great-kisser/' rows=[3] duration='27:52' quality='Stream'
-QWidgetWindow(0x2389af6c630, name="QWidgetClassWindow") must be a top level window.
-[PLAYLIST][INFO] path='https://watchporn.to/video/108314/sadie-holmes-stepmoms-big-date-momsteachsex/' rows=[5] duration='29:28' quality='Stream'
-[PLAYLIST][INFO] path='https://watchporn.to/video/162909/sophia-cruise-preparing-for-my-stepsons-big-date/' rows=[4] duration='40:23' quality='Stream'
-[PLAYLIST][INFO] path='https://watchporn.to/video/110733/ashley-alexander-stepsis-is-such-a-tease-brattysis/' rows=[7] duration='29:22' quality='Stream'
-[PLAYLIST][INFO] path='https://watchporn.to/video/113906/bianca-bangs-stepsis-loves-sex-games-brattysis/' rows=[6] duration='34:14' quality='Stream'
-[Scraper] browser fetch error https://brattysis.com/video/watch/203468/stepsis-is-such-a-tease-s34e4: Page.goto: Timeout 25000ms exceeded.
-Call log:
-  - navigating to "https://brattysis.com/video/watch/203468/stepsis-is-such-a-tease-s34e4", waiting until "domcontentloaded"
-
-[PLAYLIST][INFO] path='https://watchporn.to/video/854/alexis-fawx-benefits-of-a-busty-stepmom-pervmom/' rows=[9] duration='40:26' quality='Stream'
-[Scraper] browser fetch error https://nubiles-porn.com/video/watch/163784/stepsis-wants-to-make-babies-s28e3: Page.goto: Timeout 25000ms exceeded.
-Call log:
-  - navigating to "https://nubiles-porn.com/video/watch/163784/stepsis-wants-to-make-babies-s28e3", waiting until "domcontentloaded"
-
-[COVER] warm 163784-stepsis-wants-to-make-babies-s28e3: no signed asset (via browser, 27342 ms, empty response)
-[PLAYLIST][INFO] path='https://watchporn.to/video/857/anissa-kate-stepmom-fertilizer-pervmom/' rows=[8] duration='59:06' quality='Stream'
-[COVER] warm stepmom-fertilizer: no signed asset (via http, 238 ms, BOT CHALLENGE, not the page, 90852 byte(s), img-host 0, srcset 0, signed 0, loops 0, samples 0, title "Stepmom Fertilizer | Exclusive TeamSkeet Porn Video")
-[Scraper] browser fetch error https://brattysis.com/video/watch/148455/adding-stepsis-and-her-friend-to-the-spank-bank-s22e12: Page.goto: Timeout 25000ms exceeded.
-Call log:
-  - navigating to "https://brattysis.com/video/watch/148455/adding-stepsis-and-her-friend-to-the-spank-bank-s22e12", waiting until "domcontentloaded"
-
-[COVER] warm 148455-adding-stepsis-and-her-friend-to-the-spank-bank-s22e12: no signed asset (via browser, 27205 ms, empty response)
-[PLAYLIST][INFO] path='https://watchporn.to/video/162103/haley-spades-stepsis-and-i-have-to-share-a-room/' rows=[11] duration='31:17' quality='Stream'
-[Scraper] browser fetch error https://nubiles-porn.com/video/watch/189596/a-lesson-in-discipline-for-stepsis-s3e4: Page.goto: Timeout 25000ms exceeded.
-Call log:
-  - navigating to "https://nubiles-porn.com/video/watch/189596/a-lesson-in-discipline-for-stepsis-s3e4", waiting until "domcontentloaded"
-
-[COVER] warm 189596-a-lesson-in-discipline-for-stepsis-s3e4: no signed asset (via browser, 26503 ms, empty response)
-[PLAYLIST][INFO] path='https://watchporn.to/video/255/sheena-ryder-queen-takes-pawn-pervmom/' rows=[10] duration='50:38' quality='Stream'
-[Scraper] browser fetch error https://nubiles-porn.com/video/watch/256294/stepmom-is-a-great-kisser-s27e1: Page.goto: Timeout 25000ms exceeded.
-Call log:
-  - navigating to "https://nubiles-porn.com/video/watch/256294/stepmom-is-a-great-kisser-s27e1", waiting until "domcontentloaded"
-
-[COVER] warm 256294-stepmom-is-a-great-kisser-s27e1: no signed asset (via browser, 26492 ms, empty response)
-[Scraper] browser fetch error https://nubiles-porn.com/video/watch/174008/stepmoms-big-date-s20e6: Page.goto: Timeout 25000ms exceeded.
-Call log:
-  - navigating to "https://nubiles-porn.com/video/watch/174008/stepmoms-big-date-s20e6", waiting until "domcontentloaded"
-
-[COVER] warm 174008-stepmoms-big-date-s20e6: no signed asset (via browser, 26249 ms, empty response)
-[Scraper] browser fetch error https://momlover.com/video/watch/256273/preparing-for-my-stepsons-big-date-s10e3: Page.goto: Timeout 25000ms exceeded.
-Call log:
-  - navigating to "https://momlover.com/video/watch/256273/preparing-for-my-stepsons-big-date-s10e3", waiting until "domcontentloaded"
-
-[COVER] warm 256273-preparing-for-my-stepsons-big-date-s10e3: no signed asset (via browser, 26456 ms, empty response)
-[Scraper] curl_cffi fetch fallback https://brattysis.com/video/watch/203468/stepsis-is-such-a-tease-s34e4: Failed to perform, curl: (28) Connection timed out after 20014 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
-[Scraper] browser fetch error https://brattysis.com/video/watch/203468/stepsis-is-such-a-tease-s34e4: Page.goto: Timeout 25000ms exceeded.
-Call log:
-  - navigating to "https://brattysis.com/video/watch/203468/stepsis-is-such-a-tease-s34e4", waiting until "domcontentloaded"
-
-[COVER] warm 203468-stepsis-is-such-a-tease-s34e4: no signed asset (via browser, 26660 ms, empty response)
-[Scraper] browser fetch error https://brattysis.com/video/watch/205022/stepsis-loves-sex-games-s34e9: Page.goto: Timeout 25000ms exceeded.
-Call log:
-  - navigating to "https://brattysis.com/video/watch/205022/stepsis-loves-sex-games-s34e9", waiting until "domcontentloaded"
-
-[COVER] warm 205022-stepsis-loves-sex-games-s34e9: no signed asset (via browser, 26649 ms, empty response)
-[Scraper] requests fetch fallback https://brattysis.com/video/watch/203468/stepsis-is-such-a-tease-s34e4: HTTPSConnectionPool(host='brattysis.com', port=443): Max retries exceeded with url: /video/watch/203468/stepsis-is-such-a-tease-s34e4 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x00000238B59BE210>, 'Connection to brattysis.com timed out. (connect timeout=20)'))
-QWidgetWindow(0x2389af6c630, name="QWidgetClassWindow") must be a top level window.
-[Scraper] browser fetch error https://nubiles-porn.com/video/watch/255566/stepsis-and-i-have-to-share-a-room: Page.goto: Timeout 25000ms exceeded.
-Call log:
-  - navigating to "https://nubiles-porn.com/video/watch/255566/stepsis-and-i-have-to-share-a-room", waiting until "domcontentloaded"
-
-[Scraper] fetch error https://brattysis.com/video/watch/203468/stepsis-is-such-a-tease-s34e4: <urlopen error timed out>
-[COVER] 203468-stepsis-is-such-a-tease-s34e4: watch page carried no signed asset (via none, 128340 ms, empty response)
-[Scraper] curl_cffi fetch fallback https://nubiles-porn.com/video/watch/255566/stepsis-and-i-have-to-share-a-room: Failed to perform, curl: (28) Connection timed out after 20020 milliseconds. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
-[Scraper] requests fetch fallback https://nubiles-porn.com/video/watch/255566/stepsis-and-i-have-to-share-a-room: HTTPSConnectionPool(host='nubiles-porn.com', port=443): Max retries exceeded with url: /video/watch/255566/stepsis-and-i-have-to-share-a-room (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x000002389E47F750>, 'Connection to nubiles-porn.com timed out. (connect timeout=20)'))
-[Scraper] fetch error https://nubiles-porn.com/video/watch/255566/stepsis-and-i-have-to-share-a-room: <urlopen error timed out>
-[COVER] 255566-stepsis-and-i-have-to-share-a-room: watch page carried no signed asset (via none, 126137 ms, empty response)
-qt.multimedia.ffmpeg.mediadataholder: Could not open media. FFmpeg error description: Immediate exit requested
-[tls @ 00000238911D7B80] Unable to read from socket
-[tls @ 00000238911D7B80] Failed to send close message
-qt.multimedia.ffmpeg.mediadataholder: Could not open media. FFmpeg error description: Immediate exit requested
-[tls @ 00000238911D8140] Failed to send initial handshake data
-qt.multimedia.ffmpeg.mediadataholder: Could not open media. FFmpeg error description: I/O error
-Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'https://images.psmcdn.net/pvm/tour/pics/sheena_ryder3/bio_small.mp4':
-  Metadata:
-    major_brand     : mp42
-    minor_version   : 0
-    compatible_brands: mp42mp41
-    creation_time   : 2021-07-02T21:01:16.000000Z
-  Duration: 00:00:11.09, start: 0.000000, bitrate: 715 kb/s
-  Stream #0:0[0x1](eng): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv, smpte170m, progressive), 500x282, 696 kb/s, 23.98 fps, 23.98 tbr, 24k tbn (default)
-      Metadata:
-        creation_time   : 2021-07-02T21:01:16.000000Z
-        handler_name    : ?Mainconcept Video Media Handler
-        vendor_id       : [0][0][0][0]
-        encoder         : AVC Coding
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::VideoRenderer::unnamed
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::StreamDecoder::unnamed
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::Demuxer::unnamed
-[tls @ 00000238911D94C0] Failed to send close message
+[TURNSTILE] no gate config in what came back (0 byte(s), HTTP 429, title '') -- nothing to solve
+[Scraper] browser state: C:\Users\Mouad\Desktop\video_player\brattysis_browser_state.json (1 cookie(s))
+[PLAYLIST][INFO] path='https://watchporn.to/video/38053/brookie-blair-and-gracie-gates-adding-stepsis-and-her-friend-to-the-spank-bank-brattysis/' rows=[0] duration='36:25' quality='Stream'
+[Scraper] browser still on the challenge page after 5s: https://brattysis.com/video/watch/148455/adding-stepsis-and-her-friend-to-the-spank-bank-s22e12
+[COVER] 148455-adding-stepsis-and-her-friend-to-the-spank-bank-s22e12: watch page carried no signed asset (via browser, 10320 ms, BOT CHALLENGE, not the page, 14031 byte(s), img-host 0, srcset 0, signed 0, loops 0, samples 0, title "Security Check")
+[COVER] wrote C:\Users\Mouad\Desktop\video_player\watchpage_148455-adding-stepsis-and-her-friend-to-the-spank-bank-s22e12.html for inspection
+QWidgetWindow(0x1ce0f28df40, name="QWidgetClassWindow") must be a top level window.
+[PLAYLIST][INFO] path='https://watchporn.to/video/110001/harley-king-and-molly-little-my-stepsis-and-i-share-everything-cumswappingsis/' rows=[1] duration='29:27' quality='Stream'
+[TURNSTILE] no gate config in what came back (0 byte(s), HTTP 429, title '') -- nothing to solve
+[Scraper] browser state: nothing usable at C:\Users\Mouad\Desktop\video_player\nubiles-porn_browser_state.json -- starting cold, so any challenge has to be solved from scratch
+[Scraper] browser still on the challenge page after 5s: https://nubiles-porn.com/video/watch/171248/my-stepsis-and-i-share-everything-s4e2
+[COVER] 171248-my-stepsis-and-i-share-everything-s4e2: watch page carried no signed asset (via browser, 9291 ms, BOT CHALLENGE, not the page, 14015 byte(s), img-host 0, srcset 0, signed 0, loops 0, samples 0, title "Security Check")
+[COVER] wrote C:\Users\Mouad\Desktop\video_player\watchpage_171248-my-stepsis-and-i-share-everything-s4e2.html for inspection
