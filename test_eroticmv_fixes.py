@@ -4773,8 +4773,10 @@ _src56 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 report('_duration_seconds(' in _src56.split('def _site_movie_from_entry')[1].split('def ')[0]
        and '"duration":     _duration_seconds(data.get("duration"))' in _src56,
        'both scrapers store a runtime, so the criterion has something to read')
-report(_src56.count('duration_ms=_player_duration_ms(self.player, fp)') == 1,
-       'and the linker passes each row runtime into the match')
+report(_src56.count('_player_duration_ms(self.player, fp)') == 1
+       and _src56.count('duration_ms=dur)') == 2,
+       'and the linker passes each row runtime into the match -- on the '
+       'single-network path and the all-network one alike')
 
 # ── 57. Metadata DB stores only fields something reads back ──────────────────
 # Measured on the shipped nubiles DB: model_details 1.46 MB and model_urls
@@ -7262,6 +7264,164 @@ if _have80t:
         report(_msrc55._page_title(_page79) == 'Security Check',
            'the captured gate page reads as "Security Check"',
            repr(_msrc55._page_title(_page79)))
+
+# ---------------------------------------------------------------------------
+# 81. Search every network at once, show what decided the match, and let the
+#     user keep a performer out of the name.
+# ---------------------------------------------------------------------------
+print()
+print('--- 81: all-network search / criteria / hidden performers ---')
+
+_API81 = ('match_candidates_all_sites', 'signal_breakdown', 'hide_performer',
+          'load_hidden_performers', 'ALL_SITES_ID')
+_have81 = all(hasattr(_msrc55, n) for n in _API81)
+report(_have81, 'the all-network search, criteria and hidden-performer API is here',
+       'missing: ' + ', '.join(n for n in _API81 if not hasattr(_msrc55, n)))
+
+if _have81:
+    # -- the breakdown must agree with the number that actually ranked it ----
+    _dbf81s = os.path.join(_tf55.mkdtemp(), 'strength81.json')
+    with open(_dbf81s, 'w', encoding='utf-8') as _f81:
+        json.dump({'movies': {}}, _f81)
+    _tm81 = _msrc55.TitleMatcher(_msrc55.MetadataDB(_dbf81s))
+    for _sigs81 in (['scene'], ['scene', 'duration'], ['series', 'site'],
+                    ['model:a', 'model:b'], ['model:a', 'model:b', 'model:c'],
+                    ['scene', 'model:a', 'model:b', 'model:c', 'duration'],
+                    ['id'], ['id', 'scene'], []):
+        _bd81 = _msrc55.signal_breakdown(_sigs81)
+        _want81 = _tm81._signal_strength(list(_sigs81))
+        _got81 = (float(_bd81.rsplit('= ', 1)[1].split()[0])
+                  if '= ' in _bd81 else 0.0)
+        report(abs(_got81 - _want81) < 1e-9 or not _sigs81,
+           f'the breakdown of {_sigs81} totals the strength that ranked it',
+           f'shown {_got81} vs strength {_want81}')
+    report('capped' in _msrc55.signal_breakdown(
+        ['model:a', 'model:b', 'model:c']),
+       'and says when the cast weight was capped, rather than quietly summing '
+       'three performers past the cap',
+       _msrc55.signal_breakdown(['model:a', 'model:b', 'model:c']))
+    report('lone video id' in _msrc55.signal_breakdown(['id']),
+       'a bare video id is labelled as the weak signal it is',
+       _msrc55.signal_breakdown(['id']))
+
+    # -- two networks, one ranking ------------------------------------------
+    _dir81 = _tf55.mkdtemp()
+    _sa81 = {'id': '__s81a__', 'name': 'Network A',
+             'db_filename': 's81a.json', 'overrides_filename': 'o81a.json'}
+    _sb81 = {'id': '__s81b__', 'name': 'Network B',
+             'db_filename': 's81b.json', 'overrides_filename': 'o81b.json'}
+    # meta_fetched is what _build_index keys on; without it a record exists in
+    # the database and is invisible to the matcher.
+    _rows_a = {'a-1': {'slug': 'a-1', 'title': 'Stepmom Is A Great Kisser',
+                       'series': 'MomsTeachSex', 'models': ['Amirah Adara'],
+                       'date': '12/03/2024', 'video_id': '256294',
+                       'meta_fetched': True}}
+    _rows_b = {'b-1': {'slug': 'b-1', 'title': 'Stepmom Is A Great Kisser',
+                       'series': 'MomsTeachSex', 'models': ['Amirah Adara'],
+                       'date': '12/03/2024', 'video_id': '999999',
+                       'meta_fetched': True},
+               'b-2': {'slug': 'b-2', 'title': 'Totally Unrelated Scene',
+                       'series': 'OtherSeries', 'models': ['Someone Else'],
+                       'date': '01/01/2020', 'video_id': '111111',
+                       'meta_fetched': True}}
+    for _fn81, _rows81 in (('s81a.json', _rows_a), ('s81b.json', _rows_b)):
+        with open(os.path.join(_dir81, _fn81), 'w', encoding='utf-8') as _f81:
+            json.dump({'movies': _rows81}, _f81)
+
+    _saved81 = dict(_msrc55.METADATA_SITES)
+    _msrc55.METADATA_SITES['__s81a__'] = _sa81
+    _msrc55.METADATA_SITES['__s81b__'] = _sb81
+
+    class _Player81:
+        pass
+
+    _p81 = _Player81()
+    _p81.data_dir = _dir81
+    _p81._metadata_dbs = {}
+    _p81._metadata_matchers = {}
+    try:
+        _cands81 = _msrc55.match_candidates_all_sites(
+            _p81, 'Amirah Adara Stepmom Is A Great Kisser MomsTeachSex 256294',
+            limit=5)
+        _nets81 = [c.get('site_id') for c in _cands81]
+        report('__s81a__' in _nets81 and '__s81b__' in _nets81,
+           'one query returns candidates from every network, so the right '
+           'answer is no longer invisible because the wrong network was '
+           'picked first', str(_nets81))
+        report(all(c.get('site_name') for c in _cands81),
+           'and each candidate names the network it came from, so the card '
+           'can show it')
+        _str81 = [float(c.get('strength') or 0) for c in _cands81]
+        report(_str81 == sorted(_str81, reverse=True),
+           'merged candidates are ranked together on strength, not listed '
+           'network by network', str(_str81))
+        _top81 = _cands81[0]
+        report((_top81.get('movie') or {}).get('video_id') in ('256294', '999999'),
+           'the decisive video id decides which of two same-title scenes wins')
+        report(_msrc55.match_candidates_all_sites(
+            _p81, 'Amirah Adara Stepmom Is A Great Kisser', limit=1).__len__() == 1,
+           'and the limit is applied after merging, not per network')
+        report(_msrc55.match_candidates_all_sites(
+            _p81, 'nothing here matches at all xyzzy', limit=5) == [],
+           'a query with nothing in common still returns nothing')
+    finally:
+        _msrc55.METADATA_SITES.clear()
+        _msrc55.METADATA_SITES.update(_saved81)
+        if hasattr(_msrc55, '_SITE_MATCHERS'):
+            _msrc55._SITE_MATCHERS.clear()
+
+    # -- hidden performers ---------------------------------------------------
+    _d81h = _tf55.mkdtemp()
+    _prev81 = set(_msrc55._HIDDEN_PERFORMERS)
+    try:
+        _msrc55._HIDDEN_PERFORMERS.clear()
+        _mov81 = {'title': 'My Stepsis And I Share Everything',
+                  'series': 'CumSwappingSis',
+                  'models': ['Harley King', 'Molly Little', 'Rex Roundly'],
+                  'date': '12/03/2024'}
+        report('Rex Roundly' in _msrc55.format_display_name(_mov81),
+           'an unlisted male performer starts out in the name -- the built-in '
+           'list holds 81 of the 1916 performers in the shipped nubiles DB')
+        report(_msrc55.hide_performer(_d81h, 'Rex Roundly') is True,
+           'and can be dropped from every name from then on')
+        _name81 = _msrc55.format_display_name(_mov81)
+        report('Rex Roundly' not in _name81
+               and 'Harley King' in _name81 and 'Molly Little' in _name81,
+           'the hidden performer is gone and the others are untouched',
+           _name81)
+        report(os.path.isfile(os.path.join(_d81h, 'male_performers.json'))
+               and not os.path.exists(
+                   os.path.join(_d81h, 'male_performers.json.tmp')),
+           'it is saved next to the databases, atomically, with no .tmp left')
+        _msrc55._HIDDEN_PERFORMERS.clear()
+        report('Rex Roundly' in _msrc55.format_display_name(_mov81),
+           'clearing memory brings him back, so the test really is the file')
+        _msrc55.load_hidden_performers(_d81h)
+        report('Rex Roundly' not in _msrc55.format_display_name(_mov81),
+           'and reloading from disk hides him again -- it survives a restart')
+        with open(os.path.join(_d81h, 'male_performers.json'), 'w',
+                  encoding='utf-8') as _f81:
+            _f81.write('')
+        report(_msrc55.load_hidden_performers(_d81h) == set(),
+           'a truncated list reads as empty rather than raising')
+        report(_msrc55.hide_performer(_d81h, '   ') is False,
+           'and a blank name is refused')
+    finally:
+        _msrc55._HIDDEN_PERFORMERS.clear()
+        _msrc55._HIDDEN_PERFORMERS.update(_prev81)
+
+    # -- the dialog is wired to it ------------------------------------------
+    _txt81 = open(_msrc55.__file__, encoding='utf-8').read()
+    report('"All networks", ALL_SITES_ID' in _txt81,
+       'the linker offers searching every network at once')
+    _body81 = _fn_body(_txt81, '    def _apply_to_file(')
+    report('site = METADATA_SITES.get(site_id) or self.site' in _body81,
+       'and applying a row records the network its candidate came from, not '
+       'whichever one the dialog happens to be showing')
+    report('pyqtSignal(str, dict, str)' in _txt81,
+       'the card carries that network back when it is applied')
+    report('_hide_performer_menu' in _txt81 and 'male_performers.json' in _txt81,
+       'and the card has a way to hide a performer without editing JSON')
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

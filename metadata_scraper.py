@@ -39,7 +39,7 @@ from urllib.parse import urlparse, unquote, urljoin
 from PyQt6.QtCore  import Qt, QThread, pyqtSignal, QTimer, QObject
 from PyQt6.QtGui   import QFont
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QMenu,
     QProgressBar, QTextEdit, QWidget, QFrame, QScrollArea, QSplitter,
     QComboBox,
 )
@@ -65,7 +65,7 @@ LINKS_FILENAME       = "metadata_links.json"
 # manually, so "is the running player the one that was just pushed?" has been
 # an open question more than once and has cost whole test runs. This answers it
 # from the first line of the log.
-BUILD = "cov9-one-request"
+BUILD = "link3-allnet"
 print(f"[MetadataScraper] build {BUILD}")
 MATCH_THRESHOLD      = 0.32
 SCRAPE_DELAY         = 0.8     # seconds between yt-dlp calls
@@ -3356,11 +3356,64 @@ MALE_PERFORMERS = {
 }
 
 
+MALE_PERFORMERS_FILENAME = "male_performers.json"
+
+# The built-in list above is finite and the cast is not: 1916 distinct
+# performers in the shipped nubiles DB, 81 of them on it. There is no gender
+# field in either network's data -- a model entry carries only name, img,
+# cover and stats -- and scene count does not separate them either (the most
+# prolific unlisted names are women). So the list has to be extendable by the
+# person looking at the row, and it has to survive a restart.
+_HIDDEN_PERFORMERS: set = set()
+
+
+def hidden_performers_path(app_dir) -> str:
+    return os.path.join(str(app_dir or "."), MALE_PERFORMERS_FILENAME)
+
+
+def load_hidden_performers(app_dir) -> set:
+    global _HIDDEN_PERFORMERS
+    path = hidden_performers_path(app_dir)
+    names = set()
+    try:
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            names = {str(n).strip().lower()
+                     for n in (data or []) if str(n).strip()}
+    except Exception as exc:
+        print(f"[MetadataScraper] could not read {path}: "
+              f"{type(exc).__name__}: {exc}")
+    _HIDDEN_PERFORMERS = names
+    return names
+
+
+def hide_performer(app_dir, name: str) -> bool:
+    """Leave a performer out of every display name, permanently."""
+    norm = str(name or "").strip().lower()
+    if not norm:
+        return False
+    _HIDDEN_PERFORMERS.add(norm)
+    path = hidden_performers_path(app_dir)
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(sorted(_HIDDEN_PERFORMERS), fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        return True
+    except Exception as exc:
+        print(f"[MetadataScraper] could not save {path}: "
+              f"{type(exc).__name__}: {exc}")
+        return False
+
+
 def _is_male_performer(name: str) -> bool:
     if not name:
         return False
     norm = str(name).strip().lower()
-    if norm in MALE_PERFORMERS:
+    if norm in MALE_PERFORMERS or norm in _HIDDEN_PERFORMERS:
         return True
     tokens = norm.split()
     if any(w in tokens for w in ['stepbro', 'stepson', 'stepdad', 'husband', 'boyfriend', 'guy', 'dad', 'brother', 'father', 'son']):
@@ -3501,6 +3554,98 @@ def _get_metadata_matcher(player, db: MetadataDB, force: bool = False) -> TitleM
 # Integration
 # ─────────────────────────────────────────────────────────────────────────────
 
+ALL_SITES_ID = "__all__"
+
+_SITE_MATCHERS: dict = {}
+
+
+def _matcher_for_db(db) -> "TitleMatcher":
+    """A TitleMatcher per database, cached on its signature.
+
+    _get_metadata_matcher keeps a single slot on the player, so walking every
+    network through it rebuilds the index on each hop -- measured at 0.71 s for
+    the 10564-record teamskeet DB and 0.45 s for nubiles, which per playlist
+    row on the UI thread is a visible freeze.
+    """
+    sig = _db_signature(db)
+    matcher = _SITE_MATCHERS.get(sig)
+    if matcher is None:
+        matcher = TitleMatcher(db)
+        _SITE_MATCHERS[sig] = matcher
+    return matcher
+
+
+def signal_breakdown(signals) -> str:
+    """Exactly what a match was decided on, with each criterion's weight.
+
+    Mirrors _signal_strength, cap included, so the number shown is the number
+    that ranked the candidate rather than a paraphrase of it.
+    """
+    tm = TitleMatcher
+    sigs = [str(s) for s in (signals or ())]
+    if not sigs:
+        return ""
+    if sigs == ["id"]:
+        return (f"a lone video id = {tm._LONE_ID_STRENGTH:.2f} (held below "
+                f"{tm.HIGH_CONFIDENCE_STRENGTH:.2f} on purpose)")
+    parts, total, model_total, model_n = [], 0.0, 0.0, 0
+    for sig in sigs:
+        if sig.startswith("model:"):
+            model_total += tm._SIGNAL_WEIGHTS["model"]
+            model_n += 1
+            parts.append(f"{sig.split(':', 1)[1]} "
+                         f"{tm._SIGNAL_WEIGHTS['model']:.2f}")
+            continue
+        weight = float(tm._SIGNAL_WEIGHTS.get(sig, 0.0))
+        total += weight
+        parts.append(f"{sig} {weight:.2f}")
+    cast = min(model_total, tm._MODEL_SIGNAL_CAP)
+    if model_n:
+        note = (f", capped at {tm._MODEL_SIGNAL_CAP:.2f}"
+                if model_total > tm._MODEL_SIGNAL_CAP else "")
+        parts.append(f"cast {cast:.2f}{note}")
+    return " + ".join(parts) + f" = {total + cast:.2f}"
+
+
+def match_candidates_all_sites(player, raw: str, limit: int = 5,
+                               include_weak: bool = True, duration_ms: int = 0,
+                               site_ids=None) -> list:
+    """Candidates from every network, ranked against each other.
+
+    Picking a network before searching means the right answer is simply
+    missing whenever the pick was wrong, and nothing in the window says so --
+    the user sees a weak match and concludes there is no good one. Searching
+    all of them and ranking on the same signals puts the decision on the
+    evidence. Each candidate carries site_id/site_name so the card can name
+    the network and applying it can record the right one.
+    """
+    out = []
+    for site_id, site in METADATA_SITES.items():
+        if site_ids and site_id not in site_ids:
+            continue
+        try:
+            db = _metadata_db_for_site(player, site)
+            if not db.count():
+                continue
+            matcher = _matcher_for_db(db)
+            if matcher is None:
+                continue
+            for cand in matcher.match_candidates(
+                    raw, limit=limit, include_weak=include_weak,
+                    duration_ms=duration_ms):
+                cand = dict(cand)
+                cand["site_id"] = site_id
+                cand["site_name"] = site.get("name") or site_id
+                out.append(cand)
+        except Exception as exc:
+            print(f"[MetadataScraper] {site_id} search failed: "
+                  f"{type(exc).__name__}: {exc}")
+    out.sort(key=lambda c: (-float(c.get("strength") or 0.0),
+                            -float(c.get("score") or 0.0),
+                            str((c.get("movie") or {}).get("slug") or "")))
+    return out[:max(1, int(limit or 1))]
+
+
 def init_metadata_scraper(player):
     app_dir   = getattr(player, "data_dir", os.path.dirname(os.path.abspath(__file__)))
     site      = METADATA_SITES[DEFAULT_SITE_ID]
@@ -3516,6 +3661,7 @@ def init_metadata_scraper(player):
     player._metadata_sites          = METADATA_SITES
     player._metadata_active_site    = DEFAULT_SITE_ID
     player._metadata_updates_running = set()
+    load_hidden_performers(app_dir)
 
     if os.path.exists(over_path):
         try:
@@ -3821,7 +3967,7 @@ class _StretchedContainer(QWidget):
 
 
 class _MovieResultCard(QFrame):
-    apply_clicked = pyqtSignal(str, dict)  # file_path, movie
+    apply_clicked = pyqtSignal(str, dict, str)  # file_path, movie, site_id
 
     def __init__(self, file_path: str, movie: Optional[dict], parent=None,
                  display_name: str = "", candidates: Optional[list[dict]] = None,
@@ -3830,12 +3976,17 @@ class _MovieResultCard(QFrame):
         self.file_path    = file_path
         self.movie        = movie
         self.candidates   = candidates or []
+        # Which network the shown candidate came from. With every network
+        # searched at once this is no longer the dialog's current selection.
+        self.site_id      = str((self.candidates[0].get("site_id")
+                                 if self.candidates else "") or "")
         self.auto_apply   = bool(auto_apply and movie)
         if self.movie is None and self.candidates:
             self.movie = self.candidates[0].get("movie")
         # display_name: human-readable label (stream title or cleaned filename/
         # URL segment — never the raw URL string).
         self._display_name = unquote(display_name or _extract_raw_title(file_path))
+        self._player = None
         self._build()
 
     def resizeEvent(self, event):
@@ -3901,9 +4052,18 @@ class _MovieResultCard(QFrame):
                         prefix = "HIGH"
                     else:
                         prefix = "MAYBE"
-                    combo.addItem(f"{prefix}  {format_display_name(movie)}", cand)
+                    net = cand.get("site_name") or ""
+                    combo.addItem(
+                        f"{prefix}  {format_display_name(movie)}"
+                        + (f"   [{net}]" if net else ""), cand)
                 combo.currentIndexChanged.connect(lambda *_: self._select_candidate(combo.currentData()))
                 lay.addWidget(combo)
+
+                self._why_label = QLabel("")
+                self._why_label.setTextFormat(Qt.TextFormat.RichText)
+                self._why_label.setWordWrap(True)
+                lay.addWidget(self._why_label)
+                self._update_why(self.candidates[0] if self.candidates else None)
 
                 related_count = sum(1 for c in self.candidates if c.get("related"))
                 if related_count:
@@ -3935,6 +4095,14 @@ class _MovieResultCard(QFrame):
                 vl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
                 row.addWidget(kl)
                 row.addWidget(vl, 1)
+                if k == "Models":
+                    self._models_value = vl
+                    hb = QPushButton("hide…")
+                    hb.setFixedWidth(52)
+                    hb.setToolTip("Leave a performer out of every display name.\n"
+                                  "Saved to male_performers.json.")
+                    hb.clicked.connect(lambda *_: self._hide_performer_menu(hb))
+                    row.addWidget(hb)
                 lay.addLayout(row)
 
             sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
@@ -3999,7 +4167,7 @@ class _MovieResultCard(QFrame):
     def _apply(self):
         m = dict(self.movie)
         m["_override_name"] = self.name_edit.toPlainText().strip()
-        self.apply_clicked.emit(self.file_path, m)
+        self.apply_clicked.emit(self.file_path, m, self.site_id)
 
     def _select_candidate(self, candidate):
         if not isinstance(candidate, dict):
@@ -4009,8 +4177,44 @@ class _MovieResultCard(QFrame):
             return
         self.auto_apply = int(candidate.get("signal_count", 0)) >= 2
         self.movie = movie
+        self.site_id = str(candidate.get("site_id") or self.site_id or "")
         if hasattr(self, "name_edit"):
             self.name_edit.setPlainText(format_display_name(movie))
+        self._update_why(candidate)
+
+    def _update_why(self, candidate=None):
+        """Show the criteria that decided this match, with their weights."""
+        label = getattr(self, "_why_label", None)
+        if label is None:
+            return
+        cand = candidate if isinstance(candidate, dict) else (
+            self.candidates[0] if self.candidates else {})
+        why = signal_breakdown((cand or {}).get("signals"))
+        net = (cand or {}).get("site_name") or ""
+        text = "  |  ".join(x for x in (
+            f"network: {net}" if net else "", why) if x)
+        label.setText(f"<span style='color:{_DIM};font-size:10px;'>{text}</span>")
+        label.setVisible(bool(text))
+
+    def _hide_performer_menu(self, button):
+        """Let the user drop a performer from every display name, for good."""
+        names = [m for m in (self.movie or {}).get("models", []) if m]
+        if not names:
+            return
+        menu = QMenu(self)
+        for name in names:
+            act = menu.addAction(str(name))
+            act.setData(str(name))
+        picked = menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+        if picked is None:
+            return
+        app_dir = getattr(getattr(self, "_player", None), "data_dir", "") or ""
+        if hide_performer(app_dir, picked.data()):
+            self.name_edit.setPlainText(format_display_name(self.movie))
+            kept = [m for m in (self.movie or {}).get("models", [])
+                    if m and not _is_male_performer(m)]
+            if getattr(self, "_models_value", None) is not None:
+                self._models_value.setText(" & ".join(kept))
 
 
 class MetadataScraperDialog(QDialog):
@@ -4075,6 +4279,7 @@ class MetadataScraperDialog(QDialog):
             f"background:{_DARK}; color:{_TEXT}; border:1px solid {_PANEL};"
             f" border-radius:4px; padding:5px 8px; font-size:12px;"
         )
+        self._site_combo.addItem("All networks", ALL_SITES_ID)
         for site_id, site in METADATA_SITES.items():
             self._site_combo.addItem(site["name"], site_id)
         self._site_combo.setCurrentIndex(0)
@@ -4214,6 +4419,18 @@ class MetadataScraperDialog(QDialog):
     def _on_site_changed(self, *_):
         site_id = self._site_combo.currentData() or DEFAULT_SITE_ID
         self.site_id = site_id
+        if site_id == ALL_SITES_ID:
+            # The scrape buttons still need a concrete site to point at; only
+            # the search spans all of them.
+            self.site = METADATA_SITES[DEFAULT_SITE_ID]
+            self.db = _metadata_db_for_site(self.player, self.site)
+            self.player._metadata_active_site = site_id
+            self.matcher = _get_metadata_matcher(self.player, self.db)
+            self._clear_results()
+            self._refresh_db_status()
+            self._set_status("Searching every network.")
+            QTimer.singleShot(50, self._run_match)
+            return
         self.site = METADATA_SITES.get(site_id, METADATA_SITES[DEFAULT_SITE_ID])
         self.db = _metadata_db_for_site(self.player, self.site)
         self.player._metadata_active_site = site_id
@@ -4294,6 +4511,15 @@ class MetadataScraperDialog(QDialog):
 
     # ── matching ──────────────────────────────────────────────────────────────
 
+    def _candidates_for(self, raw: str, fp=None) -> list:
+        """Candidates for one row, from every network or just the chosen one."""
+        dur = _player_duration_ms(self.player, fp) if fp else 0
+        if (self._site_combo.currentData() or DEFAULT_SITE_ID) == ALL_SITES_ID:
+            return match_candidates_all_sites(
+                self.player, raw, limit=5, include_weak=True, duration_ms=dur)
+        return self.matcher.match_candidates(
+            raw, limit=5, include_weak=True, duration_ms=dur)
+
     def _run_match(self):
         self._clear_results()
         self._cards.clear()
@@ -4302,10 +4528,7 @@ class MetadataScraperDialog(QDialog):
 
         for fp in self.file_paths:
             raw = _best_match_raw_title(self.player, fp)
-            candidates = self.matcher.match_candidates(
-                raw, limit=5, include_weak=True,
-                duration_ms=_player_duration_ms(self.player, fp),
-            )
+            candidates = self._candidates_for(raw, fp)
             movie = None
             auto_apply = False
             if candidates:
@@ -4319,6 +4542,7 @@ class MetadataScraperDialog(QDialog):
                                      display_name=raw,
                                      candidates=candidates,
                                      auto_apply=auto_apply)
+            card._player = self.player
             card.apply_clicked.connect(self._on_apply_single)
             idx = self._res_layout.count() - 1
             self._res_layout.insertWidget(idx, card)
@@ -4347,7 +4571,7 @@ class MetadataScraperDialog(QDialog):
         raw = _best_match_raw_title(self.player, url, fetch_remote_page=True)
         self._log_msg(f"URL title: {raw!r}")
 
-        candidates = self.matcher.match_candidates(raw, limit=5, include_weak=True)
+        candidates = self._candidates_for(raw)
         movie = (candidates[0].get("movie")
                  if candidates and _candidate_is_high_confidence(candidates[0])
                  else None)
@@ -4368,9 +4592,10 @@ class MetadataScraperDialog(QDialog):
         self._set_status(f"Applied to {len(self.file_paths)} file(s).")
         self._run_match()
 
-    def _on_apply_single(self, file_path: str, movie: dict):
+    def _on_apply_single(self, file_path: str, movie: dict, site_id: str = ""):
         custom = movie.pop("_override_name", None)
-        self._apply_to_file(file_path, movie, custom_name=custom)
+        self._apply_to_file(file_path, movie, custom_name=custom,
+                            site_id=site_id)
         self._log_msg(f"Applied: {custom or format_display_name(movie)}")
         self._run_match()
 
@@ -4379,13 +4604,18 @@ class MetadataScraperDialog(QDialog):
         for card in self._cards:
             if card.movie and getattr(card, "auto_apply", False):
                 name = card.name_edit.toPlainText().strip() if hasattr(card, "name_edit") else None
-                self._apply_to_file(card.file_path, card.movie, custom_name=name)
+                self._apply_to_file(card.file_path, card.movie, custom_name=name,
+                                    site_id=getattr(card, "site_id", ""))
                 n += 1
         self._log_msg(f"Applied {n} matches.")
         self._set_status(f"{n} matches applied.")
         self._run_match()
 
-    def _apply_to_file(self, file_path: str, movie: dict, custom_name: Optional[str]):
+    def _apply_to_file(self, file_path: str, movie: dict,
+                       custom_name: Optional[str], site_id: str = ""):
+        # With every network searched at once, a row's network is the one its
+        # candidate came from -- not whichever site the dialog happens to show.
+        site = METADATA_SITES.get(site_id) or self.site
         name = custom_name or format_display_name(movie)
         if not name:
             return
@@ -4407,7 +4637,7 @@ class MetadataScraperDialog(QDialog):
             if not hasattr(self.player, "_metadata_links"):
                 self.player._metadata_links = {}
             self.player._metadata_links[target_key] = {
-                "site": self.site.get("id") or DEFAULT_SITE_ID,
+                "site": site.get("id") or DEFAULT_SITE_ID,
                 "slug": movie.get("slug") or "",
                 "name": name,
             }
@@ -4420,8 +4650,8 @@ class MetadataScraperDialog(QDialog):
         # instead of at the click an hour later.
         try:
             refresh_signed_assets_async(
-                self.player, self.site, movie,
-                _metadata_db_for_site(self.player, self.site), force=True)
+                self.player, site, movie,
+                _metadata_db_for_site(self.player, site), force=True)
         except Exception as e:
             print(f"[MetadataScraper] link refresh error: {e}")
 
