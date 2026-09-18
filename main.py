@@ -9224,6 +9224,7 @@ class VideoPlayer(QMainWindow):
             return
         self._hover_clip_wanted = True
         self._hover_clip_ready = False
+        self._hover_clip_source = url
         self._hover_clip_timer.start()
         self._hover_cover_hold_timer.start()
         try:
@@ -9274,6 +9275,13 @@ class VideoPlayer(QMainWindow):
             self._hover_clip_player.play()
         except Exception:
             self._abandon_hover_clip()
+            return
+        try:
+            print("[HOVER] replaying the clip from the start ("
+                  + os.path.basename(str(
+                      getattr(self, '_hover_clip_source', '') or '')) + ")")
+        except Exception:
+            pass
 
     def _swap_to_hover_clip(self):
         """Cover has had its second and the clip is buffered: swap over.
@@ -9290,6 +9298,17 @@ class VideoPlayer(QMainWindow):
         self.hover_preview_video.show()
         self._hover_clip_last_pos = -1
         self._hover_clip_stall = 0
+        try:
+            try:
+                _dur_ms = int(self._hover_clip_player.duration() or 0)
+            except Exception:
+                _dur_ms = 0
+            print("[HOVER] clip swapped in: "
+                  + os.path.basename(str(
+                      getattr(self, '_hover_clip_source', '') or ''))
+                  + f" duration={_dur_ms} ms")
+        except Exception:
+            pass
         try:
             # Plain play(). Seeking here looked harmless and was not: at this
             # point the player has parsed the header but not opened the stream,
@@ -9335,6 +9354,7 @@ class VideoPlayer(QMainWindow):
             # Claiming to play but the clock is not moving.
             self._hover_clip_stall += 1
             if self._hover_clip_stall >= 6:
+                print(f"[HOVER] clip clock stuck at {pos} ms, restarting it")
                 self._hover_clip_stall = 0
                 self._restart_hover_clip()
                 self._hover_clip_last_pos = pos
