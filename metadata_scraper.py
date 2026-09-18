@@ -675,6 +675,81 @@ class _BrowserGallerySession:
         self._pw = self._browser = self._context = self._page = None
 
 
+def _host_of(url) -> str:
+    match = re.match(r"https?://([^/]+)", str(url or "").strip(), re.IGNORECASE)
+    if not match:
+        return ""
+    host = match.group(1).lower().split(":")[0]
+    return host[4:] if host.startswith("www.") else host
+
+
+def _source_for_url(site: dict, url) -> dict:
+    """The gallery_sources entry whose network a URL belongs to.
+
+    A site is a family of networks -- nubiles-porn.com, nubilefilms.com,
+    brattysis.com, momlover.com -- and the per-network entry is what carries
+    needs_browser, so the site dict on its own says nothing.
+    """
+    host = _host_of(url)
+    for source in (site or {}).get("gallery_sources") or []:
+        if host and _host_of(source.get("base_url")) == host:
+            return source
+    return {}
+
+
+def _site_needs_browser(site: dict, url) -> bool:
+    """Whether a page from this site has to be read in a browser.
+
+    nubiles answers a plain HTTP client with a page titled "Security Check",
+    and every one of its networks sets needs_browser -- on the gallery_sources
+    entry, never on the site itself.
+    """
+    if (site or {}).get("needs_browser"):
+        return True
+    source = _source_for_url(site, url)
+    if source:
+        return bool(source.get("needs_browser"))
+    return any(s.get("needs_browser")
+               for s in (site or {}).get("gallery_sources") or [])
+
+
+def _browser_state_path(db, site: dict, url) -> str:
+    """Where Update keeps the browser state that got past a site's challenge.
+
+    Reusing it matters: a fresh context is far more likely to be challenged
+    again than one that has already been through. The name has to match the one
+    Update writes, which is keyed on the network, not on the site.
+    """
+    directory = os.path.dirname(getattr(db, "db_path", "") or "") or "."
+    source = _source_for_url(site, url)
+    ident = str(source.get("id") or (site or {}).get("id") or "gallery")
+    return os.path.join(directory, f"{ident}_browser_state.json")
+
+
+_BROWSER_FETCH_LOCK = threading.Lock()
+
+
+def _browser_page_html(url: str, state_path: str,
+                       wait_selector: str = "a[href*='/video/']",
+                       timeout: int = 25000) -> Optional[str]:
+    """Fetch one page through a headless browser.
+
+    Sites that challenge a plain HTTP client -- nubiles answers one with a page
+    titled "Security Check" -- can only be read this way. A session is opened
+    and closed per call: Playwright's sync API is bound to the thread that
+    started it, and this runs on a hover thread.
+    """
+    # One at a time. Each call starts a Chromium, and a hover can arrive for
+    # several different movies in a row; without this they would all launch at
+    # once. The per-movie cooldown bounds how often this happens at all.
+    with _BROWSER_FETCH_LOCK:
+        session = _BrowserGallerySession(cookie_path=state_path)
+        try:
+            return session.get(url, wait_selector=wait_selector, timeout=timeout)
+        finally:
+            session.close()
+
+
 def _reader_url(url: str) -> str:
     return "https://r.jina.ai/http://r.jina.ai/http://" + str(url or "").strip()
 
@@ -1562,6 +1637,9 @@ def _describe_page(page: str) -> str:
             f"samples {low.count('/samples/')}"]
     if title:
         bits.append(f'title "{title}"')
+    if ("security check" in low[:6000] or "cf-chl" in low
+            or "challenge-platform" in low):
+        bits.insert(0, "BOT CHALLENGE, not the page")
     return ", ".join(bits)
 
 
@@ -1593,7 +1671,16 @@ def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
 
     def _work():
         try:
-            page = _fetch_html(page_url) or ""
+            page = ""
+            if _site_needs_browser(site, page_url):
+                try:
+                    page = _browser_page_html(
+                        page_url, _browser_state_path(db, site, page_url)) or ""
+                except Exception as exc:
+                    print(f"[COVER] {slug}: browser fetch failed: "
+                          f"{type(exc).__name__}: {exc}")
+            if not page:
+                page = _fetch_html(page_url) or ""
             cover = signed_cover_url(page, hint)
             loop = signed_media_url(page, hint)
             if not cover and not loop:

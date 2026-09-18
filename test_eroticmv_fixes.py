@@ -6547,5 +6547,120 @@ _db75c.save()
 report(len(json.load(open(_d75c, encoding='utf-8'))['movies']) == 1,
        'a fresh save writes over the empty one cleanly')
 
+
+# ── 76. A site that challenges a plain HTTP client has to be read in a browser ──
+print()
+print("76. reading a challenged watch page")
+if hasattr(_msrc55, '_browser_page_html'):
+    _FOLDER76 = 'stepmom_is_a_great_kisser'
+    _URL76 = ('https://images.nubiles-porn.com/videos/' + _FOLDER76 +
+              '/samples/cover1280.jpg?st=AbCdEfGhIjKlMnOpQrStUv&e=1999999999')
+    _PAGE76 = '<html><img data-srcset="' + _URL76 + ' 1280w"></html>'
+    _site76 = dict(_msrc55.METADATA_SITES['nubiles'])
+    _site76['db_filename'] = 's76.json'
+    _d76 = os.path.join(_tf55.mkdtemp(), 's76.json')
+    with open(_d76, 'w', encoding='utf-8') as _f76:
+        json.dump({'movies': {}}, _f76)
+
+    class _Player76:
+        pass
+
+    _p76 = _Player76()
+    _p76.data_dir = os.path.dirname(_d76)
+    _MOV76 = {'slug': '256294-stepmom-is-a-great-kisser-s27e1',
+              'title': 'Stepmom Is A Great Kisser', 'series': 'MomsTeachSex',
+              'url': 'https://nubiles-porn.com/video/watch/256294/slug'}
+    _db76 = _msrc55.MetadataDB(_d76)
+    _calls76 = []
+    _plain76 = []
+    _ob76 = _msrc55._browser_page_html
+    _oh76 = _msrc55._fetch_html
+    _oby76 = _msrc55._fetch_bytes
+    try:
+        _msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: (
+            b'\xff\xd8' + b'0' * 800)
+        _msrc55._fetch_html = lambda url, timeout=20: (
+            _plain76.append(url), '')[1]
+        _msrc55._browser_page_html = lambda url, state, **kw: (
+            _calls76.append((url, state)), _PAGE76)[1]
+        _msrc55._REFRESH_LAST.pop(_MOV76['slug'], None)
+        report(_msrc55.refresh_signed_assets_async(
+            _p76, _site76, _MOV76, _db76) is True,
+           'a hover on a site that challenges plain requests tries a browser')
+        for _ in range(300):
+            if _db76.movies.get(_MOV76['slug'], {}).get('image'):
+                break
+            time.sleep(0.01)
+        report(bool(_calls76) and _calls76[0][0] == _MOV76['url'],
+           'which reads the movie\'s own watch page, because a plain request '
+           'only ever gets a "Security Check" interstitial back',
+           str(_calls76[0][0]) if _calls76 else 'no browser call')
+        report(bool(_calls76) and _calls76[0][1].endswith(
+            'nubiles-porn_browser_state.json'),
+           'reusing the browser state Update already established -- keyed on '
+           'the network the movie came from, not on the site -- so the second '
+           'visit is not challenged again',
+           str(_calls76[0][1]) if _calls76 else '(none)')
+        report('cover1280.jpg' in str(
+            _db76.movies.get(_MOV76['slug'], {}).get('image') or ''),
+           'and a signed cover found that way lands in the database',
+           str(_db76.movies.get(_MOV76['slug'], {}).get('image') or '(none)')[:90])
+        report(not _plain76,
+           'and the plain request is not made when the browser answered')
+
+        # A browser that yields nothing still falls back, so a site that stops
+        # needing one does not silently lose covers.
+        _db76b = _msrc55.MetadataDB(_d76)
+        _db76b.movies.clear()
+        _calls76.clear()
+        _plain76.clear()
+        _msrc55._browser_page_html = lambda url, state, **kw: (
+            _calls76.append((url, state)), None)[1]
+        _msrc55._fetch_html = lambda url, timeout=20: (
+            _plain76.append(url), _PAGE76)[1]
+        _msrc55._REFRESH_LAST.pop(_MOV76['slug'], None)
+        _msrc55.refresh_signed_assets_async(_p76, _site76, _MOV76, _db76b)
+        for _ in range(300):
+            if _db76b.movies.get(_MOV76['slug'], {}).get('image'):
+                break
+            time.sleep(0.01)
+        report(bool(_plain76),
+           'and a browser that yields nothing falls back to a plain request',
+           f'{len(_calls76)} browser / {len(_plain76)} plain')
+    finally:
+        _msrc55._browser_page_html = _ob76
+        _msrc55._fetch_html = _oh76
+        _msrc55._fetch_bytes = _oby76
+        _msrc55._REFRESH_LAST.pop(_MOV76['slug'], None)
+
+    report('BOT CHALLENGE' in _msrc55._describe_page(
+        '<html><head><title>Security Check</title></head></html>'),
+       'an interstitial is named as one rather than described as if it were '
+       'the page -- that distinction is what the field log was missing',
+       _msrc55._describe_page('<title>Security Check</title>'))
+    report('BOT CHALLENGE' not in _msrc55._describe_page(_PAGE76),
+       'and a real page is not mislabelled as a challenge')
+    _st76 = _msrc55._browser_state_path(_db76, _site76, _MOV76['url'])
+    report(_st76.replace('\\', '/').endswith('/nubiles-porn_browser_state.json'),
+       'the state file is named per network, next to the database', _st76)
+    report(_msrc55._site_needs_browser(_site76, _MOV76['url']) is True,
+       'needs_browser is read off the matching gallery_sources entry -- it is '
+       'not on the site dict, so checking that alone never fires',
+       f"site={_site76.get('needs_browser')!r} "
+       f"source={_msrc55._source_for_url(_site76, _MOV76['url']).get('id')!r}")
+    report(_msrc55._site_needs_browser(
+        dict(_site76, gallery_sources=[]), _MOV76['url']) is False,
+       'and a site with no browser-flagged networks is not sent through one')
+    _txt76 = open(_msrc55.__file__, encoding='utf-8').read()
+    _i76 = _txt76.index('def _browser_page_html(')
+    _body76 = _txt76[_i76:_txt76.index('\ndef ', _i76 + 10)]
+    report('_BROWSER_FETCH_LOCK' in _body76,
+       'browser fetches are serialized -- each one starts a Chromium, and '
+       'hovers for several different movies arrive in a row')
+else:
+    report(False, 'the browser-backed refresh is present',
+           'missing: _browser_page_html')
+
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
