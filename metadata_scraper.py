@@ -389,8 +389,20 @@ class MetadataDB:
             try:
                 with open(self.db_path, "w", encoding="utf-8") as f:
                     json.dump(self._data, f, ensure_ascii=False, indent=2)
+                self._save_error_at = 0.0
+                self._save_errors_hidden = 0
             except Exception as e:
-                print(f"[MetadataDB] save error: {e}")
+                # A full disk made this print on every autosave: fifty
+                # identical lines, burying the one thing worth reading in the
+                # log. Report it, then stay quiet about the same failure.
+                now = time.time()
+                hidden = getattr(self, "_save_errors_hidden", 0) + 1
+                self._save_errors_hidden = hidden
+                if now - getattr(self, "_save_error_at", 0.0) > 300:
+                    self._save_error_at = now
+                    extra = (f" (+{hidden - 1} more since the last report)"
+                             if hidden > 1 else "")
+                    print(f"[MetadataDB] save error: {e}{extra}")
 
     # ── accessors ─────────────────────────────────────────────────────────────
 
@@ -1288,35 +1300,6 @@ def preview_loop_url(title: str, series: str, height: int = 480) -> str:
     return f"https://images.nubiles-porn.com/videos/{t}/videos/loops/{name}"
 
 
-_SIGNED_LOOP_RE = re.compile(
-    r"""https?://[^"'\s)<>]+?/loops/[^"'\s)<>]+?\.mp4(?:\?[^"'\s)<>]*)?""",
-    re.IGNORECASE)
-
-
-def signed_loop_url(html: str, hint: str = "") -> str:
-    """The signed preview loop in a page, '' if there is none.
-
-    The gallery carries one per card in a data-* attribute, and a watch page
-    mints a fresh signature for the same asset -- which is how a preview is
-    recovered once the signature a scrape stored has expired.
-
-    `hint` is a title or series. When it is given it is a hard filter, not a
-    preference: two of every twelve gallery cards have no loop at all, and
-    falling back to the longest-lived loop on the page would cache another
-    scene's clip against this row.
-    """
-    needle = _cdn_folder_name(hint) if hint else ""
-    best, best_exp = "", -1
-    for match in _SIGNED_LOOP_RE.finditer(html or ""):
-        url = html_unescape(match.group(0))
-        if needle and needle not in url.lower():
-            continue
-        exp = _image_expiry_epoch(url)
-        if exp > best_exp:
-            best, best_exp = url, exp
-    return best
-
-
 def _gallery_preview_video(html: str, title_start: int, window: int = 4000) -> str:
     """The hover-preview mp4 for a card, from the markup just before its title.
 
@@ -1413,78 +1396,6 @@ def save_thumbnail(db_path: str, slug: str, url: str, referer: str = "",
     if m:
         ext = "." + m.group(1).lower().replace("jpeg", "jpg")
     dest_dir = thumbnails_dir(db_path)
-    try:
-        os.makedirs(dest_dir, exist_ok=True)
-        dest = os.path.join(dest_dir, re.sub(r"[^A-Za-z0-9._-]", "_", slug) + ext)
-        with open(dest, "wb") as f:
-            f.write(data)
-        return dest
-    except Exception:
-        return ""
-
-
-# A nubiles loop is a few seconds of 480p, so a couple of megabytes. Anything
-# much larger means the URL was not a loop, and pulling a whole scene down on a
-# hover is not what was asked for.
-_PREVIEW_MAX_BYTES = 25 * 1024 * 1024
-
-
-def previews_dir(db_path: str) -> str:
-    base = os.path.dirname(os.path.abspath(db_path or "")) or "."
-    return os.path.join(base, "previews")
-
-
-_PREVIEW_EXTS = (".mp4", ".webm", ".m4v")
-
-
-def _preview_path_for_slug(player, site: dict, slug: str) -> str:
-    """The locally cached preview loop for a movie, if one was downloaded."""
-    if not slug:
-        return ""
-    folder = previews_dir(_db_path_for_site(player, site))
-    safe = re.sub(r"[^A-Za-z0-9._-]", "_", slug)
-    for ext in _PREVIEW_EXTS:
-        candidate = os.path.join(folder, safe + ext)
-        if os.path.isfile(candidate):
-            return candidate
-    return ""
-
-
-def _preview_file_exists(db_path: str, slug: str) -> bool:
-    """Whether a loop is already on disk, for callers that have no player."""
-    if not slug:
-        return False
-    folder = previews_dir(db_path)
-    safe = re.sub(r"[^A-Za-z0-9._-]", "_", slug)
-    return any(os.path.isfile(os.path.join(folder, safe + ext))
-               for ext in _PREVIEW_EXTS)
-
-
-def save_preview(db_path: str, slug: str, url: str, referer: str = "",
-                 diag: list | None = None) -> str:
-    """Download a preview loop now, while its signature is valid.
-
-    Returns the local path, or '' if it could not be saved. The signed URL
-    dies in about an hour, so the file is the only durable copy -- the same
-    trade the cover makes, and the only way a nubiles hover can show a clip
-    more than an hour after the scrape that found it.
-    """
-    if not url or not slug:
-        return ""
-    data = _fetch_bytes(url, referer=referer, diag=diag)
-    if len(data) < 4096:
-        if diag is not None and (not diag or diag[-1] == "HTTP 200"):
-            diag.append(f"{len(data)} byte(s)")
-        return ""
-    if len(data) > _PREVIEW_MAX_BYTES:
-        if diag is not None:
-            diag.append(f"not a loop ({len(data)} bytes)")
-        return ""
-    ext = ".mp4"
-    m = re.search(r"\.(mp4|webm|m4v)(?:[?#]|$)", url, re.IGNORECASE)
-    if m:
-        ext = "." + m.group(1).lower()
-    dest_dir = previews_dir(db_path)
     try:
         os.makedirs(dest_dir, exist_ok=True)
         dest = os.path.join(dest_dir, re.sub(r"[^A-Za-z0-9._-]", "_", slug) + ext)
@@ -2024,12 +1935,6 @@ class NetworkGalleryScraper(QThread):
         self._active_gallery_url = self._active_source.get("gallery_url", "")
         self._active_page_template = self._active_source.get("page_url_template", "")
         self._browser_session: Optional[_BrowserGallerySession] = None
-        # Slugs whose preview loop should be downloaded while its signature is
-        # fresh. The gallery page is the only place a signed loop can be had --
-        # a watch page fetched over plain HTTP carries none -- and the whole
-        # catalogue would be gigabytes, so this is limited to the rows the
-        # player actually has in its playlist.
-        self.wanted_previews: set = set()
 
     def cancel(self):
         self._cancel = True
@@ -2043,25 +1948,6 @@ class NetworkGalleryScraper(QThread):
             if self._browser_session is not None:
                 self._browser_session.close()
                 self._browser_session = None
-
-    def _cache_wanted_preview(self, movie: dict, source: dict) -> None:
-        """Download a playlist row's loop now, while its signature is valid.
-
-        The gallery page is the only place a signed loop can be had -- a watch
-        page fetched over plain HTTP carries none, which a field log confirmed
-        on six rows out of six -- so a scrape is the only moment it can be
-        saved, exactly as with the cover.
-        """
-        slug = str(movie.get("slug") or "")
-        url = str(movie.get("preview") or "")
-        if not slug or not url or _preview_file_exists(self.db.db_path, slug):
-            return
-        diag: list = []
-        local = save_preview(self.db.db_path, slug, url,
-                             referer=_referer_for(source), diag=diag)
-        self.signals.progress.emit(
-            f"    preview cached: {os.path.basename(local)}" if local else
-            f"    preview FAILED for {slug}: {'; '.join(diag) or 'no data'}")
 
     def _page_url(self, page: int) -> str:
         if page <= 1:
@@ -2161,12 +2047,6 @@ class NetworkGalleryScraper(QThread):
                 page_changed = False
                 duplicate_count = 0
                 for movie in movies:
-                    # Cached before the dedupe branch, because a playlist row
-                    # is almost certainly already in the database and that
-                    # branch continues early. This page's signatures are fresh
-                    # right now and dead in about an hour.
-                    if movie.get("slug") in self.wanted_previews:
-                        self._cache_wanted_preview(movie, source)
                     existing = self.db.movies.get(movie["slug"])
                     if existing and existing.get("meta_fetched"):
                         src_id = source.get("id") or ""
@@ -2203,19 +2083,32 @@ class NetworkGalleryScraper(QThread):
                         # This one DOES set page_changed, unlike the
                         # sources_seen bookkeeping above. A backfill is
                         # one-time work -- once the record carries an image
-                        # the branch stops firing -- so the first Update
-                        # after this change crawls the whole catalogue to
-                        # fill in 5371 missing covers, and every Update
-                        # after that converges on the first pass again.
-                        if not existing.get("image") and movie.get("image"):
+                        # the branch stops firing for it -- so the first
+                        # Update after this change crawls the whole catalogue
+                        # to fill in 5371 missing covers, and every Update
+                        # after that converges on the first pass again. The
+                        # preview half is not one-time: its signature dies in
+                        # about an hour, so it re-arms on every Update.
+                        _want_image = bool(movie.get("image")) and not existing.get("image")
+                        # compact_records() drops a preview whose signature has
+                        # expired, so a record with none here either never had
+                        # one or lost it. This page is carrying a live signature
+                        # for it right now, and since previews are streamed
+                        # rather than downloaded, refreshing the stored URL is
+                        # the only thing that keeps a nubiles row previewing.
+                        _want_preview = (bool(movie.get("preview"))
+                                         and not existing.get("preview"))
+                        if _want_image or _want_preview:
                             existing = dict(existing)
-                            existing["image"] = movie["image"]
-                            existing["image_expires"] = int(movie.get("image_expires") or 0)
-                            if movie.get("preview"):
+                            if _want_image:
+                                existing["image"] = movie["image"]
+                                existing["image_expires"] = int(movie.get("image_expires") or 0)
+                            if _want_preview:
                                 existing["preview"] = movie["preview"]
                                 existing["preview_expires"] = int(movie.get("preview_expires") or 0)
                             self.db.upsert(existing)
                             page_changed = True
+                        if _want_image:
                             _diag68 = []
                             local = save_thumbnail(self.db.db_path, movie["slug"],
                                                    movie["image"],
@@ -3011,102 +2904,6 @@ def ensure_thumbnail_async(player, site: dict, slug: str, url: str) -> bool:
     return True
 
 
-_PREVIEW_INFLIGHT: set = set()
-_PREVIEW_LOCK = threading.Lock()
-
-
-def ensure_preview_async(player, site: dict, slug: str, url: str) -> bool:
-    """Cache a preview loop in the background while its signature is alive.
-
-    The hover plays the signed URL itself the first time; this makes every
-    later hover instant and permanent, since the URL is dead within an hour.
-    Concurrent requests for the same loop are collapsed.
-    """
-    if not url or not slug or player is None:
-        return False
-    key = ((site or {}).get("id"), slug)
-    with _PREVIEW_LOCK:
-        if key in _PREVIEW_INFLIGHT:
-            return False
-        _PREVIEW_INFLIGHT.add(key)
-    db_path = _db_path_for_site(player, site)
-    referer = _referer_for(site)
-
-    def _work():
-        diag: list = []
-        try:
-            local = save_preview(db_path, slug, url, referer=referer, diag=diag)
-            print(f"[PREVIEW] {slug}: cached {os.path.basename(local)}" if local
-                  else f"[PREVIEW] {slug}: cache failed "
-                       f"({'; '.join(diag) or 'no data'})")
-        except Exception as exc:
-            print(f"[PREVIEW] {slug}: {type(exc).__name__}: {exc}")
-        finally:
-            with _PREVIEW_LOCK:
-                _PREVIEW_INFLIGHT.discard(key)
-
-    threading.Thread(target=_work, daemon=True).start()
-    return True
-
-
-def refresh_preview_async(player, site: dict, slug: str, movie: dict) -> bool:
-    """Re-mint an expired preview signature and cache the loop.
-
-    A stored nubiles loop URL is dead within about an hour, so an hour after
-    the scrape there is nothing to play. The movie's own watch page mints a
-    fresh signature for the same asset, so one background fetch turns a row
-    that will never preview into one that previews from disk forever.
-    """
-    page_url = str((movie or {}).get("url") or "")
-    if not page_url or not slug or player is None:
-        return False
-    # Two of every twelve gallery cards have no loop at all. Remembering the
-    # ones that turned out not to is what stops a hover from fetching the same
-    # watch page every single time the pointer crosses that row.
-    misses = getattr(player, "_metadata_preview_misses", None)
-    if misses is None:
-        misses = set()
-        try:
-            player._metadata_preview_misses = misses
-        except Exception:
-            misses = None
-    if misses is not None and slug in misses:
-        return False
-    key = ((site or {}).get("id"), slug)
-    with _PREVIEW_LOCK:
-        if key in _PREVIEW_INFLIGHT:
-            return False
-        _PREVIEW_INFLIGHT.add(key)
-    db_path = _db_path_for_site(player, site)
-    referer = _referer_for(site)
-    hint = str((movie or {}).get("title") or "") or str((movie or {}).get("series") or "")
-
-    def _work():
-        try:
-            page = _fetch_html(page_url) or ""
-            fresh = signed_loop_url(page, hint)
-            if not fresh:
-                if misses is not None:
-                    misses.add(slug)
-                print(f"[PREVIEW] {slug}: no signed loop on its watch page "
-                      f"({len(page)} byte(s) fetched)")
-                return
-            diag: list = []
-            local = save_preview(db_path, slug, fresh, referer=referer, diag=diag)
-            print(f"[PREVIEW] {slug}: re-minted and cached {os.path.basename(local)}"
-                  if local else
-                  f"[PREVIEW] {slug}: re-mint download failed "
-                  f"({'; '.join(diag) or 'no data'})")
-        except Exception as exc:
-            print(f"[PREVIEW] {slug}: {type(exc).__name__}: {exc}")
-        finally:
-            with _PREVIEW_LOCK:
-                _PREVIEW_INFLIGHT.discard(key)
-
-    threading.Thread(target=_work, daemon=True).start()
-    return True
-
-
 def _thumbnail_path_for_slug(player, site: dict, slug: str) -> str:
     """The locally cached cover for a movie, if a scrape downloaded it."""
     if not slug:
@@ -3186,19 +2983,10 @@ def preview_info_for_path(player, path: str) -> dict:
     trailer = str(movie.get("trailer_url") or "")
     img_exp = int(movie.get("image_expires") or 0)
     prv_exp = int(movie.get("preview_expires") or 0)
-    preview_local = _preview_path_for_slug(player, site, slug)
-    if not preview_local and str(site.get("id") or "") != "teamskeet":
-        # A nubiles loop is signed for about an hour, so the downloaded file is
-        # the only durable copy -- the same trade the cover makes. A URL that
-        # is still alive is played as-is and cached on the side; one that has
-        # expired is re-minted from the movie's watch page. Both run on a
-        # daemon thread, so the hover itself never waits on the network.
-        # TeamSkeet's trailer is unsigned and permanent, so it needs none of
-        # this and is left alone.
-        if preview and prv_exp > now:
-            ensure_preview_async(player, site, slug, preview)
-        else:
-            refresh_preview_async(player, site, slug, movie)
+    # Previews are streamed, never downloaded: the signed URL plays straight
+    # from the CDN while it lasts, and nothing is written to disk for it. An
+    # expired signature is refreshed by the next Update, which is reading the
+    # gallery page anyway -- the only place a loop signature can be had.
     # A stored preview is a real asset; TeamSkeet keeps one per scene. The
     # loop URL derived from title+series is nubiles-shaped and only locates
     # the asset (unsigned it 403s), so it must never be invented for a
@@ -3225,9 +3013,6 @@ def preview_info_for_path(player, path: str) -> dict:
         # reads as live -- it is a permanent asset, not a signed one.
         "preview_live":  bool(preview or trailer) and (prv_exp == 0 or prv_exp > now),
         "preview_url":   preview_url,
-        # The cached loop on disk, if one was ever downloaded. Unlike
-        # preview_url this never expires, so it is what the card should play.
-        "preview_local": preview_local,
         "series":        movie.get("series") or "",
         "models":        list(movie.get("models") or []),
         "date":          movie.get("date") or "",
@@ -3260,22 +3045,6 @@ def _start_all_background_updates(player, force: bool = False, manual: bool = Fa
     return started
 
 
-def _linked_slugs_for_site(player, site_id: str) -> set:
-    """The slugs this site has linked to rows in the player's playlist.
-
-    Bounds preview caching. A nubiles loop can only be had while the gallery
-    page carrying it is being read, and one per movie across the catalogue
-    would be gigabytes -- for a handful of rows that get hovered.
-    """
-    out: set = set()
-    links = getattr(player, "_metadata_links", None) or {}
-    for link in links.values():
-        if (isinstance(link, dict) and link.get("slug")
-                and link.get("site") == site_id):
-            out.add(str(link["slug"]))
-    return out
-
-
 def _start_background_update(player, site: Optional[dict] = None, db: Optional[MetadataDB] = None,
                              mode: str = "update", manual: bool = False):
     site = site or METADATA_SITES[DEFAULT_SITE_ID]
@@ -3291,10 +3060,6 @@ def _start_background_update(player, site: Optional[dict] = None, db: Optional[M
     ytdlp = _find_ytdlp()
     if site.get("scraper") == "network_gallery":
         scraper = NetworkGalleryScraper(db, site, mode=mode)
-        scraper.wanted_previews = _linked_slugs_for_site(player, site_id)
-        if scraper.wanted_previews:
-            print(f"[MetadataScraper] {site.get('name') or site_id}: caching the "
-                  f"preview loop for {len(scraper.wanted_previews)} playlist row(s)")
     else:
         scraper = TeamSkeetScraper(db, mode=mode, ytdlp_path=ytdlp,
                                    sources=site.get("sources") or REPTYLE_SOURCES)

@@ -6003,51 +6003,25 @@ report(_run71.count('referer=src_referer') == 2,
        'both gallery cover saves pass the network referer through',
        str(_run71.count('referer=src_referer')))
 
-# ── 72. A nubiles preview outlives the hour its signature lives ───────────────
-# The real gallery page carries a signed loop for 10 of its 12 cards, so the
-# preview was always obtainable -- but the signature dies in about an hour,
-# which is why nubiles rows had nothing to play while TeamSkeet's unsigned
-# trailer played forever. The loop is now cached on disk like the cover, and
-# re-minted from the watch page once the stored signature has expired.
+# ── 72. A preview is streamed, never written to disk ──────────────────────────
+# A field log showed the signed loop playing straight from the CDN, and a disk
+# that was already full turning the cache into "cache failed (HTTP 200)" on six
+# rows out of seven. So the file was never needed -- the URL plays -- and
+# writing it was the only thing that could fail. Nothing is stored now.
 print()
-print('72. A nubiles preview is cached, so it outlives its signature')
+print('72. A preview is streamed, never written to disk')
 
-# Access through these so a falsification run against a build without the
-# preview cache reports its failures instead of aborting on the first one.
-def _slu72(html, hint=''):
-    fn = getattr(_msrc55, 'signed_loop_url', None)
-    return fn(html, hint) if fn else None
-
-
-def _sp72(*a, **k):
-    fn = getattr(_msrc55, 'save_preview', None)
-    return fn(*a, **k) if fn else ''
-
-
-def _pd72(db_path):
-    fn = getattr(_msrc55, 'previews_dir', None)
-    return fn(db_path) if fn else ''
-
-
-
-_mv72 = _msrc55._gallery_movies_from_html(_page70, _site70) if _page70 else []
-_loops72 = [m for m in _mv72 if m.get('preview')]
-report(len(_mv72) == 12 and len(_loops72) == 10,
-       'the real gallery page carries a signed loop for the cards that have one',
-       f'{len(_loops72)} of {len(_mv72)}')
-report(bool(_mv72) and all(
-    _slu72(_page70, m.get('title')) == str(m.get('preview') or '')
-    for m in _mv72),
-       'and re-minting from a page reproduces exactly the loop the scrape stored')
-report(bool(_mv72) and all(
-    _slu72(_page70, m.get('title')) == ''
-    for m in _mv72 if not m.get('preview')),
-       "a card with no loop yields nothing rather than another scene's clip")
-_ONE72 = ('https://images.nubiles-porn.com/videos/only_this_one/videos/loops/'
-          'series_only_this_one_loop_480.mp4?st=A&e=9999999999')
-report(_slu72(f'<x data-src="{_ONE72}">', 'Only This One') == _ONE72
-       and _slu72(f'<x data-src="{_ONE72}">', 'Some Other Scene') == '',
-       'the hint is a hard filter, so caching the wrong scene is not possible')
+_msrc72 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'metadata_scraper.py'), encoding='utf-8').read()
+for _gone72 in ('def save_preview', 'def previews_dir', '_preview_path_for_slug',
+                'preview_local', 'ensure_preview_async', 'refresh_preview_async'):
+    report(_gone72 not in _msrc72,
+           f'nothing writes a preview to disk any more: {_gone72} is gone')
+_clip72 = _vsrc64('_start_metadata_hover_clip')
+report('fromLocalFile' not in _clip72 and 'preview_local' not in _clip72,
+       'the card plays the URL rather than a file')
+report('preview_live' in _clip72 and 'QUrl(' in _clip72,
+       'streaming it while its signature lasts')
 
 
 class _P72:
@@ -6056,143 +6030,52 @@ class _P72:
         self._metadata_links = {}
 
 
-def _fakecurl72(content, status=200):
-    class _R:
-        status_code = status
-    _R.content = content
-    mod = _types55.ModuleType('curl_cffi')
-    mod.requests = _types55.SimpleNamespace(
-        get=lambda url, headers=None, timeout=None, impersonate=None: _R)
-    return mod
+_LIVE72 = ('https://images.nubiles-porn.com/videos/x/videos/loops/'
+           'series_x_loop_480.mp4?st=A&e=9999999999')
+_DEAD72 = ('https://images.nubiles-porn.com/videos/y/videos/loops/'
+           'series_y_loop_480.mp4?st=B&e=1')
 
 
-_LOOPBYTES72 = b'\x00\x00\x00\x18ftypmp42' + b'0' * 9000
-_saved72 = _sys55.modules.get('curl_cffi')
-try:
-    _sys55.modules['curl_cffi'] = _fakecurl72(_LOOPBYTES72)
-    # The path is derived from the site's db_filename, not chosen here.
-    _dbp72 = os.path.join(_tf55.mkdtemp(),
-                          _msrc55.METADATA_SITES['nubiles']['db_filename'])
-    _p72 = _sp72(_dbp72, 'pv72-slug', _ONE72,
-                                referer='https://nubiles-porn.com/')
-    report(bool(_p72) and os.path.isfile(_p72) and _p72.endswith('.mp4'),
-           'a loop is written under previews/ next to the database',
-           os.path.basename(_p72) if _p72 else 'NOT SAVED')
-    report(_pd72(_dbp72).endswith('previews'),
-           'in its own folder, not mixed in with the covers')
-    _tiny72 = []
-    _sys55.modules['curl_cffi'] = _fakecurl72(b'nope')
-    report(_sp72(_dbp72, 'pv72-tiny', _ONE72, diag=_tiny72) == '',
-           'a stub or an error page is not cached as a video', str(_tiny72))
-    _sys55.modules['curl_cffi'] = _fakecurl72(b'0' * (26 * 1024 * 1024))
-    _big72 = []
-    report(_sp72(_dbp72, 'pv72-big', _ONE72, diag=_big72) == '',
-           'and neither is a whole scene mistaken for a loop', str(_big72))
+def _mk72(preview, expires):
+    d = _tf55.mkdtemp()
+    dbp = os.path.join(d, _msrc55.METADATA_SITES['nubiles']['db_filename'])
+    with open(dbp, 'w', encoding='utf-8') as f:
+        json.dump({'movies': {'r1': {
+            'slug': 'r1', 'title': 'Some Scene', 'series': 'Series',
+            'models': [], 'date': '16/09/2026', 'video_id': '1',
+            'meta_fetched': True,
+            'url': 'https://nubiles-porn.com/video/watch/1/s',
+            'preview': preview, 'preview_expires': expires}}}, f)
+    pl = _P72(d)
+    row = 'https://watchporn.to/video/1/some-row/'
+    pl._metadata_links[_msrc55._meta_norm_path(row)] = {
+        'site': 'nubiles', 'slug': 'r1'}
+    return _msrc55.preview_info_for_path(pl, row), d
 
-    # A row whose loop is already on disk: the hover must be handed the file,
-    # not the dead signed URL.
-    _dir72 = os.path.dirname(_dbp72)
-    with open(_dbp72, 'w', encoding='utf-8') as f:
-        json.dump({'movies': {
-            '256652-stepmom-is-a-great-kisser': {
-                'slug': '256652-stepmom-is-a-great-kisser',
-                'title': 'Stepmom Is A Great Kisser', 'series': 'MomsTeachSex',
-                'models': [], 'date': '16/09/2026', 'video_id': '256652',
-                'meta_fetched': True,
-                'url': 'https://nubiles-porn.com/video/watch/256652/x'},
-            '256653-no-loop-here': {
-                'slug': '256653-no-loop-here', 'title': 'No Loop Here',
-                'series': 'MomsTeachSex', 'models': [], 'date': '16/09/2026',
-                'video_id': '256653', 'meta_fetched': True,
-                'url': 'https://nubiles-porn.com/video/watch/256653/y'},
-        }}, f)
-    _pvdir72 = _pd72(_dbp72)
-    if _pvdir72:
-        os.makedirs(_pvdir72, exist_ok=True)
-        with open(os.path.join(_pvdir72,
-                               '256652-stepmom-is-a-great-kisser.mp4'), 'wb') as f:
-            f.write(_LOOPBYTES72)
-    _pl72 = _P72(_dir72)
-    _row72 = 'https://watchporn.to/video/39488/some-row/'
-    _pl72._metadata_links[_msrc55._meta_norm_path(_row72)] = {
-        'site': 'nubiles', 'slug': '256652-stepmom-is-a-great-kisser'}
-    _info72 = _msrc55.preview_info_for_path(_pl72, _row72)
-    report(str(_info72.get('preview_local') or '').endswith('.mp4'),
-           'a hover on that row is handed the cached loop',
-           os.path.basename(str(_info72.get('preview_local'))))
-    report(not _info72.get('preview_live') and bool(_info72.get('preview_local')),
-           'so a row whose signature has expired still previews')
 
-    _calls72 = []
-    _orig72 = _msrc55._fetch_html
-    _msrc55._fetch_html = lambda url, timeout=20: (
-        _calls72.append(url), '<html>no loops here</html>')[1]
-    try:
-        _row72b = 'https://watchporn.to/video/1/no-loop/'
-        _pl72._metadata_links[_msrc55._meta_norm_path(_row72b)] = {
-            'site': 'nubiles', 'slug': '256653-no-loop-here'}
-        _msrc55.preview_info_for_path(_pl72, _row72b)
-        _msrc55.preview_info_for_path(_pl72, _row72b)
-        time.sleep(0.5)
-        report(len(_calls72) == 1,
-               'a row that turns out to have no loop is fetched once, not on '
-               'every hover', f'{len(_calls72)} fetch(es)')
-    finally:
-        _msrc55._fetch_html = _orig72
-finally:
-    if _saved72 is None:
-        _sys55.modules.pop('curl_cffi', None)
-    else:
-        _sys55.modules['curl_cffi'] = _saved72
+_live72, _d72 = _mk72(_LIVE72, 9999999999)
+report(_live72.get('preview_live') and _live72.get('preview_url') == _LIVE72,
+       'a row inside its hour is handed the signed URL to stream',
+       str(_live72.get('preview_url'))[:70])
+report('preview_local' not in _live72,
+       'and no local path is offered, because none is ever created')
+_dead72, _ = _mk72(_DEAD72, 1)
+report(not _dead72.get('preview_live'),
+       'a row whose signature has died is not handed a dead link to fail on')
 
-_clip72 = _vsrc64('_start_metadata_hover_clip')
-report('preview_local' in _clip72 and 'fromLocalFile' in _clip72,
-       'the card plays the cached file ahead of a signed URL')
-report('preview_live' in _clip72 and 'preview_url' in _clip72,
-       'and still falls back to a signed URL while it is alive')
-
-# ── 73. The scrape caches the loop for the rows actually in the playlist ──────
-# A field log settled where a loop can be had: six rows out of six printed "no
-# signed loop on its watch page", so re-minting over plain HTTP does not work
-# and the gallery page read during a scrape is the only source -- with a
-# browser, and a signature that is fresh right then. Downloading one per movie
-# would be gigabytes, so only the slugs linked to playlist rows are fetched.
+# ── 73. Update refreshes the signature, so a row keeps previewing ─────────────
+# Nothing is on disk to fall back on, so the stored URL is the whole mechanism.
+# compact_records() drops it once it expires, which leaves the record with none
+# -- and the gallery page an Update is already reading carries a fresh one.
 print()
-print('73. Update caches the loop for the rows actually in the playlist')
+print('73. Update refreshes the signature, so a row keeps previewing')
 
-# Same crash-safety as section 72: a falsification run against a build without
-# this has to report its failures, not abort on the first missing name.
-def _lsl73(player, site_id):
-    fn = getattr(_msrc55, '_linked_slugs_for_site', None)
-    return fn(player, site_id) if fn else None
-
-
-def _pfe73(db_path, slug):
-    fn = getattr(_msrc55, '_preview_file_exists', None)
-    return fn(db_path, slug) if fn else False
-
-
-
-
-class _P73:
-    def __init__(self, links):
-        self._metadata_links = links
-
-
-report(_lsl73(_P73({
-           'a': {'site': 'nubiles', 'slug': 'n1'},
-           'b': {'site': 'nubiles', 'slug': 'n2'},
-           'c': {'site': 'teamskeet', 'slug': 't1'},
-           'd': 'not a dict'}), 'nubiles') == {'n1', 'n2'},
-       "only this site's linked rows are asked for, not the whole database")
-report(_lsl73(_P73({}), 'nubiles') == set(),
-       'and an empty playlist asks for nothing')
-
-_mv73 = _msrc55._gallery_movies_from_html(_page70, _site70) if _page70 else []
-_loops73 = [m for m in _mv73 if m.get('preview')]
-_want73 = [m['slug'] for m in _loops73][:3]
-_LOOP73 = b'\x00\x00\x00\x18ftypmp42' + b'0' * 9000
-_hdr73 = {}
+_BASE73 = {'slug': '256294-stepmom-is-a-great-kisser-s27e1',
+           'title': 'Stepmom Is A Great Kisser', 'series': 'MomsTeachSex',
+           'models': [], 'date': '16/09/2026', 'video_id': '256294',
+           'meta_fetched': True,
+           'url': 'https://nubiles-porn.com/video/watch/256294/'
+                  'stepmom-is-a-great-kisser-s27e1'}
 
 
 class _E73:
@@ -6203,12 +6086,11 @@ class _E73:
         self._sink.append(' '.join(str(x) for x in a))
 
 
-def _run73(wanted, db_path=None):
-    d = db_path or os.path.join(
-        _tf55.mkdtemp(), _msrc55.METADATA_SITES['nubiles']['db_filename'])
-    if not os.path.isfile(d):
-        with open(d, 'w', encoding='utf-8') as f:
-            json.dump({'movies': {}}, f)
+def _run73(existing):
+    d = os.path.join(_tf55.mkdtemp(),
+                     _msrc55.METADATA_SITES['nubiles']['db_filename'])
+    with open(d, 'w', encoding='utf-8') as f:
+        json.dump({'movies': {existing['slug']: existing} if existing else {}}, f)
     scr = _msrc55.NetworkGalleryScraper(_msrc55.MetadataDB(d), _site70,
                                         mode='update')
     sink = []
@@ -6217,54 +6099,39 @@ def _run73(wanted, db_path=None):
     scr.signals.finished = _E73()
     scr.signals.error = _E73()
     scr._fetch_gallery_page = lambda page: _page70 if page == 1 else ''
-    scr.wanted_previews = set(wanted)
-    _hdr73.clear()
-
-    def _get(url, headers=None, timeout=None, impersonate=None):
-        _hdr73['last'] = dict(headers or {})
-
-        class _R:
-            status_code = 200
-        _R.content = _LOOP73 if '.mp4' in url else b'\xff\xd8' + b'0' * 900
-        return _R
-    mod = _types55.ModuleType('curl_cffi')
-    mod.requests = _types55.SimpleNamespace(get=_get)
-    saved = _sys55.modules.get('curl_cffi')
-    _sys55.modules['curl_cffi'] = mod
+    orig = _msrc55.save_thumbnail
+    _msrc55.save_thumbnail = lambda *a, **k: ''
     try:
         scr._run()
     finally:
-        if saved is None:
-            _sys55.modules.pop('curl_cffi', None)
-        else:
-            _sys55.modules['curl_cffi'] = saved
-    return d, sink
+        _msrc55.save_thumbnail = orig
+    # The scraper's own DB, not a reloaded one: nubiles.txt was captured with a
+    # signature that has since expired, and compact_records() prunes an expired
+    # preview on load -- which is correct behaviour, but it would hide what the
+    # scrape just wrote.
+    return scr.db, d, sink
 
 
-_d73, _sink73 = _run73(_want73)
-_dir73 = _pd72(_d73)
-_files73 = sorted(os.listdir(_dir73)) if os.path.isdir(_dir73) else []
-report(len(_files73) == len(_want73) and all(f.endswith('.mp4') for f in _files73),
-       'a scrape downloads the loop for exactly the rows asked for',
-       f'{len(_files73)} of {len(_want73)}')
-report(_hdr73.get('last', {}).get('Referer') == 'https://nubiles-porn.com/',
-       'asked for as the network that signed it',
-       str(_hdr73.get('last', {}).get('Referer')))
-report(sum(1 for m in _sink73 if 'preview cached:' in m) == len(_want73),
-       'and says so per row, so a failure is attributable')
-report(all(_pfe73(_d73, s) for s in _want73),
-       'the file is where the hover looks for it')
-report(len(_files73) < len(_loops73),
-       'and not the rest of the catalogue, which would be gigabytes',
-       f'{len(_files73)} of {len(_loops73)} loops on this page')
-_d73b, _sink73b = _run73(_want73, _d73)
-report(not any('preview cached:' in m for m in _sink73b),
-       'a second Update does not download them again')
-_msrc73 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            'metadata_scraper.py'), encoding='utf-8').read()
-report('byte(s) fetched' in _msrc73,
-       'the re-mint reports whether the watch page arrived at all, so a blocked '
-       'fetch is not mistaken for a page that has no loop')
+_db73, _d73, _sink73 = _run73(dict(_BASE73))
+_rec73 = _db73.movies.get(_BASE73['slug']) or {}
+report('/loops/' in str(_rec73.get('preview') or ''),
+       'a record that lost its signature gets a fresh one off the page',
+       str(_rec73.get('preview') or '(none)')[:80])
+report(int(_rec73.get('preview_expires') or 0) > 0,
+       'with its new expiry, so the player knows when to stop streaming it')
+report(not os.path.isdir(os.path.join(os.path.dirname(_d73), 'previews')),
+       'and no previews folder is created anywhere')
+report(all('/loops/' in str(m.get('preview') or '')
+           for m in _db73.movies.values() if m.get('preview')),
+       'every record the page had a loop for is streamable',
+       f"{sum(1 for m in _db73.movies.values() if m.get('preview'))} of "
+       f"{len(_db73.movies)}")
+_live73 = dict(_rec73)
+_live73['preview'] = _LIVE72
+_live73['preview_expires'] = 9999999999
+_db73b, _, _ = _run73(_live73)
+report((_db73b.movies.get(_BASE73['slug']) or {}).get('preview') == _LIVE72,
+       'and a signature that is still live is left alone')
 
 print()
 print('FAILURES:', FAILS)

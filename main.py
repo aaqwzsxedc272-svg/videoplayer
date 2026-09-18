@@ -9171,25 +9171,17 @@ class VideoPlayer(QMainWindow):
     def _start_metadata_hover_clip(self, meta):
         """Cover first, then the scene's own clip if it has one.
 
-        A loop cached on disk never expires, so it is preferred. TeamSkeet
-        keeps a per-scene trailer_url on images.psmcdn.net that is unsigned
-        and permanently public, so it plays straight from the CDN. Nubiles
-        signs its loops for about an hour, so its rows play from the cached
-        file -- and until one exists, from the signed URL while that is still
-        alive. With neither, the card stays on the cover.
+        Streamed, never downloaded. TeamSkeet's trailer_url on
+        images.psmcdn.net is unsigned and permanently public, so it plays from
+        the CDN forever. Nubiles signs its loops for about an hour, so a row
+        previews while that signature lasts and Update refreshes it; nothing is
+        ever written to disk for either. With no live URL the card stays on the
+        cover.
         """
         self._stop_metadata_hover_clip()
         meta = meta or {}
-        local = str(meta.get("preview_local") or "")
-        source = None
-        if local and os.path.isfile(local):
-            try:
-                source = QUrl.fromLocalFile(local)
-            except Exception:
-                source = QUrl(local)
-        elif meta.get("preview_live") and meta.get("preview_url"):
-            source = QUrl(str(meta["preview_url"]))
-        if source is None:
+        url = str(meta.get("preview_url") or "")
+        if not url or not meta.get("preview_live"):
             return
         if self._ensure_hover_clip_player() is None:
             return
@@ -9198,7 +9190,7 @@ class VideoPlayer(QMainWindow):
         self._hover_clip_timer.start()
         self._hover_cover_hold_timer.start()
         try:
-            self._hover_clip_player.setSource(source)
+            self._hover_clip_player.setSource(QUrl(url))
         except Exception:
             self._abandon_hover_clip()
 
