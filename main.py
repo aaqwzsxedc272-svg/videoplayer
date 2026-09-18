@@ -9117,7 +9117,10 @@ class VideoPlayer(QMainWindow):
         """Pick up the cover the first hover started downloading."""
         self._hover_cover_poll_tries += 1
         path = self._hover_cover_poll_path
-        if not path or self._hover_cover_poll_tries > 8 or not self.hover_preview.isVisible():
+        # 25 tries at 400 ms. Re-minting a dead cover costs two round trips --
+        # the watch page, then the image -- so 3 seconds was not enough for it
+        # to land. Moving the mouse away stops this anyway.
+        if not path or self._hover_cover_poll_tries > 25 or not self.hover_preview.isVisible():
             self._hover_cover_poll_timer.stop()
             return
         try:
@@ -9134,13 +9137,19 @@ class VideoPlayer(QMainWindow):
         self._reposition_hover_preview()
 
     def _metadata_cover_pixmap(self, meta):
-        """The cached cover for a matched row, scaled to the card, or None."""
-        thumb = str((meta or {}).get("thumbnail") or "")
-        if not thumb or not os.path.isfile(thumb):
+        """The cover for a matched row, scaled to the card, or None.
+
+        Covers live in memory, not on disk -- the bytes are fetched straight
+        off the CDN when a row is first hovered. Returning None here is not a
+        failure: it just means they have not landed yet, and the poll timer
+        that starts alongside asks again shortly.
+        """
+        data = (meta or {}).get("cover_data") or b""
+        if not data:
             return None
         try:
-            pm = QPixmap(thumb)
-            if pm.isNull():
+            pm = QPixmap()
+            if not pm.loadFromData(data) or pm.isNull():
                 return None
             return self._scale_preview_pixmap(pm)
         except Exception:
@@ -9952,9 +9961,11 @@ class VideoPlayer(QMainWindow):
         self._hover_cover_poll_timer.stop()
         self._hover_cover_poll_tries = 0
         self._hover_cover_poll_path = None
-        if _cover62 is None and meta.get("image") and meta.get("image_live"):
-            # No cover on disk yet, but there is a live URL and a download is
-            # already on its way -- wait for it instead of showing nothing.
+        if _cover62 is None and (meta.get("image_live") or meta.get("can_refresh")):
+            # No cover in memory yet, and something is already fetching one --
+            # either the stored URL is still signed, or its signature died and
+            # the watch page is being re-read to mint a new one. Wait for it
+            # instead of showing nothing.
             self._hover_cover_poll_path = path
             self._hover_cover_poll_timer.start()
         self._start_metadata_hover_clip(meta)

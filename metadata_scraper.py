@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 import unicodedata
+from collections import OrderedDict
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from html import unescape as html_unescape
@@ -222,8 +223,9 @@ _MOVIE_KEEP_FIELDS = (
     # re-upserted on every scrape and the "caught up - no new listing metadata"
     # early-stop could never fire, turning an Update into a full 175-page crawl.
     "sources_seen",
-    # Cover thumbnail. The URL is signed and expires (see _image_expiry_epoch),
-    # so the local file under thumbnails/ is what the player should display.
+    # Cover. The URL is signed and expires (see _image_expiry_epoch), so it is
+    # held only until it dies -- and when it does, the movie's own watch page
+    # mints a fresh one on hover. The bytes live in memory, never on disk.
     "image", "image_expires", "preview", "preview_expires",
     # TeamSkeet's trailer_url is a per-scene mp4 on images.psmcdn.net --
     # unsigned and permanently public, verified with a real/invented path
@@ -1332,11 +1334,6 @@ def _image_expiry_epoch(url: str) -> int:
     return int(m.group(1)) if m else 0
 
 
-def thumbnails_dir(db_path: str) -> str:
-    base = os.path.dirname(os.path.abspath(db_path or "")) or "."
-    return os.path.join(base, "thumbnails")
-
-
 def _fetch_bytes(url: str, timeout: int = 20, referer: str = "",
                  diag: list | None = None) -> bytes:
     """Binary GET through the same impersonating client the scraper uses.
@@ -1380,30 +1377,175 @@ def _referer_for(site: dict) -> str:
     return ""
 
 
-def save_thumbnail(db_path: str, slug: str, url: str, referer: str = "",
-                   diag: list | None = None) -> str:
-    """Download a cover now, while its signature is still valid. Returns the
-    local path, or '' if it could not be saved."""
-    if not url or not slug:
-        return ""
-    data = _fetch_bytes(url, referer=referer, diag=diag)
-    if len(data) < 512:
-        if diag is not None and (not diag or diag[-1] == "HTTP 200"):
-            diag.append(f"{len(data)} byte(s)")
-        return ""
-    ext = ".jpg"
-    m = re.search(r"\.(jpe?g|png|webp)(?:[?#]|$)", url, re.IGNORECASE)
-    if m:
-        ext = "." + m.group(1).lower().replace("jpeg", "jpg")
-    dest_dir = thumbnails_dir(db_path)
-    try:
-        os.makedirs(dest_dir, exist_ok=True)
-        dest = os.path.join(dest_dir, re.sub(r"[^A-Za-z0-9._-]", "_", slug) + ext)
-        with open(dest, "wb") as f:
-            f.write(data)
-        return dest
-    except Exception:
-        return ""
+_ANY_URL_RE = re.compile(r"""https?://[^"'\s)<>]+""")
+
+
+def _signed_urls(html: str):
+    """Every URL on a page that carries a signature, de-duplicated."""
+    seen = set()
+    for match in _ANY_URL_RE.finditer(html or ""):
+        url = html_unescape(match.group(0)).rstrip('"\'),;')
+        if "st=" in url and url not in seen:
+            seen.add(url)
+            yield url
+
+
+def signed_cover_url(html: str, hint: str = "") -> str:
+    """This movie's own cover out of a freshly loaded page, '' if there is none.
+
+    A watch page mints a new signature for its cover on every load -- measured
+    live: cover1280, cover960 and cover614 all carrying the same fresh e= -- so
+    a hover can recover a cover an hour after the scrape without anything being
+    written to disk. The widest variant wins.
+
+    `hint` is a title or series and is a hard filter: the same page also carries
+    the covers of its related videos, and picking one of those would show the
+    wrong scene.
+    """
+    needle = _cdn_folder_name(hint) if hint else ""
+    best, best_key = "", (0, -1)
+    for url in _signed_urls(html):
+        match = re.search(r"/samples/cover(\d+)\.jpe?g", url, re.IGNORECASE)
+        if not match:
+            continue
+        if needle and needle not in url.lower():
+            continue
+        key = (int(match.group(1)), _image_expiry_epoch(url))
+        if key > best_key:
+            best, best_key = url, key
+    return best
+
+
+def signed_media_url(html: str, hint: str = "") -> str:
+    """A freshly signed preview video out of a page, '' if it carries none.
+
+    Only the gallery page has one. A watch page does not -- its player sources
+    are not in the HTML, measured on six watch pages out of six -- but a page
+    that does carry one should not be ignored.
+    """
+    needle = _cdn_folder_name(hint) if hint else ""
+    best, best_exp = "", -1
+    for url in _signed_urls(html):
+        if ".mp4" not in url.lower():
+            continue
+        if needle and needle not in url.lower():
+            continue
+        exp = _image_expiry_epoch(url)
+        if exp > best_exp:
+            best, best_exp = url, exp
+    return best
+
+
+_COVER_CACHE: "OrderedDict[str, bytes]" = OrderedDict()
+_COVER_CACHE_MAX = 96
+_COVER_CACHE_LOCK = threading.Lock()
+_COVER_INFLIGHT: set = set()
+_COVER_LOCK = threading.Lock()
+
+
+def cover_bytes(slug: str) -> bytes:
+    """The cover held in memory for a movie, or b''."""
+    with _COVER_CACHE_LOCK:
+        data = _COVER_CACHE.get(slug)
+        if data:
+            _COVER_CACHE.move_to_end(slug)
+        return data or b""
+
+
+def ensure_cover_async(player, site: dict, slug: str, url: str) -> bool:
+    """Fetch a cover into memory. Nothing is ever written to disk for it.
+
+    The card paints it on the next poll of the same hover, so a cover costs one
+    image request the first time a row is hovered and nothing after that.
+    """
+    if not url or not slug or player is None:
+        return False
+    with _COVER_CACHE_LOCK:
+        if slug in _COVER_CACHE:
+            return False
+    key = ((site or {}).get("id"), slug)
+    with _COVER_LOCK:
+        if key in _COVER_INFLIGHT:
+            return False
+        _COVER_INFLIGHT.add(key)
+    referer = _referer_for(site)
+
+    def _work():
+        try:
+            data = _fetch_bytes(url, referer=referer)
+            if len(data) >= 512:
+                with _COVER_CACHE_LOCK:
+                    _COVER_CACHE[slug] = data
+                    _COVER_CACHE.move_to_end(slug)
+                    while len(_COVER_CACHE) > _COVER_CACHE_MAX:
+                        _COVER_CACHE.popitem(last=False)
+        except Exception:
+            pass
+        finally:
+            with _COVER_LOCK:
+                _COVER_INFLIGHT.discard(key)
+
+    threading.Thread(target=_work, daemon=True).start()
+    return True
+
+
+_REFRESH_INFLIGHT: set = set()
+_REFRESH_LOCK = threading.Lock()
+
+
+def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
+    """Mint a fresh signature for one movie, on demand, when a hover needs it.
+
+    A stored nubiles signature dies in about an hour, and the movie's own watch
+    page mints a new one for its cover every time it is loaded. So a hover can
+    recover a cover with no scrape and nothing on disk: read the page, take the
+    signed URL, store it, fetch the bytes, and the card repaints itself.
+
+    The preview loop is not on that page, so it stays whatever the last scrape
+    stored -- which is why previews still need an Update.
+    """
+    slug = str((movie or {}).get("slug") or "")
+    page_url = str((movie or {}).get("url") or "")
+    if not slug or not page_url or player is None or db is None:
+        return False
+    key = ((site or {}).get("id"), slug)
+    with _REFRESH_LOCK:
+        if key in _REFRESH_INFLIGHT:
+            return False
+        _REFRESH_INFLIGHT.add(key)
+    hint = str(movie.get("title") or "") or str(movie.get("series") or "")
+    record = dict(movie)
+
+    def _work():
+        try:
+            page = _fetch_html(page_url) or ""
+            cover = signed_cover_url(page, hint)
+            loop = signed_media_url(page, hint)
+            if not cover and not loop:
+                print(f"[COVER] {slug}: watch page carried no signed asset "
+                      f"({len(page)} byte(s) fetched)")
+                return
+            if cover:
+                record["image"] = cover
+                record["image_expires"] = _image_expiry_epoch(cover)
+            if loop:
+                record["preview"] = loop
+                record["preview_expires"] = _image_expiry_epoch(loop)
+            db.upsert(record)
+            db.save()
+            print(f"[COVER] {slug}: re-signed"
+                  + (" cover" if cover else "")
+                  + (" + preview" if loop else ""))
+            if cover:
+                ensure_cover_async(player, site, slug, cover)
+        except Exception as exc:
+            print(f"[COVER] {slug}: {type(exc).__name__}: {exc}")
+        finally:
+            with _REFRESH_LOCK:
+                _REFRESH_INFLIGHT.discard(key)
+
+    threading.Thread(target=_work, daemon=True).start()
+    return True
 
 
 def _gallery_slug_from_url(url: str) -> str:
@@ -1766,9 +1908,6 @@ class TeamSkeetScraper(QThread):
             if movie:
                 self.db.upsert(movie)
                 enriched += 1
-                if movie.get("image"):
-                    save_thumbnail(self.db.db_path, movie["slug"], movie["image"],
-                                   referer=_referer_for(source))
                 self.signals.progress.emit(
                     f"  OK {movie['title']}"
                     + (f" | {movie['series']}" if movie.get('series') else "")
@@ -1873,17 +2012,6 @@ class TeamSkeetScraper(QThread):
                                 changed_slugs.append(slug)
                         movie["sources_seen"] = [source.get("id") or ""] if source.get("id") else []
                         self.db.upsert(movie)
-                        # TeamSkeet covers are unsigned and permanent, so
-                        # caching them here means the hover preview never
-                        # needs the network again.
-                        if movie.get("image"):
-                            local = save_thumbnail(self.db.db_path, movie["slug"],
-                                                   movie["image"],
-                                                   referer=_referer_for(source))
-                            if local:
-                                self.signals.progress.emit(
-                                    f"    thumbnail saved: {os.path.basename(local)}")
-
                     total_hint = f"/{estimated_pages}" if estimated_pages else ""
                     self.signals.progress.emit(
                         f"  {source_name} page {page}{total_hint}: {len(page_slugs)} movies parsed"
@@ -2017,12 +2145,9 @@ class NetworkGalleryScraper(QThread):
             consecutive_unchanged = 0
             src_covers = 0
             src_movies = 0
-            src_cover_saved = 0
-            src_cover_failed = 0
             # The cover CDN signs its URLs so they cannot be hotlinked, and
             # REQUEST_HEADERS claims teamskeet -- the right referer for
             # images.psmcdn.net, the wrong one here.
-            src_referer = _referer_for(source)
             source_name = source.get("name") or self.site.get("name", "site")
 
             while not self._cancel:
@@ -2108,49 +2233,12 @@ class NetworkGalleryScraper(QThread):
                                 existing["preview_expires"] = int(movie.get("preview_expires") or 0)
                             self.db.upsert(existing)
                             page_changed = True
-                        if _want_image:
-                            _diag68 = []
-                            local = save_thumbnail(self.db.db_path, movie["slug"],
-                                                   movie["image"],
-                                                   referer=src_referer,
-                                                   diag=_diag68)
-                            if local:
-                                src_cover_saved += 1
-                                self.signals.progress.emit(
-                                    f"    cover backfilled: {os.path.basename(local)}")
-                            else:
-                                src_cover_failed += 1
-                                if src_cover_failed <= 3:
-                                    self.signals.progress.emit(
-                                        "    cover download failed: "
-                                        + ("; ".join(_diag68) or "no data"))
                         continue
                     if _movie_identity_changed(existing, movie):
                         page_changed = True
                         changed += 1
                     movie["sources_seen"] = [source.get("id") or ""] if source.get("id") else []
                     self.db.upsert(movie)
-                    # Only for movies that are new or changed, so an Update
-                    # costs a handful of image fetches rather than one per
-                    # movie in the database. The signed URL expires in about
-                    # an hour, so this is the only moment it can be saved.
-                    if movie.get("image"):
-                        _diag68 = []
-                        local = save_thumbnail(self.db.db_path, movie["slug"],
-                                               movie["image"],
-                                               referer=src_referer,
-                                               diag=_diag68)
-                        if local:
-                            src_cover_saved += 1
-                            self.signals.progress.emit(
-                                f"    thumbnail saved: {os.path.basename(local)}")
-                        else:
-                            src_cover_failed += 1
-                            if src_cover_failed <= 3:
-                                self.signals.progress.emit(
-                                    "    cover download failed: "
-                                    + ("; ".join(_diag68) or "no data"))
-
                 # Cover telemetry: if a gallery changes its markup or starts
                 # lazy-loading, the cover silently stops being captured and
                 # the only symptom is a hover card with nothing in it. Saying
@@ -2183,15 +2271,9 @@ class NetworkGalleryScraper(QThread):
                 page += 1
                 time.sleep(PAGE_DELAY)
 
-            cover_note = ""
-            if src_covers:
-                cover_note = f" | {src_cover_saved} saved to disk"
-                if src_cover_failed:
-                    cover_note += f", {src_cover_failed} download(s) failed"
             self.signals.progress.emit(
                 f"  {source_name}: {src_covers} cover(s) captured from "
-                f"{src_movies} card(s) across {max(0, page - 1)} page(s)"
-                + cover_note)
+                f"{src_movies} card(s) across {max(0, page - 1)} page(s)")
 
         self.db.save()
         if parsed_any or self.db.count() > 0:
@@ -2869,60 +2951,14 @@ def _db_path_for_site(player, site: dict) -> str:
                         (site or {}).get("db_filename") or "")
 
 
-_THUMB_INFLIGHT: set = set()
-_THUMB_LOCK = threading.Lock()
-
-
-def ensure_thumbnail_async(player, site: dict, slug: str, url: str) -> bool:
-    """Fetch a cover in the background the first time a row is hovered.
-
-    TeamSkeet covers (images.psmcdn.net) are unsigned and never expire --
-    verified: a real path serves bytes while an invented one returns an
-    'origin error...' page -- so one download caches the image for good and
-    every later hover is instant from disk. Returns True if a fetch was
-    started; concurrent requests for the same cover are collapsed.
-    """
-    if not url or not slug or player is None:
-        return False
-    key = ((site or {}).get("id"), slug)
-    with _THUMB_LOCK:
-        if key in _THUMB_INFLIGHT:
-            return False
-        _THUMB_INFLIGHT.add(key)
-    db_path = _db_path_for_site(player, site)
-
-    def _work():
-        try:
-            save_thumbnail(db_path, slug, url, referer=_referer_for(site))
-        except Exception:
-            pass
-        finally:
-            with _THUMB_LOCK:
-                _THUMB_INFLIGHT.discard(key)
-
-    threading.Thread(target=_work, daemon=True).start()
-    return True
-
-
-def _thumbnail_path_for_slug(player, site: dict, slug: str) -> str:
-    """The locally cached cover for a movie, if a scrape downloaded it."""
-    if not slug:
-        return ""
-    folder = thumbnails_dir(_db_path_for_site(player, site))
-    safe = re.sub(r"[^A-Za-z0-9._-]", "_", slug)
-    for ext in (".jpg", ".jpeg", ".png", ".webp"):
-        candidate = os.path.join(folder, safe + ext)
-        if os.path.isfile(candidate):
-            return candidate
-    return ""
-
-
 def preview_info_for_path(player, path: str) -> dict:
-    """Everything needed to preview a playlist row, from local data only.
+    """Everything needed to preview a playlist row.
 
-    Deliberately makes no network call: hover has to be instant, and the
-    signed cover/preview URLs minted during a scrape are dead within about
-    an hour anyway. Returns {} when the row is not linked to any movie.
+    Never blocks: hover has to be instant, so nothing here waits on a socket.
+    What it does start, in the background, is the work a cover needs -- the
+    signed URL minted during a scrape is dead within about an hour, and the
+    row's own watch page can mint a new one. Returns {} when the row is not
+    linked to any movie.
 
     Rows linked before metadata_links.json existed are recovered by matching
     the saved display name back through the matcher, so previously renamed
@@ -2973,20 +3009,22 @@ def preview_info_for_path(player, path: str) -> dict:
 
     now = time.time()
     slug = str(movie.get("slug") or "")
-    thumb = _thumbnail_path_for_slug(player, site, slug)
-    if not thumb and str(movie.get("image") or ""):
-        # First hover on this row: start the download so the next one is
-        # instant. Does not block the tooltip.
-        ensure_thumbnail_async(player, site, slug, str(movie["image"]))
     image = str(movie.get("image") or "")
     preview = str(movie.get("preview") or "")
     trailer = str(movie.get("trailer_url") or "")
     img_exp = int(movie.get("image_expires") or 0)
     prv_exp = int(movie.get("preview_expires") or 0)
-    # Previews are streamed, never downloaded: the signed URL plays straight
-    # from the CDN while it lasts, and nothing is written to disk for it. An
-    # expired signature is refreshed by the next Update, which is reading the
-    # gallery page anyway -- the only place a loop signature can be had.
+    # Covers are held in memory, never on disk, and previews are streamed
+    # straight from the CDN. A signature that has died is re-minted from the
+    # movie's own watch page in the background, and the card repaints itself
+    # when the bytes land -- so a row recovers on hover with nothing stored.
+    cover_data = cover_bytes(slug)
+    if not cover_data:
+        if image and (img_exp == 0 or img_exp > now):
+            ensure_cover_async(player, site, slug, image)
+        elif movie.get("url"):
+            refresh_signed_assets_async(player, site, movie,
+                                        _metadata_db_for_site(player, site))
     # A stored preview is a real asset; TeamSkeet keeps one per scene. The
     # loop URL derived from title+series is nubiles-shaped and only locates
     # the asset (unsigned it 403s), so it must never be invented for a
@@ -3001,7 +3039,7 @@ def preview_info_for_path(player, path: str) -> dict:
         "site":          site.get("id") or "",
         "site_name":     site.get("name") or "",
         "name":          format_display_name(movie),
-        "thumbnail":     thumb,
+        "cover_data":    cover_data,
         "image":         image,
         # exp == 0 means the URL carries no signature at all. TeamSkeet's
         # covers are like that and stay valid forever, so absence of an
@@ -3016,6 +3054,9 @@ def preview_info_for_path(player, path: str) -> dict:
         "series":        movie.get("series") or "",
         "models":        list(movie.get("models") or []),
         "date":          movie.get("date") or "",
+        # True when the row's watch page is known, so a dead cover has
+        # somewhere to be re-minted from and the card is worth polling.
+        "can_refresh":   bool(movie.get("url")),
     })
     return info
 

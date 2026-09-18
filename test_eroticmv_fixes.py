@@ -4971,23 +4971,45 @@ report('sources_seen' in _msrc55._MOVIE_KEEP_FIELDS
        and 'image_expires' in _msrc55._MOVIE_KEEP_FIELDS,
        'sources_seen (the update early-stop) and the cover survive the trim')
 
-_dir58 = _tf55.mkdtemp()
-_orig58 = _msrc55._fetch_bytes
-try:
-    _msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: b''
-    report(_msrc55.save_thumbnail(_dir58, 'x-1', 'https://x/y.jpg') == '',
-           'a failed download saves nothing and reports nothing')
-    _msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: (
-        b'\xff\xd8' + b'0' * 900)
-    _p58 = _msrc55.save_thumbnail(_dir58, '256651/my stepsis?', 'https://x/y.jpg')
-    report(bool(_p58) and os.path.isfile(_p58)
-           and os.path.basename(_p58).startswith('256651'),
-           'a good download is written under thumbnails/, slug sanitised',
-           os.path.basename(_p58) if _p58 else 'NOT SAVED')
-    report(_msrc55.thumbnails_dir(_dir58).endswith('thumbnails'),
-           'thumbnails live beside the database, not inside it')
-finally:
-    _msrc55._fetch_bytes = _orig58
+# The cover the card paints is fetched into memory when the row is hovered,
+# and never touches the disk -- a full disk made every download fail, and the
+# URL was the only thing that mattered.
+report(not any(hasattr(_msrc55, n) for n in (
+           'save_thumbnail', 'thumbnails_dir', 'ensure_thumbnail_async',
+           '_thumbnail_path_for_slug', '_THUMB_INFLIGHT')),
+       'nothing in the scraper can write a cover to disk any more')
+# Guarded so that reverting metadata_scraper.py to the version before the
+# on-demand API yields failures rather than an AttributeError that truncates
+# the run and hides every later assertion.
+_API74 = ('cover_bytes', 'ensure_cover_async', 'signed_cover_url',
+          'signed_media_url', 'refresh_signed_assets_async', '_COVER_CACHE',
+          '_COVER_CACHE_LOCK', '_COVER_CACHE_MAX', '_COVER_INFLIGHT',
+          '_REFRESH_INFLIGHT')
+_have74 = all(hasattr(_msrc55, n) for n in _API74)
+report(_have74,
+       'the on-demand cover API is present',
+       'missing: ' + ', '.join(n for n in _API74 if not hasattr(_msrc55, n)))
+if _have74:
+    report(_msrc55.cover_bytes('never-fetched-58') == b'',
+           'an un-fetched cover reads as empty rather than raising')
+    report(_msrc55.ensure_cover_async(object(), _msrc55.METADATA_SITES['nubiles'],
+                                      '', 'https://x/y.jpg') is False
+           and _msrc55.ensure_cover_async(
+               None, _msrc55.METADATA_SITES['nubiles'], 'x', 'https://x/y.jpg') is False
+           and _msrc55.ensure_cover_async(object(), _msrc55.METADATA_SITES['nubiles'],
+                                          'x', '') is False,
+           'and the fetch refuses to start without a player, a slug and a URL')
+    _msrc55._COVER_CACHE.clear()
+    for _i58 in range(_msrc55._COVER_CACHE_MAX + 30):
+        with _msrc55._COVER_CACHE_LOCK:
+            _msrc55._COVER_CACHE['cap-58-%d' % _i58] = b'x'
+            while len(_msrc55._COVER_CACHE) > _msrc55._COVER_CACHE_MAX:
+                _msrc55._COVER_CACHE.popitem(last=False)
+    report(len(_msrc55._COVER_CACHE) == _msrc55._COVER_CACHE_MAX
+           and _msrc55.cover_bytes('cap-58-0') == b'',
+           'the memory cache is bounded, so hovering a whole playlist cannot grow it',
+           str(len(_msrc55._COVER_CACHE)))
+    _msrc55._COVER_CACHE.clear()
 
 # ── 59. Hover preview loop ───────────────────────────────────────────────────
 # Ground truth captured live from the gallery with a media sniffer (found.txt):
@@ -5050,7 +5072,7 @@ report('preview' in _msrc55._MOVIE_KEEP_FIELDS
 # data only, and rows renamed before metadata_links.json existed are
 # recovered by matching the saved display name back through the matcher.
 print()
-print('60. Hover preview resolves a linked row from local data only')
+print('60. Hover preview resolves a linked row, and fetches its cover behind it')
 
 import shutil as _sh60
 
@@ -5097,15 +5119,12 @@ report(_leg60.get('preview_url', '').endswith(
 
 # New path: the linker recorded the movie it matched.
 _p60._metadata_links[_key60] = {'site': 'nubiles', 'slug': _slug60, 'name': _name60}
-os.makedirs(os.path.join(_work60, 'thumbnails'), exist_ok=True)
-_thumb60 = os.path.join(_work60, 'thumbnails', _slug60 + '.jpg')
-with open(_thumb60, 'wb') as _f60:
-    _f60.write(b'\xff\xd8' + b'0' * 900)
+if _have74:
+    _msrc55._COVER_CACHE[_slug60] = b'\xff\xd8' + b'0' * 900
 _new60 = _msrc55.preview_info_for_path(_p60, _row60)
-report(_new60.get('slug') == _slug60 and _new60.get('thumbnail') == _thumb60
-       and os.path.isfile(_new60.get('thumbnail') or ''),
-       'a linked row resolves straight to its movie and its cached cover',
-       os.path.basename(_new60.get('thumbnail') or 'NONE'))
+report(_new60.get('slug') == _slug60 and len(_new60.get('cover_data') or b'') > 512,
+       'a linked row resolves straight to its movie and its cover in memory',
+       f'{len(_new60.get("cover_data") or b"")} bytes')
 report(_new60.get('name') == _name60 and _new60.get('site_name') == 'Nubiles-Porn',
        'and carries the display name and network for the tooltip')
 report(_new60.get('image_live') is False and _new60.get('preview_live') is False,
@@ -5316,19 +5335,28 @@ def _slow62(url, timeout=20, referer='', diag=None):
 
 try:
     _msrc55._fetch_bytes = _slow62
-    _msrc55._THUMB_INFLIGHT.clear()
-    _a62 = _msrc55.ensure_thumbnail_async(_p62, _site62, 'dedupe-62', 'https://i/c.jpg')
-    _b62 = _msrc55.ensure_thumbnail_async(_p62, _site62, 'dedupe-62', 'https://i/c.jpg')
-    report(_a62 is True and _b62 is False,
-           'a second hover on the same row does not start a second download',
-           f'{len(_calls62)} fetch(es) started')
-    report(_msrc55.ensure_thumbnail_async(_p62, _site62, '', 'https://i/c.jpg') is False
-           and _msrc55.ensure_thumbnail_async(None, _site62, 'x', 'https://i/c.jpg') is False,
-           'and it refuses to run without a slug or a player')
+    if _have74:
+        _msrc55._COVER_INFLIGHT.clear()
+        _msrc55._COVER_CACHE.clear()
+        _a62 = _msrc55.ensure_cover_async(_p62, _site62, 'dedupe-62',
+                                          'https://i/c.jpg')
+        _b62 = _msrc55.ensure_cover_async(_p62, _site62, 'dedupe-62',
+                                          'https://i/c.jpg')
+        report(_a62 is True and _b62 is False,
+               'a second hover on the same row does not start a second download',
+               f'{len(_calls62)} fetch(es) started')
+        report(_msrc55.ensure_cover_async(_p62, _site62, '', 'https://i/c.jpg') is False
+               and _msrc55.ensure_cover_async(None, _site62, 'x', 'https://i/c.jpg') is False,
+               'and it refuses to run without a slug or a player')
+    else:
+        report(False, 'a second hover on the same row does not start a second '
+                      'download: the on-demand cover API is absent')
 finally:
     _gate62.set()
     _msrc55._fetch_bytes = _orig_fetch62
-    _msrc55._THUMB_INFLIGHT.clear()
+    if _have74:
+        _msrc55._COVER_INFLIGHT.clear()
+        _msrc55._COVER_CACHE.clear()
 
 # Future scrapes must stay lean: the teamskeet builder still produces the fat
 # record, so upsert has to be what trims it.
@@ -5565,13 +5593,13 @@ _scr65 = _msrc55.NetworkGalleryScraper(_db65, _site65, mode='update')
 _scr65.signals = _Sigs65()
 _scr65._fetch_gallery_page = lambda page: _HTML65 if page == 1 else ''
 _saved65 = []
-_orig65 = _msrc55.save_thumbnail
-_msrc55.save_thumbnail = lambda p, sl, u, referer='', diag=None: (
-    _saved65.append((sl, u, referer)), '/x/cover.jpg')[1]
+_orig65 = _msrc55._fetch_bytes
+_msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: (
+    _saved65.append((url, referer)), b'x' * 900)[1]
 try:
     _scr65._run()
 finally:
-    _msrc55.save_thumbnail = _orig65
+    _msrc55._fetch_bytes = _orig65
 
 _after65 = _msrc55.MetadataDB(_d65).movies['256651-my-stepsis-is-a-hot-mess']
 report('cover960.jpg' in str(_after65.get('image') or ''),
@@ -5579,29 +5607,35 @@ report('cover960.jpg' in str(_after65.get('image') or ''),
        str(_after65.get('image'))[:64])
 report(int(_after65.get('image_expires') or 0) == 9999999999,
        'along with its signature expiry, so a dead one can be pruned later')
-report(_saved65 and _saved65[0][0] == '256651-my-stepsis-is-a-hot-mess',
-       'and the bytes are downloaded to thumbnails/ while the URL is alive')
-report(bool(_saved65) and _saved65[0][2] == 'https://nubiles-porn.com/',
-       'and asked for as the network that signed it, not as teamskeet',
-       repr(_saved65[0][2]) if _saved65 else 'no fetch')
+report(not _saved65,
+       'and the scrape downloads nothing -- the bytes are fetched on hover',
+       f'{len(_saved65)} fetch(es)')
+report(not os.path.isdir(os.path.join(os.path.dirname(_d65), 'thumbnails')),
+       'so no thumbnails/ folder appears beside the database')
 report(_after65.get('sources_seen') == ['shesinmybed'],
        'without disturbing the sources_seen bookkeeping')
 
 # Second pass: the record now has a cover, so nothing is rewritten and the
 # "caught up" early-stop can fire again.
-_saved65.clear()
 _scr65b = _msrc55.NetworkGalleryScraper(_msrc55.MetadataDB(_d65), _site65, mode='update')
 _scr65b.signals = _Sigs65()
 _scr65b._fetch_gallery_page = lambda page: _HTML65 if page == 1 else ''
-_msrc55.save_thumbnail = lambda p, sl, u, referer='', diag=None: (
-    _saved65.append((sl, u, referer)), '/x/cover.jpg')[1]
+_saved65.clear()
+# The stub has to be re-installed here: without it _saved65 could never grow,
+# and the assertion below would pass no matter what the second pass did.
+_msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: (
+    _saved65.append((url, referer)), b'x' * 900)[1]
 try:
     _scr65b._run()
 finally:
-    _msrc55.save_thumbnail = _orig65
+    _msrc55._fetch_bytes = _orig65
 report(not _saved65,
        'a second pass backfills nothing, so the crawl converges again',
        f'{len(_saved65)} fetches')
+_after65b = _msrc55.MetadataDB(_d65).movies['256651-my-stepsis-is-a-hot-mess']
+report(int(_after65b.get('image_expires') or 0) == 9999999999
+       and 'cover960.jpg' in str(_after65b.get('image') or ''),
+       'and the cover it already had is left exactly as it was')
 
 # ── 66. Card placement on first show, and a 0.7 s hold on the cover ───────────
 print()
@@ -5700,7 +5734,7 @@ report('cover(s) captured' in _run67,
 _poll67 = _vsrc64('_poll_hover_cover')
 report('_metadata_cover_pixmap' in _poll67 and 'setPixmap' in _poll67,
        'a cover that is still downloading is picked up and painted')
-report('_hover_cover_poll_tries > 8' in _poll67,
+report('_hover_cover_poll_tries > 25' in _poll67,
        'with a bound, so it cannot poll forever')
 _show67 = _vsrc64('_show_hover_preview')
 report('_hover_cover_poll_timer.start()' in _show67 and 'image_live' in _show67,
@@ -5711,13 +5745,13 @@ report('_hover_cover_poll_timer.stop()' in _vsrc64('_hide_hover_preview'),
 # ── 68. The whole cover chain, end to end ─────────────────────────────────────
 # A full re-scrape on 2026-09-17 produced 5374 nubiles records with zero covers
 # while every one of them had a title, models, date and url. So page fetching
-# and anchor parsing work and only the cover step fails -- and two different
-# causes look identical from the outside: "the markup has no cover" and "the
-# cover was found but the signed download failed". compact_records() then
-# deletes the dead URL, so the database reads the same either way. This drives
-# the real scraper over a lazy-loaded card and asserts a file reaches disk.
+# and anchor parsing worked and only the cover step failed -- the real URLs were
+# in data-srcset and the shared request headers named the wrong network.
+# compact_records() then deleted the dead URL, so the database read the same as
+# a gallery with no covers at all. This drives the real scraper over a
+# lazy-loaded card and asserts the URL is captured and nothing reaches disk.
 print()
-print('68. A lazy-loaded gallery card becomes a cover file on disk')
+print('68. A lazy-loaded gallery card yields its cover URL and no file')
 
 _HTML68 = """<html><body><div class="card">
  <a href="https://nubiles-porn.com/video/watch/256651/my-stepsis-is-a-hot-mess">
@@ -5776,29 +5810,31 @@ _rec68 = _db68.movies.get(_SLUG68) or {}
 report('cover960.jpg' in str(_rec68.get('image') or ''),
        'a card that lazy-loads carries its cover through the real scraper',
        repr(str(_rec68.get('image'))[:70]))
-_f68 = os.path.join(_msrc55.thumbnails_dir(_p68),
-                    re.sub(r'[^A-Za-z0-9._-]', '_', _SLUG68) + '.jpg')
-report(os.path.isfile(_f68) and os.path.getsize(_f68) > 512,
-       'and the cover is written next to the database, which is what the hover '
-       'card actually reads', _f68)
+report(not os.path.isdir(os.path.join(os.path.dirname(_p68), 'thumbnails')),
+       'and writes no file for it -- the hover card fetches the URL on demand',
+       os.path.dirname(_p68))
 report(any('covers 1/1' in m for m in _log68),
        'the page line reports how many covers it captured',
        ' | '.join(_log68)[:180])
-report(any('1 saved to disk' in m for m in _log68),
-       'and the source line confirms the download landed, so a zero there means '
-       'the markup changed rather than the site having no covers')
+report(any('1 cover(s) captured from 1 card(s)' in m for m in _log68),
+       'and the source line says so too, so a zero there means the markup '
+       'changed rather than the site having no covers',
+       ' | '.join(_log68)[:180])
 
+# Capturing the URL and fetching the bytes are independent now: the scrape
+# records the first and nothing else. A CDN that refuses to serve is therefore
+# no longer visible here -- correctly, because the bytes are wanted at hover
+# time and not before.
 _db68b, _p68b, _log68b = _scrape68(b'')
-report(any('download(s) failed' in m for m in _log68b),
-       'a cover that is found but cannot be downloaded says so, instead of '
-       'looking identical to a gallery with no covers',
-       ' | '.join(_log68b)[:180])
-report(not os.path.isdir(os.path.join(_msrc55.thumbnails_dir(_p68b))),
-       'and writes no file for it')
+report('cover960.jpg' in str((_db68b.movies.get(_SLUG68) or {}).get('image') or ''),
+       'a gallery whose images cannot be fetched still records the cover URL',
+       repr(str((_db68b.movies.get(_SLUG68) or {}).get('image'))[:70]))
+report(not os.path.isdir(os.path.join(os.path.dirname(_p68b), 'thumbnails')),
+       'and still leaves no thumbnails/ folder behind')
 
-# compact_records() drops a cover whose signature has expired; the downloaded
-# file is the durable copy. That is why a database scraped an hour ago can read
-# zero covers while the cards still display something.
+# compact_records() drops a cover whose signature has expired, so a database
+# scraped an hour ago reads zero covers. That is now recoverable rather than
+# permanent: the movie's own watch page mints a fresh signature on demand.
 _db68c = _msrc55.MetadataDB(_p68)
 _db68c.movies[_SLUG68]['image_expires'] = 1
 _db68c.compact_records()
@@ -5809,9 +5845,10 @@ _db68d.movies[_SLUG68]['image_expires'] = 9999999999
 _db68d.compact_records()
 report('cover960.jpg' in str(_db68d.movies[_SLUG68].get('image') or ''),
        'and a still-valid one is kept')
-report(os.path.isfile(_f68),
-       'either way the downloaded file survives, so pruning is not what empties '
-       'the hover card')
+report(bool((_db68c.movies[_SLUG68] or {}).get('url')),
+       'and the watch page it can be re-minted from survives the prune, so an '
+       'empty cover is now a hover away from being fixed',
+       str((_db68c.movies[_SLUG68] or {}).get('url'))[:70])
 
 # ── 69. No name is read before it is bound ────────────────────────────────────
 # _show_hover_preview tested `_cover64 is None` where the function's own cover
@@ -5912,7 +5949,7 @@ report(_msrc55._best_srcset_url('https://x/shared/med.jpg') == 'https://x/shared
 # for images.psmcdn.net, which is unsigned and public, and wrong for
 # images.nubiles-porn.com, whose covers are signed precisely so they cannot be
 # hotlinked. So even with the cover URL in hand, every nubiles download asked
-# the wrong network for it -- and save_thumbnail swallowed the refusal.
+# the wrong network for it -- and the download swallowed the refusal.
 print()
 print('71. A cover is requested from the network that signed it')
 
@@ -5961,29 +5998,27 @@ def _install71(resp):
 _saved71 = _sys55.modules.get('curl_cffi')
 _U71 = ('https://images.nubiles-porn.com/videos/my_stepsis/samples/'
         'cover960.jpg?st=A&e=9999999999')
-_d71 = os.path.join(_tf55.mkdtemp(), 'ref71.json')
 try:
     _sys55.modules['curl_cffi'] = _install71(_Resp71)
-    _p71 = _msrc55.save_thumbnail(_d71, 'ref71-slug', _U71,
-                                  referer='https://nubiles-porn.com/')
-    report(bool(_p71) and os.path.isfile(_p71),
-           'a cover downloads when the request names the network that signed it')
+    _b71 = _msrc55._fetch_bytes(_U71, referer='https://nubiles-porn.com/')
+    report(len(_b71) > 512,
+           'a cover downloads when the request names the network that signed it',
+           f'{len(_b71)} bytes')
     report(_cap71['headers'].get('Referer') == 'https://nubiles-porn.com/',
            'and that referer is what goes on the wire, not teamskeet',
            str(_cap71['headers'].get('Referer')))
     report(str(_cap71['headers'].get('Accept') or '').startswith('image/'),
            'asking for an image rather than an HTML document',
            str(_cap71['headers'].get('Accept'))[:40])
-    _msrc55.save_thumbnail(_d71, 'ref71-slug2', _U71)
+    _msrc55._fetch_bytes(_U71)
     report(_cap71['headers'].get('Referer') == 'https://www.teamskeet.com/',
            'with no referer given the teamskeet default is left as it was',
            str(_cap71['headers'].get('Referer')))
     _sys55.modules['curl_cffi'] = _install71(_Refused71)
     _diag71 = []
-    _p71b = _msrc55.save_thumbnail(_d71, 'ref71-slug3', _U71,
-                                   referer='https://nubiles-porn.com/',
-                                   diag=_diag71)
-    report(not _p71b and _diag71 == ['HTTP 403'],
+    _b71b = _msrc55._fetch_bytes(_U71, referer='https://nubiles-porn.com/',
+                                 diag=_diag71)
+    report(not _b71b and _diag71 == ['HTTP 403'],
            'a refused cover says why, so a 403 is not mistaken for a markup '
            'change', str(_diag71))
 finally:
@@ -5999,9 +6034,16 @@ _run71 = ast.get_source_segment(
         os.path.dirname(os.path.abspath(__file__)), 'metadata_scraper.py'),
         encoding='utf-8').read()))
          if isinstance(n, ast.ClassDef) and n.name == 'NetworkGalleryScraper'))
-report(_run71.count('referer=src_referer') == 2,
-       'both gallery cover saves pass the network referer through',
-       str(_run71.count('referer=src_referer')))
+report('save_thumbnail' not in _run71 and 'src_referer' not in _run71,
+       'the scrape downloads no cover at all now, so it cannot pass the wrong '
+       'referer for one')
+_src71 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           'metadata_scraper.py'), encoding='utf-8').read()
+_hit71 = [n for n in ast.walk(ast.parse(_src71))
+          if isinstance(n, ast.FunctionDef) and n.name == 'ensure_cover_async']
+_fn71 = ast.get_source_segment(_src71, _hit71[0]) if _hit71 else ''
+report('_referer_for(site)' in (_fn71 or ''),
+       'the fetch that does happen asks as the network that signed the cover')
 
 # ── 72. A preview is streamed, never written to disk ──────────────────────────
 # A field log showed the signed loop playing straight from the CDN, and a disk
@@ -6099,12 +6141,8 @@ def _run73(existing):
     scr.signals.finished = _E73()
     scr.signals.error = _E73()
     scr._fetch_gallery_page = lambda page: _page70 if page == 1 else ''
-    orig = _msrc55.save_thumbnail
-    _msrc55.save_thumbnail = lambda *a, **k: ''
-    try:
-        scr._run()
-    finally:
-        _msrc55.save_thumbnail = orig
+    # The scrape downloads nothing any more, so there is no fetch to stub out.
+    scr._run()
     # The scraper's own DB, not a reloaded one: nubiles.txt was captured with a
     # signature that has since expired, and compact_records() prunes an expired
     # preview on load -- which is correct behaviour, but it would hide what the
@@ -6133,6 +6171,202 @@ _db73b, _, _ = _run73(_live73)
 report((_db73b.movies.get(_BASE73['slug']) or {}).get('preview') == _LIVE72,
        'and a signature that is still live is left alone')
 
-print()
+if _have74:
+    # ── 74. A dead cover is re-minted on hover, from the movie's own watch page ───
+    # A nubiles signature dies in about an hour, and the old answer was "run an
+    # Update". But the watch page mints a fresh one every time it is loaded --
+    # measured live, cover1280/cover614 both carrying a new e= -- so a hover can
+    # recover the cover itself, with no scrape and nothing on disk. The page is
+    # built below from what that page actually returned, distractors included: it
+    # also carries the covers of its related videos and its photo thumbnails, and
+    # picking one of those would show the wrong scene.
+    print()
+    print('74. A dead cover is re-minted on hover from the watch page')
+
+    _PAGE74 = """
+    ![Screenshot](https://images.nubiles-porn.com/videos/stepmom_is_a_great_kisser/samples/cover1280.jpg?st=gYviyGTFR2y8Ci8PlnN7kQ&e=1789696800)
+
+    [![preview image](https://content2a.nubiles-porn.com/exclusive/stepmom_is_a_great_kisser/photos/tn/stepmom_is_a_great_kisser_054.jpg?st=4kMgzJiUFs3liUJZPFw_tw&e=1789696800)](https://nubiles-porn.com/join)
+
+    Related Videos
+    [![My Swap Family Is Closer Than Ever - S11:E6](https://images.nubiles-porn.com/videos/my_swap_family_is_closer_than_ever/samples/cover960.jpg?st=RFjoV0KXfnF9JqfV65raYw&e=1789696800)](https://nubiles-porn.com/video/watch/246088/my-swap-family-is-closer-than-ever-s11e6)
+
+    Related Photos
+    [![Stepmom Is A Great Kisser - S27:E1](https://images.nubiles-porn.com/videos/stepmom_is_a_great_kisser/samples/cover614.jpg?st=D9TO6Qs3eAssgLwx5Q1g2g&e=1789696800)](https://nubiles-porn.com/photo/gallery/256287/stepmom-is-a-great-kisser-s27e1)
+
+    To view this video please enable JavaScript. Video Player is loading.
+    1280x720 HD  960x540  640x360  480x270
+    """
+
+    _c74 = _msrc55.signed_cover_url(_PAGE74, 'Stepmom Is A Great Kisser')
+    report('cover1280.jpg' in _c74 and 'st=gYviyGTFR2y8Ci8PlnN7kQ' in _c74,
+           'the watch page hands back this movie\'s cover, freshly signed',
+           _c74[:110] or '(none)')
+    report('my_swap_family' not in _c74 and 'cover614' not in _c74,
+           'and not a related video\'s, nor a narrower cut of its own')
+    report(_msrc55.signed_cover_url(_PAGE74, 'My Swap Family Is Closer Than Ever')
+           .count('my_swap_family_is_closer_than_ever') == 1,
+           'a different movie on the same page resolves to its own cover instead')
+    report(_msrc55.signed_cover_url(_PAGE74, 'NoSuchScene') == '',
+           'a title the page does not carry yields nothing rather than a guess')
+    report(_msrc55._image_expiry_epoch(_c74) == 1789696800,
+           'with the new expiry, so it can be pruned again an hour later',
+           str(_msrc55._image_expiry_epoch(_c74)))
+
+    # The preview loop is not on that page -- its player sources are not in the
+    # HTML, measured on six watch pages out of six, which is exactly what the field
+    # log showed. So a refresh recovers the cover and cannot recover the preview.
+    report(_msrc55.signed_media_url(_PAGE74, 'Stepmom Is A Great Kisser') == '',
+           'and the same page carries no loop, which is why previews still need an Update')
+    report('/loops/' in _msrc55.signed_media_url(
+        _PAGE74 + ('<a href="https://images.nubiles-porn.com/videos/stepmom_is_a_'
+                   'great_kisser/videos/loops/momsteachsex_stepmom_is_a_great_kisser'
+                   '_loop_480.mp4?st=B&e=1789696800"></a>'),
+        'Stepmom Is A Great Kisser'),
+           'but one that did would be taken, not ignored')
+    report(_msrc55.signed_media_url(_PAGE74 + (
+        '<a href="https://images.nubiles-porn.com/videos/some_other_scene/videos/'
+        'loops/x_loop_480.mp4?st=C&e=1789696800"></a>'),
+        'Stepmom Is A Great Kisser') == '',
+           'and another scene\'s loop is never borrowed for it')
+
+
+    class _Player74:
+        pass
+
+
+    _p74 = _Player74()
+    _p74.data_dir = _tf55.mkdtemp()
+    _p74._metadata_dbs = {}
+    _p74._metadata_links = {}
+    _p74._metadata_name_overrides = {}
+    _p74._meta_norm_path = _msrc55._meta_norm_path
+    _d74 = os.path.join(_p74.data_dir, _msrc55.METADATA_SITES['nubiles']['db_filename'])
+    _URL74 = 'https://nubiles-porn.com/video/watch/256294/stepmom-is-a-great-kisser-s27e1'
+    _MOV74 = {
+        'slug': '256294-stepmom-is-a-great-kisser-s27e1',
+        'title': 'Stepmom Is A Great Kisser', 'series': 'MomsTeachSex',
+        'models': ['Amirah Adara'], 'date': '14/09/2026', 'meta_fetched': True,
+        'url': _URL74, 'source_site': 'momsteachsex',
+        'image': 'https://images.nubiles-porn.com/videos/stepmom_is_a_great_kisser/'
+                 'samples/cover960.jpg?st=OLD&e=1',
+        'image_expires': 1,
+    }
+    with open(_d74, 'w', encoding='utf-8') as _f74:
+        json.dump({'movies': {_MOV74['slug']: dict(_MOV74)}}, _f74)
+    _db74 = _msrc55.MetadataDB(_d74)
+    report(not _db74.movies[_MOV74['slug']].get('image'),
+           'an hour later the stored cover is gone, pruned as expired')
+
+    _site74 = dict(_msrc55.METADATA_SITES['nubiles'])
+    _orig_sites74 = _msrc55.METADATA_SITES['nubiles']
+    _orig_html74 = _msrc55._fetch_html
+    _orig_bytes74 = _msrc55._fetch_bytes
+    _fetched74 = []
+    try:
+        _msrc55.METADATA_SITES['nubiles'] = _site74
+        _msrc55._fetch_html = lambda url, timeout=20: (
+            _fetched74.append(url), _PAGE74)[1]
+        _msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: (
+            _fetched74.append(url), b'\xff\xd8' + b'0' * 900)[1]
+        _msrc55._COVER_CACHE.clear()
+        _msrc55._COVER_INFLIGHT.clear()
+        _msrc55._REFRESH_INFLIGHT.clear()
+        report(_msrc55.refresh_signed_assets_async(
+            _p74, _site74, _MOV74, _db74) is True,
+           'a hover with a dead cover starts a re-mint in the background')
+        for _ in range(200):
+            if _db74.movies[_MOV74['slug']].get('image'):
+                break
+            time.sleep(0.01)
+        _rec74 = _db74.movies[_MOV74['slug']]
+        report('cover1280.jpg' in str(_rec74.get('image') or ''),
+               'which replaces the dead URL with a live one in the database',
+               str(_rec74.get('image') or '(none)')[:100])
+        report(int(_rec74.get('image_expires') or 0) == 1789696800,
+               'and records the new expiry so the cycle can repeat')
+        report(_fetched74 and _fetched74[0] == _URL74,
+               'having read the movie\'s own watch page',
+               str(_fetched74[0]) if _fetched74 else 'no fetch')
+        for _ in range(200):
+            if _msrc55.cover_bytes(_MOV74['slug']):
+                break
+            time.sleep(0.01)
+        report(len(_msrc55.cover_bytes(_MOV74['slug'])) > 512,
+               'and then the bytes, into memory -- never onto the disk',
+               f'{len(_msrc55.cover_bytes(_MOV74["slug"]))} bytes')
+        report(not os.path.isdir(os.path.join(_p74.data_dir, 'thumbnails')),
+               'so no thumbnails/ folder is created for it',
+               _p74.data_dir)
+        report(_msrc55.refresh_signed_assets_async(
+            None, _site74, _MOV74, _db74) is False
+               and _msrc55.refresh_signed_assets_async(
+                   _p74, _site74, {'slug': '', 'url': _URL74}, _db74) is False,
+               'and it refuses to run without a player and a slug')
+    finally:
+        _msrc55.METADATA_SITES['nubiles'] = _orig_sites74
+        _msrc55._fetch_html = _orig_html74
+        _msrc55._fetch_bytes = _orig_bytes74
+        _msrc55._COVER_CACHE.clear()
+        _msrc55._COVER_INFLIGHT.clear()
+        _msrc55._REFRESH_INFLIGHT.clear()
+
+    # The hover itself must hand the card something to paint and a reason to keep
+    # polling, including for a row whose cover has already been pruned away.
+    _p74b = _Player74()
+    _p74b.data_dir = _tf55.mkdtemp()
+    _p74b._metadata_dbs = {}
+    _p74b._metadata_links = {}
+    _p74b._metadata_name_overrides = {}
+    _p74b._meta_norm_path = _msrc55._meta_norm_path
+    _d74b = os.path.join(_p74b.data_dir, _msrc55.METADATA_SITES['nubiles']['db_filename'])
+    with open(_d74b, 'w', encoding='utf-8') as _f74b:
+        json.dump({'movies': {_MOV74['slug']: {
+            'slug': _MOV74['slug'], 'title': _MOV74['title'],
+            'series': _MOV74['series'], 'models': _MOV74['models'],
+            'date': _MOV74['date'], 'meta_fetched': True, 'url': _URL74,
+            'image': _MOV74['image'], 'image_expires': 9999999999,
+        }}}, _f74b)
+    _row74 = 'https://pixeldrain.com/u/row74'
+    _orig_sites74b = _msrc55.METADATA_SITES['nubiles']
+    _orig_bytes74b = _msrc55._fetch_bytes
+    try:
+        _msrc55.METADATA_SITES['nubiles'] = _site74
+        _msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: b'\xff\xd8' + b'0' * 900
+        _p74b._metadata_links[_msrc55._meta_norm_path(_row74)] = {
+            'slug': _MOV74['slug'], 'site': 'nubiles'}
+        _i74 = _msrc55.preview_info_for_path(_p74b, _row74)
+        report('cover_data' in _i74 and 'thumbnail' not in _i74,
+               'the hover hands the card cover bytes, not a file path',
+               ','.join(sorted(_i74)))
+        report(_i74.get('image_live') is True and _i74.get('can_refresh') is True,
+               'and says both that the URL is live and where a dead one comes from')
+        for _ in range(200):
+            if _msrc55.cover_bytes(_MOV74['slug']):
+                break
+            time.sleep(0.01)
+        _i74b = _msrc55.preview_info_for_path(_p74b, _row74)
+        report(len(_i74b.get('cover_data') or b'') > 512,
+               'and once the fetch lands the same call returns the bytes',
+               f'{len(_i74b.get("cover_data") or b"")} bytes')
+    finally:
+        _msrc55.METADATA_SITES['nubiles'] = _orig_sites74b
+        _msrc55._fetch_bytes = _orig_bytes74b
+        _msrc55._COVER_CACHE.clear()
+
+    _cover74 = _vsrc64('_metadata_cover_pixmap')
+    report('loadFromData' in _cover74 and 'cover_data' in _cover74,
+           'the card paints those bytes straight into a pixmap')
+    report('os.path.isfile' not in _cover74 and 'thumbnail' not in _cover74,
+           'and no longer looks for a file on disk to do it')
+    _poll74 = _vsrc64('_poll_hover_cover')
+    report('_hover_cover_poll_tries > 25' in _poll74,
+           'the poll outlasts the two round trips a re-mint costs, not just 3 s')
+    _show74 = _vsrc64('_show_hover_preview')
+    report('can_refresh' in _show74,
+           'and it keeps polling for a row whose cover was pruned, not only a live one')
+
+
+    print()
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
