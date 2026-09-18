@@ -20,6 +20,7 @@ Integration hooks in main.py
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -927,6 +928,12 @@ def _fetch_page(site: dict, page_url: str, db=None, session=None,
             return "", "unreachable", waited
     elif not _is_challenge_page(html):
         return html, "http", waited
+
+    # A gate we can solve ourselves beats launching a browser for one, by
+    # about three orders of magnitude.
+    solved = solve_turnstile_challenge(page_url)
+    if solved:
+        return solved, "turnstile", _ms()
 
     if not _site_needs_browser(site, page_url):
         return html, ("http" if html else "none"), waited
@@ -1877,6 +1884,148 @@ def _is_challenge_page(html) -> bool:
         return False
     title = html_unescape(match.group(1)).strip()[:120]
     return bool(title) and bool(_CHALLENGE_TITLE_RE.match(title))
+
+
+_TURNSTILE_CONFIG_RE = re.compile(
+    r"var\s+turnstileConfig\s*=\s*(\{.*?\})\s*;", re.DOTALL)
+_TURNSTILE_SESSION = None
+_TURNSTILE_MAX_NONCE = 4_000_000
+
+
+def _turnstile_config(html) -> dict:
+    """The challenge parameters a page is hiding behind, {} if there are none.
+
+    This is not Cloudflare Turnstile despite the class names. It is the site's
+    own gate: an inline config carrying a proof-of-work challenge, and a script
+    that hashes nonces in a web worker until one comes out with enough leading
+    zero bits. That matters, because a proof of work is arithmetic -- it can be
+    done here, in milliseconds, without a browser.
+    """
+    match = _TURNSTILE_CONFIG_RE.search(html or "")
+    if not match:
+        return {}
+    try:
+        cfg = json.loads(match.group(1))
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:
+        return {}
+
+
+def _has_leading_zero_bits(digest: bytes, bits: int) -> bool:
+    """Mirror of the page's checkLeadingZeroBits, bit for bit."""
+    full_bytes, rem_bits = divmod(int(bits), 8)
+    if digest[:full_bytes] != b"\x00" * full_bytes:
+        return False
+    if rem_bits and (digest[full_bytes] >> (8 - rem_bits)):
+        return False
+    return True
+
+
+def solve_turnstile_pow(challenge: str, difficulty: int,
+                        max_nonce: int = _TURNSTILE_MAX_NONCE) -> str:
+    """The nonce the gate wants, or '' if none is found within max_nonce.
+
+    SHA-256("<challenge>:<nonce>") with `difficulty` leading zero bits. At the
+    difficulty the site actually serves -- 15 -- that is about 32768 hashes on
+    average, which is tens of milliseconds here. The browser spent 16919 ms on
+    the same page and came back with the challenge still up.
+    """
+    if not challenge:
+        return ""
+    difficulty = int(difficulty or 0)
+    if difficulty <= 0 or difficulty > 40:
+        return ""
+    prefix = f"{challenge}:".encode("utf-8")
+    for nonce in range(max_nonce):
+        digest = hashlib.sha256(prefix + str(nonce).encode("utf-8")).digest()
+        if _has_leading_zero_bits(digest, difficulty):
+            return str(nonce)
+    return ""
+
+
+def _environment_checks() -> dict:
+    """The values the gate's collectEnvironmentChecks() would have gathered.
+
+    Sent because the page sends them. Nothing here is validated against a real
+    browser -- it is a plausible desktop Chrome on Windows, which is what the
+    player is running on.
+    """
+    try:
+        offset = int((time.altzone if (time.daylight and time.localtime().tm_isdst)
+                      else time.timezone) / 60)
+    except Exception:
+        offset = 0
+    return {
+        "screenWidth": 1920,
+        "screenHeight": 1080,
+        "hasCanvas": True,
+        "hasWebGL": True,
+        "colorDepth": 24,
+        "timezoneOffset": offset,
+        "languages": "en-US,en",
+        "platform": "Win32",
+        "cookieEnabled": True,
+    }
+
+
+def solve_turnstile_challenge(url: str, timeout: int = 15) -> str:
+    """Walk a page's own proof-of-work gate and return the page behind it.
+
+    '' when there is no such gate, the proof cannot be solved, or the server
+    refuses it. One session carries the whole exchange, because the clearance
+    lives in a cookie that the follow-up request has to present.
+    """
+    global _TURNSTILE_SESSION
+    try:
+        import requests
+    except ImportError:
+        return ""
+    if _TURNSTILE_SESSION is None:
+        _TURNSTILE_SESSION = requests.Session()
+        _TURNSTILE_SESSION.headers.update(REQUEST_HEADERS)
+    session = _TURNSTILE_SESSION
+    try:
+        first = session.get(url, timeout=timeout)
+        cfg = _turnstile_config(first.text)
+        challenge = str(cfg.get("challenge") or "")
+        difficulty = int(cfg.get("difficulty") or 0)
+        if not challenge or not difficulty:
+            return ""
+        started = time.time()
+        nonce = solve_turnstile_pow(challenge, difficulty)
+        if not nonce:
+            print(f"[TURNSTILE] no nonce found for difficulty {difficulty}")
+            return ""
+        parsed = urlparse(url)
+        verify = f"{parsed.scheme}://{parsed.netloc}/turnstile/verify"
+        reply = session.post(verify, json={
+            "nonce": nonce,
+            "timestamp": cfg.get("timestamp"),
+            "difficulty": difficulty,
+            "environmentChecks": _environment_checks(),
+            "returnTo": cfg.get("returnTo") or parsed.path,
+        }, timeout=timeout)
+        try:
+            verdict = reply.json()
+        except Exception:
+            verdict = {}
+        if not verdict.get("success"):
+            print(f"[TURNSTILE] verify refused: "
+                  f"{verdict.get('error') or reply.status_code}")
+            return ""
+        again = session.get(url, timeout=timeout)
+        page = again.text or ""
+        solved_ms = int((time.time() - started) * 1000)
+        if page and not _is_challenge_page(page):
+            print(f"[TURNSTILE] cleared in {solved_ms} ms "
+                  f"(nonce {nonce}, difficulty {difficulty})")
+            return page
+        print(f"[TURNSTILE] verified but the page is still a challenge "
+              f"after {solved_ms} ms")
+        return ""
+    except Exception as exc:
+        print(f"[TURNSTILE] {type(exc).__name__}: {exc}")
+        return ""
 
 
 def _describe_page(page: str, transport: str = "", elapsed_ms=None) -> str:

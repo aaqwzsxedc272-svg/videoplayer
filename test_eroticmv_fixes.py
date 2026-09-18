@@ -7027,5 +7027,125 @@ else:
     report(False, 'the browser-state diagnostic is present',
            'missing: _storage_state_cookie_count')
 
+# ---------------------------------------------------------------------------
+# 79. The gate is not Cloudflare. It is the site's own proof of work.
+#
+# The captured page carries an inline turnstileConfig and a web worker that
+# hashes "<challenge>:<nonce>" until the digest has enough leading zero bits,
+# then POSTs the nonce to /turnstile/verify. A proof of work is arithmetic, so
+# it can be done here -- which matters, because the headless browser spent
+# 16919 ms on this exact page and handed back the challenge unsolved.
+#
+# This section runs against the real captured page, not a reconstruction of it.
+# ---------------------------------------------------------------------------
+print()
+print("--- 79: the site's own proof-of-work gate ---")
+import hashlib as _hl79
+
+_CAP79 = os.path.join(os.path.dirname(os.path.abspath(_msrc55.__file__)),
+                      'watchpage_244784-my-stepmom-is-the-perfect-date-s5e6.html')
+_API79 = ('_turnstile_config', 'solve_turnstile_pow', 'solve_turnstile_challenge',
+          '_environment_checks')
+_HAVE79 = os.path.isfile(_CAP79) and all(
+    hasattr(_msrc55, n) for n in _API79)
+if not os.path.isfile(_CAP79):
+    _why79 = 'missing fixture: ' + os.path.basename(_CAP79)
+else:
+    _miss79 = [n for n in _API79 if not hasattr(_msrc55, n)]
+    _why79 = ('missing: ' + ', '.join(_miss79)) if _miss79 else 'ready'
+report(_HAVE79,
+       'the proof-of-work solver and the captured gate are both here', _why79)
+
+if _HAVE79:
+    _page79 = open(_CAP79, encoding='utf-8', errors='replace').read()
+    _cfg79 = _msrc55._turnstile_config(_page79)
+    report(bool(_cfg79.get('challenge')) and _cfg79.get('difficulty') == 15,
+       "the gate's parameters are read out of the page the player actually "
+       'captured', json.dumps(_cfg79)[:96])
+    report(_msrc55._is_challenge_page(_page79) is True,
+       'and that page is recognised as an interstitial')
+
+    _t79 = time.time()
+    _nonce79 = _msrc55.solve_turnstile_pow(_cfg79['challenge'],
+                                           _cfg79['difficulty'])
+    _ms79 = (time.time() - _t79) * 1000
+    report(bool(_nonce79),
+       'the proof of work is solved here, in Python, with no browser',
+       f'nonce {_nonce79}')
+    report(_ms79 < 2000,
+       'in milliseconds -- the browser spent 16919 ms on this same page and '
+       'came back with the challenge still up', f'{_ms79:.0f} ms')
+
+    # Verified by a loop transcribed from the page's own checkLeadingZeroBits,
+    # not by the function under test.
+    _d79 = _hl79.sha256(
+        (_cfg79['challenge'] + ':' + _nonce79).encode('utf-8')).digest()
+    _bits79, _done79 = 0, False
+    for _byte79 in _d79:
+        for _pos79 in range(7, -1, -1):
+            if (_byte79 >> _pos79) & 1:
+                _done79 = True
+                break
+            _bits79 += 1
+        if _done79:
+            break
+    report(_bits79 >= int(_cfg79['difficulty']),
+       'and the nonce really carries the leading zero bits the gate demands',
+       f'{_bits79} bits >= {_cfg79["difficulty"]}')
+    report(_msrc55.solve_turnstile_pow(_cfg79['challenge'], 0) == ''
+           and _msrc55.solve_turnstile_pow('', 15) == ''
+           and _msrc55.solve_turnstile_pow('x', 99) == '',
+       'a difficulty that is absent or absurd is refused rather than allowed '
+       'to burn the whole nonce budget')
+    _env79 = _msrc55._environment_checks()
+    report(set(_env79) == {'screenWidth', 'screenHeight', 'hasCanvas',
+                           'hasWebGL', 'colorDepth', 'timezoneOffset',
+                           'languages', 'platform', 'cookieEnabled'},
+       'the environment block matches the keys the page collects, no more',
+       str(sorted(_env79)))
+
+    _txt79 = open(_msrc55.__file__, encoding='utf-8').read()
+    _fp79 = _txt79.index('def _fetch_page(')
+    report(_txt79.index('solve_turnstile_challenge(page_url)')
+           < _txt79.index('_browser_fetch_guard():', _fp79),
+       'the solver is tried before any browser is even considered')
+
+    _site79 = dict(_msrc55.METADATA_SITES['nubiles'])
+    _url79 = 'https://nubiles-porn.com/video/watch/244784/x'
+    _oh79 = _msrc55._fetch_html
+    _osess79 = _msrc55._BrowserGallerySession
+    _ost79 = _msrc55.solve_turnstile_challenge
+    _open79 = []
+    try:
+        class _S79:
+            def __init__(self, cookie_path=None, on_status=None):
+                _open79.append(cookie_path)
+
+            def get(self, url, wait_selector=None, timeout=None):
+                return _page79
+
+            def close(self):
+                pass
+
+        _msrc55._BrowserGallerySession = _S79
+        _msrc55._fetch_html = lambda url, timeout=20: _page79
+        _msrc55.solve_turnstile_challenge = (
+            lambda url, timeout=15: '<html><title>The Real Page</title></html>')
+        _h, _t, _m = _msrc55._fetch_page(_site79, _url79, None)
+        report(_t == 'turnstile' and not _open79 and 'Real Page' in _h,
+           'so a gate we can solve ourselves is solved, and no browser is '
+           'launched for it', f'{_t!r}, {len(_open79)} browser(s)')
+
+        _msrc55.solve_turnstile_challenge = lambda url, timeout=15: ''
+        _h, _t, _m = _msrc55._fetch_page(_site79, _url79, None)
+        report(_t == 'browser' and len(_open79) == 1,
+           'and a gate that refuses us still falls through to the browser '
+           'rather than giving up', f'{_t!r}, {len(_open79)} browser(s)')
+    finally:
+        _msrc55._fetch_html = _oh79
+        _msrc55._BrowserGallerySession = _osess79
+        _msrc55.solve_turnstile_challenge = _ost79
+        _msrc55._UNREACHABLE_UNTIL.clear()
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
