@@ -215,8 +215,7 @@ for _f in _kb_pyc.glob('keybindings_dialog*.pyc') if _kb_pyc.exists() else []:
 from keybindings_dialog import KeybindingsEditorDialog
 from settings_dialog import SettingsDialog
 from metadata_scraper import (init_metadata_scraper, _metadata_context_menu_hook,
-                               _meta_norm_path, preview_info_for_path,
-                               warm_previews_async)
+                               _meta_norm_path, preview_info_for_path)
 import socket
 import http.server
 import threading
@@ -44573,14 +44572,6 @@ try {
                 quality_item.setText(quality_text)
 
         print(f"[PLAYLIST][INFO] path='{file_path}' rows={rows} duration='{duration_text}' quality='{quality_text}'")
-        # Warm the hover preview in the background. A hover gets about a second
-        # and a half before it feels broken, and launching a browser alone costs
-        # more than that, so the cover is fetched here -- one browser reused
-        # across every row of a network -- and is already cached on hover.
-        try:
-            warm_previews_async(self, [file_path])
-        except Exception as _warm_exc:
-            print(f"[COVER] warm-up skipped: {type(_warm_exc).__name__}: {_warm_exc}")
         if self._is_remote_url(file_path):
             self._collapse_duplicate_url_mirrors()
     

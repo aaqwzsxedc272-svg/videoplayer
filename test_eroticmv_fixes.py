@@ -6620,11 +6620,15 @@ if hasattr(_msrc55, '_fetch_page'):
             _db76.movies.get(_MOV76['slug'], {}).get('image') or ''),
            'and a signed cover found that way lands in the database',
            str(_db76.movies.get(_MOV76['slug'], {}).get('image') or '(none)')[:90])
-        report(not _plain76,
-           'and the plain request is not made when the browser answered')
+        report(_plain76 == [_MOV76['url']],
+           'plain HTTP is tried first, because it is cheap and a site that '
+           'answers is answered for in a few hundred ms -- only what it comes '
+           'back with decides whether a browser is worth 12 s',
+           str(_plain76))
 
-        # A browser that yields nothing still falls back, so a site that stops
-        # needing one does not silently lose covers.
+        # The reverse: a page plain HTTP can actually serve must never cost a
+        # browser launch. The old order opened one first and only fell back,
+        # which is how a 238 ms page turned into a 27 s one.
         _d76b = os.path.join(_tf55.mkdtemp(), 's76b.json')
         with open(_d76b, 'w', encoding='utf-8') as _fb76:
             json.dump({'movies': {}}, _fb76)
@@ -6640,8 +6644,8 @@ if hasattr(_msrc55, '_fetch_page'):
             if _db76b.movies.get(_MOV76['slug'], {}).get('image'):
                 break
             time.sleep(0.01)
-        report(bool(_plain76),
-           'and a browser that yields nothing falls back to a plain request',
+        report(bool(_plain76) and not _calls76,
+           'and when plain HTTP serves the page, no browser is opened at all',
            f'{len(_calls76)} browser / {len(_plain76)} plain')
     finally:
         _msrc55._BrowserGallerySession = _ob76
@@ -6691,10 +6695,10 @@ else:
 # refresh with it. This section pins the cause and the fix.
 # ---------------------------------------------------------------------------
 print()
-print('--- 77: state file / transport label / warm-up ---')
+print('--- 77: state file / transport label / bounded fetch ---')
 
 _API77 = ('_storage_state_usable', '_save_storage_state', '_fetch_page',
-          '_resolve_linked_movie', 'warm_previews_async')
+          '_is_challenge_page', 'permanent_cover_url', 'page_cover_url')
 _have77 = all(hasattr(_msrc55, n) for n in _API77)
 report(_have77, 'the state-file, transport and warm-up API is present',
        'missing: ' + ', '.join(n for n in _API77 if not hasattr(_msrc55, n)))
@@ -6814,129 +6818,133 @@ if _have77:
         _msrc55._fetch_html = _oh77
         _msrc55._BrowserGallerySession = _osess77
 
-    # -- the warm-up ---------------------------------------------------------
-    _d77b = _tf55.mkdtemp()
-    _dbf77 = os.path.join(_d77b, 's77.json')
-    _rows77 = []
-    for _i77 in range(3):
-        _rows77.append({
-            'slug': f'25629{_i77}-stepmom-is-a-great-kisser-s27e{_i77}',
-            'title': 'Stepmom Is A Great Kisser',
-            'url': f'https://nubiles-porn.com/video/watch/25629{_i77}/slug'})
-    with open(_dbf77, 'w', encoding='utf-8') as _f77:
-        json.dump({'movies': {r['slug']: r for r in _rows77}}, _f77)
+    # -- a real page is not a challenge --------------------------------------
+    # The field log labelled this page a bot challenge:
+    #   via http, 238 ms, BOT CHALLENGE, not the page, 90852 byte(s), ...
+    #   title "Stepmom Fertilizer | Exclusive TeamSkeet Porn Video"
+    # It is not one. Every Cloudflare-fronted page carries challenge-platform,
+    # so matching it anywhere in the body condemned real pages.
+    _TS77 = ('<html><head><title>Stepmom Fertilizer | Exclusive TeamSkeet '
+             'Porn Video</title><script src="/cdn-cgi/challenge-platform/h/b/'
+             'orchestrate/chl_page.js"></script></head><body>'
+             + 'x' * 90000 + '</body></html>')
+    report(_msrc55._is_challenge_page(_TS77) is False,
+       'a real Cloudflare-fronted page is not called a challenge -- the old '
+       'test matched challenge-platform anywhere in the body, which every '
+       'such page carries', 'mislabelled a 90852-byte teamskeet page')
+    report('BOT CHALLENGE' not in _msrc55._describe_page(_TS77, 'http', 238),
+       'so the diagnostic stops reporting a good page as an interstitial',
+       _msrc55._describe_page(_TS77, 'http', 238)[:70])
+    report(_msrc55._is_challenge_page(
+        '<html><head><title>Security Check</title></head></html>') is True,
+       'and a genuine interstitial still is one')
+    report(_msrc55._is_challenge_page('') is False
+           and _msrc55._is_challenge_page('<html>no title here</html>') is False,
+       'a page with no title is not guessed at -- guessing wrong here sends a '
+       '12 s browser fetch after a page that was already fine')
 
-    _site77b = dict(_site77)
-    _site77b['db_filename'] = 's77.json'
-    _msrc55.METADATA_SITES['__s77__'] = _site77b
-    _paths77 = [f'https://watchporn.to/video/11013{_i77}/a-b-c/'
-                for _i77 in range(3)]
+    # -- permanent covers ----------------------------------------------------
+    _FOLDER77 = 'stepmom_fertilizer'
+    _PSC77 = ('https://images.psmcdn.net/teamskeet/pervmom/'
+              + _FOLDER77 + '/shared/med.jpg')
+    _PAGE77b = ('<html><meta property="og:image" content="' + _PSC77 + '">'
+                '<img src="https://images.psmcdn.net/teamskeet/pervmom/'
+                'some_other_scene/shared/med.jpg"></html>')
+    report(_msrc55.signed_cover_url(_PAGE77b, 'Stepmom Fertilizer') == '',
+       'a teamskeet page carries no signature at all -- which is precisely '
+       'why the refresh found nothing on it in the field, at 238 ms, on a '
+       'page that had loaded perfectly')
+    report(_msrc55.page_cover_url(_PAGE77b, 'Stepmom Fertilizer') == _PSC77,
+       'page_cover_url takes the unsigned permanent cover instead, filtered '
+       "to this movie's own CDN folder so a related scene is not shown",
+       _msrc55.page_cover_url(_PAGE77b, 'Stepmom Fertilizer'))
+    report(_msrc55.permanent_cover_url(_PAGE77b, 'NoSuchScene') == '',
+       'and a page holding only other scenes yields nothing')
+    report(_msrc55._image_expiry_epoch(_PSC77) == 0,
+       'a permanent cover never expires, so it needs none of this re-minting')
 
-    class _Player77:
-        pass
-
-    _p77 = _Player77()
-    _p77.data_dir = _d77b
-    _p77._metadata_links = {
-        _msrc55._meta_norm_path(_paths77[_i77]):
-            {'site': '__s77__', 'slug': _rows77[_i77]['slug']}
-        for _i77 in range(3)}
-
-    _s77, _db77, _m77 = _msrc55._resolve_linked_movie(_p77, _paths77[0])
-    report(_s77 is _site77b and _m77 and _m77['slug'] == _rows77[0]['slug'],
-       'a playlist row resolves to its metadata record through the saved link',
-       str(_m77 or {})[:70])
-    report(_msrc55._resolve_linked_movie(_p77, 'https://x/y')[0] is None,
-       'and an unlinked row resolves to nothing, so it is simply skipped')
-
+    # -- the fetch is bounded ------------------------------------------------
+    _oh77 = _msrc55._fetch_html
+    _osess77 = _msrc55._BrowserGallerySession
     _opens77 = []
-    _gets77 = []
-    _oby77 = _msrc55._fetch_bytes
-    _ec77 = _msrc55.ensure_cover_async
-    _covers77 = []
+    _probe77 = _msrc55._PROBE_TIMEOUT
+    _unreach77 = dict(_msrc55._UNREACHABLE_UNTIL)
     try:
-        class _SessWarm77:
+        class _Sess77b:
             def __init__(self, cookie_path=None, on_status=None):
                 _opens77.append(cookie_path)
 
             def get(self, url, wait_selector=None, timeout=None):
-                _gets77.append(url)
-                return ('<html><img data-srcset="'
-                        'https://images.nubiles-porn.com/videos/'
-                        'stepmom_is_a_great_kisser/samples/cover1280.jpg'
-                        '?st=AbCdEfGhIjKlMnOpQrStUv&e=1999999999 1280w">'
-                        '</html>')
+                return '<html><title>Real Page</title></html>'
 
             def close(self):
                 pass
 
-        _msrc55._BrowserGallerySession = _SessWarm77
-        _msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: (
-            b'\xff\xd8' + b'0' * 800)
-        _msrc55.ensure_cover_async = lambda pl, st, slug, url: (
-            _covers77.append(slug), True)[1]
-        _msrc55._WARM_DONE.clear()
-        _msrc55._WARM_RUNNING.clear()
-        with _msrc55._COVER_CACHE_LOCK:
-            _msrc55._COVER_CACHE.clear()
+        _msrc55._BrowserGallerySession = _Sess77b
+        _site77c = dict(_site77)          # a needs_browser site
+        _mov77c = dict(_MOV77, url='https://brattysis.com/video/watch/203468/x')
 
-        _n77 = _msrc55.warm_previews_async(_p77, _paths77)
-        report(_n77 == 3, 'the warm-up queues every linked row of the playlist',
-               f'{_n77}')
-        for _ in range(400):
-            if len(_gets77) >= 3 and len(_covers77) >= 3:
-                break
-            time.sleep(0.01)
-        report(len(_gets77) == 3,
-           'and reads all three watch pages', f'{len(_gets77)} fetched')
-        report(len(_opens77) == 1,
-           'through ONE browser for the whole network -- a hover cannot afford '
-           'a launch inside ~1.5 s, so the launch happens once here, in the '
-           'background, before any row is hovered',
-           f'{len(_opens77)} browser(s) opened')
-        report(len(_covers77) == 3,
-           'and each cover is pushed into the hover cache',
-           str(_covers77))
-        def _stored77():
-            return sum(1 for r in _msrc55.MetadataDB(_dbf77).movies.values()
-                       if 'cover1280.jpg' in str(r.get('image') or ''))
+        # A site that answers over plain HTTP must not cost a browser launch.
+        _msrc55._fetch_html = lambda url, timeout=20: (
+            '<html><title>Stepmom Fertilizer | TeamSkeet</title></html>')
+        _h, _t, _m = _msrc55._fetch_page(_site77c, _mov77c['url'], None)
+        report(_t == 'http' and not _opens77,
+           'a page that plain HTTP serves is not followed by a 25 s browser '
+           'launch -- teamskeet answered in 238 ms and the browser was never '
+           'needed', f'{_t!r}, {len(_opens77)} browser(s)')
 
-        for _ in range(400):        # db.save() runs after the last row
-            if _stored77() >= 3:
-                break
-            time.sleep(0.01)
-        report(_stored77() == 3,
-           'and lands in the database, so a later run does not refetch',
-           f'{_stored77()} of 3 stored')
+        # Only a real interstitial escalates.
+        _msrc55._fetch_html = lambda url, timeout=20: (
+            '<html><head><title>Security Check</title></head></html>')
+        _h, _t, _m = _msrc55._fetch_page(_site77c, _mov77c['url'], None)
+        report(_t == 'browser' and len(_opens77) == 1,
+           'and a genuine challenge does escalate to the browser',
+           f'{_t!r}, {len(_opens77)} browser(s)')
 
-        _gets77.clear()
-        _opens77.clear()
-        report(_msrc55.warm_previews_async(_p77, _paths77) == 0,
-           'a repeat call inside the cooldown queues nothing',
-           'second call queued work')
-        report(_msrc55.warm_previews_async(_p77, []) == 0
-               and _msrc55.warm_previews_async(None, _paths77) == 0,
-           'and an empty batch or no player is a no-op')
+        # A host that will not answer is remembered, not re-probed per row.
+        _msrc55._PROBE_TIMEOUT = 0.02          # 18 ms threshold
+        _msrc55._fetch_html = lambda url, timeout=20: (time.sleep(0.05), None)[1]
+        _h, _t, _m = _msrc55._fetch_page(_site77c, _mov77c['url'], None)
+        report(_t == 'unreachable',
+           'burning the whole probe on a connect timeout marks the host '
+           'unreachable -- brattysis.com refused TCP outright and every row '
+           're-proved it', f'{_t!r} after {_m} ms')
+        _t0 = time.time()
+        _h, _t, _m = _msrc55._fetch_page(_site77c, _mov77c['url'], None)
+        report(_t == 'unreachable' and _m == 0
+               and (time.time() - _t0) < 0.02,
+           'so the next row of the same network costs nothing instead of '
+           'another 128 s', f'{_t!r} in {int((time.time()-_t0)*1000)} ms')
+        report(_msrc55._PROBE_TIMEOUT * 1000 <= 8000
+               and _msrc55._BROWSER_TIMEOUT <= 12000,
+           'the probe and the browser are both capped, where the old path '
+           'spent 25 s in the browser and then 20 s each in curl_cffi, '
+           'requests and urllib',
+           f'probe {_probe77*1000:.0f} ms, browser '
+           f'{_msrc55._BROWSER_TIMEOUT} ms')
     finally:
+        _msrc55._fetch_html = _oh77
         _msrc55._BrowserGallerySession = _osess77
-        _msrc55._fetch_bytes = _oby77
-        _msrc55.ensure_cover_async = _ec77
-        _msrc55.METADATA_SITES.pop('__s77__', None)
-        _msrc55._WARM_DONE.clear()
-        _msrc55._WARM_RUNNING.clear()
+        _msrc55._PROBE_TIMEOUT = _probe77
+        _msrc55._UNREACHABLE_UNTIL.clear()
+        _msrc55._UNREACHABLE_UNTIL.update(_unreach77)
 
-    # -- main.py actually calls it ------------------------------------------
+    # -- fetched at link time, not an hour later -----------------------------
+    _txt77 = open(_msrc55.__file__, encoding='utf-8').read()
+    _i77 = _txt77.index('def _apply_to_file(')
+    _body77 = _txt77[_i77:_txt77.index('\n    def ', _i77 + 10)]
+    report('refresh_signed_assets_async(' in _body77
+           and 'force=True' in _body77,
+       'linking a row fetches its cover then and there -- the user is sitting '
+       'in the linker and a few seconds costs nothing, which is the moment to '
+       'pay for it rather than at the click an hour later')
     _main77 = open(os.path.join(os.path.dirname(
         os.path.abspath(_msrc55.__file__)), 'main.py'),
         encoding='utf-8', errors='replace').read()
-    report('warm_previews_async' in _main77.split('import socket')[0],
-       'main.py imports warm_previews_async')
-    _i77m = _main77.index('def update_video_info(')
-    _body77m = _main77[_i77m:_main77.index('\n    def ', _i77m + 10)]
-    report('warm_previews_async(self, [file_path])' in _body77m,
-       'and update_video_info warms each row as its info resolves, so the '
-       'cover is fetched while the playlist is still loading')
-
+    report('warm_previews_async' not in _main77,
+       'and the playlist-load batch fetch is gone -- it serialized 27 s '
+       'browser timeouts across every row and was neither of the two moments '
+       'that matter')
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

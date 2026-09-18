@@ -779,6 +779,32 @@ def _browser_state_path(db, site: dict, url) -> str:
     return os.path.join(directory, f"{ident}_browser_state.json")
 
 
+_PROBE_TIMEOUT = 8          # plain HTTP gets this long before we give up
+_BROWSER_TIMEOUT = 12000    # ms; 25000 measured 27 s of dead air per row
+_UNREACHABLE_TTL = 600.0
+_UNREACHABLE_UNTIL: dict = {}
+_UNREACHABLE_LOCK = threading.Lock()
+
+
+def _host_unreachable(host: str) -> bool:
+    with _UNREACHABLE_LOCK:
+        return bool(host) and _UNREACHABLE_UNTIL.get(host, 0.0) > time.time()
+
+
+def _mark_host_unreachable(host: str) -> None:
+    """Remember that a host did not answer, so the next row skips it.
+
+    The field log spent 128 s on one row and then repeated it for every other
+    row of the same network: brattysis.com and nubiles-porn.com refuse the TCP
+    connection outright, and each row re-proved that through curl_cffi, requests,
+    urllib and a browser in turn.
+    """
+    if not host:
+        return
+    with _UNREACHABLE_LOCK:
+        _UNREACHABLE_UNTIL[host] = time.time() + _UNREACHABLE_TTL
+
+
 _BROWSER_FETCH_LOCK = threading.Lock()
 
 
@@ -833,28 +859,46 @@ def _fetch_page(site: dict, page_url: str, db=None, session=None):
         return int((time.time() - started) * 1000)
 
     if session is not None:
-        # Caller owns the session (a warm-up batch reusing one browser).
+        # Caller owns the session (a batch reusing one browser).
         try:
             return session.get(page_url) or "", "browser", _ms()
         except Exception as exc:
             return "", f"browser error {type(exc).__name__}: {exc}", _ms()
 
-    if _site_needs_browser(site, page_url):
-        # One at a time: each call starts a Chromium, and hovers for several
-        # different movies arrive in a row.
-        with _browser_fetch_guard():
-            opened = _BrowserGallerySession(
-                cookie_path=_browser_state_path(db, site, page_url))
-            try:
-                html = opened.get(page_url) or ""
-                if html:
-                    return html, "browser", _ms()
-            except Exception as exc:
-                print(f"[COVER] browser fetch failed: {type(exc).__name__}: {exc}")
-            finally:
-                opened.close()
+    host = _host_of(page_url)
+    if _host_unreachable(host):
+        return "", "unreachable", 0
 
-    html = _fetch_html(page_url) or ""
+    # Plain HTTP first. A site that answers is answered for in a few hundred
+    # milliseconds -- teamskeet measured 238 ms -- and launching a browser
+    # costs more than the whole budget a hover has.
+    html = _fetch_html(page_url, timeout=_PROBE_TIMEOUT) or ""
+    waited = _ms()
+    if not html:
+        if waited >= _PROBE_TIMEOUT * 900:
+            # Burned the whole probe on a connect timeout: the host is not
+            # answering, and no transport will change that.
+            _mark_host_unreachable(host)
+            return "", "unreachable", waited
+    elif not _is_challenge_page(html):
+        return html, "http", waited
+
+    if not _site_needs_browser(site, page_url):
+        return html, ("http" if html else "none"), waited
+
+    # Escalate only when there is something a browser could fix: a challenge
+    # page, or a site that serves nothing to a plain client at all.
+    with _browser_fetch_guard():
+        opened = _BrowserGallerySession(
+            cookie_path=_browser_state_path(db, site, page_url))
+        try:
+            page = opened.get(page_url, timeout=_BROWSER_TIMEOUT) or ""
+            if page:
+                return page, "browser", _ms()
+        except Exception as exc:
+            print(f"[COVER] browser fetch failed: {type(exc).__name__}: {exc}")
+        finally:
+            opened.close()
     return html, ("http" if html else "none"), _ms()
 
 
@@ -1639,6 +1683,45 @@ def signed_cover_url(html: str, hint: str = "") -> str:
     return best
 
 
+_PERMANENT_HOSTS = ("psmcdn.net",)
+_IMG_EXT_RE = re.compile(r"\.(?:jpe?g|webp|png)(?:[?#]|$)", re.IGNORECASE)
+
+
+def permanent_cover_url(html: str, hint: str = "") -> str:
+    """An unsigned, never-expiring cover off the page, '' if there is none.
+
+    teamskeet serves images.psmcdn.net/<code>/<folder>/shared/med.jpg with no
+    signature at all, so it needs none of this re-minting. The field log shows
+    its watch page loading over plain HTTP in 238 ms and then yielding nothing,
+    because signed_cover_url only ever looks at URLs carrying st=.
+    """
+    needle = _cdn_folder_name(hint) if hint else ""
+    best, best_rank = "", -1
+    for match in _ANY_URL_RE.finditer(html or ""):
+        url = html_unescape(match.group(0)).rstrip('"\'),;')
+        low = url.lower()
+        if not any(h in low for h in _PERMANENT_HOSTS):
+            continue
+        if not _IMG_EXT_RE.search(url):
+            continue
+        if needle and needle not in low:
+            continue
+        # /shared/med.jpg is the standard cover; a thumbnail is better than
+        # nothing but worse than that.
+        rank = 2 if "/shared/med." in low else (1 if "/shared/" in low else 0)
+        if rank > best_rank or (rank == best_rank and len(url) > len(best)):
+            best, best_rank = url, rank
+    return best
+
+
+def page_cover_url(html: str, hint: str = "") -> str:
+    """The page's own cover: a fresh signature if it mints them, else a
+    permanent one. A signed nubiles cover dies in about an hour; a teamskeet
+    one never expires, and asking which kind a site uses is the caller's
+    problem no more."""
+    return signed_cover_url(html, hint) or permanent_cover_url(html, hint)
+
+
 def signed_media_url(html: str, hint: str = "") -> str:
     """A freshly signed preview video out of a page, '' if it carries none.
 
@@ -1724,6 +1807,33 @@ _REFRESH_DUMP_MAX = 3
 _REFRESH_LOCK = threading.Lock()
 
 
+_CHALLENGE_TITLE_RE = re.compile(
+    r"^(?:\s|\W)*(?:just a moment|security check|attention required|"
+    r"access denied|verify you are (?:a )?human|are you a robot|"
+    r"cloudflare|ddos|enable javascript and cookies)", re.IGNORECASE)
+
+
+def _is_challenge_page(html) -> bool:
+    """Is this an interstitial rather than the page that was asked for?
+
+    The earlier test looked for "challenge-platform" anywhere in the body.
+    Every Cloudflare-fronted page carries that script, so a real teamskeet
+    watch page -- 90852 bytes, titled "Stepmom Fertilizer | Exclusive
+    TeamSkeet Porn Video", loaded over plain HTTP in 238 ms -- was reported as
+    a bot challenge. The title is the signal, and a page with no title is not
+    called a challenge, because guessing wrong here sends a 25 s browser fetch
+    after a page that was already fine.
+    """
+    if not html:
+        return False
+    match = re.search(r"<title[^>]*>(.*?)</title>", html,
+                      re.IGNORECASE | re.DOTALL)
+    if not match:
+        return False
+    title = html_unescape(match.group(1)).strip()[:120]
+    return bool(title) and bool(_CHALLENGE_TITLE_RE.match(title))
+
+
 def _describe_page(page: str, transport: str = "", elapsed_ms=None) -> str:
     """One line saying what a fetched page actually held.
 
@@ -1750,13 +1860,13 @@ def _describe_page(page: str, transport: str = "", elapsed_ms=None) -> str:
             f"samples {low.count('/samples/')}"]
     if title:
         bits.append(f'title "{title}"')
-    if ("security check" in low[:6000] or "cf-chl" in low
-            or "challenge-platform" in low):
+    if _is_challenge_page(page):
         bits.insert(0, "BOT CHALLENGE, not the page")
     return ", ".join(head + bits)
 
 
-def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
+def refresh_signed_assets_async(player, site: dict, movie: dict, db,
+                                force: bool = False) -> bool:
     """Try to mint a fresh signature for one movie, on demand, from its page.
 
     A stored nubiles signature dies in about an hour, so a hover with no cover
@@ -1775,7 +1885,8 @@ def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
         return False
     now = time.time()
     with _REFRESH_LOCK:
-        if now - float(_REFRESH_LAST.get(slug, 0.0)) < _REFRESH_COOLDOWN:
+        if (not force
+                and now - float(_REFRESH_LAST.get(slug, 0.0)) < _REFRESH_COOLDOWN):
             return False
         _REFRESH_LAST[slug] = now
     hint = str(movie.get("title") or "") or str(movie.get("series") or "")
@@ -1785,7 +1896,7 @@ def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
     def _work():
         try:
             page, transport, elapsed = _fetch_page(site, page_url, db)
-            cover = signed_cover_url(page, hint)
+            cover = page_cover_url(page, hint)
             loop = signed_media_url(page, hint)
             if not cover and not loop:
                 print(f"[COVER] {slug}: watch page carried no signed asset "
@@ -1819,154 +1930,6 @@ def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
 
     threading.Thread(target=_work, daemon=True).start()
     return True
-
-
-_WARM_LOCK = threading.Lock()
-_WARM_RUNNING = set()
-_WARM_DONE = {}
-_WARM_BATCH_MAX = 60
-
-
-def _resolve_linked_movie(player, path):
-    """The metadata record a playlist row points at, or ``(None, None, None)``.
-
-    This is the saved-link half of preview_info_for_path, split out so a batch
-    warm-up can resolve a whole playlist without going through the per-hover
-    name-override fallback.
-    """
-    norm = _meta_norm_path(path or "")
-    links = getattr(player, "_metadata_links", {}) or {}
-    link = links.get(norm) or links.get(_meta_norm_path(_unwrap_path(path or "")))
-    if not isinstance(link, dict) or not link.get("slug"):
-        return None, None, None
-    site = METADATA_SITES.get(link.get("site") or DEFAULT_SITE_ID)
-    if not site:
-        return None, None, None
-    db = _metadata_db_for_site(player, site)
-    movie = (getattr(db, "movies", {}) or {}).get(link["slug"])
-    if not movie:
-        return None, None, None
-    return site, db, movie
-
-
-def warm_previews_async(player, paths) -> int:
-    """Warm the hover cache for a whole playlist in the background.
-
-    A hover has about a second and a half before it feels broken, and a browser
-    launch alone costs more than that -- so the fetch does not happen on hover.
-    It happens here, the moment rows land in the playlist: one background
-    thread opens a single browser per network and reuses it across every row of
-    that network, which is what _BrowserGallerySession was built for. By the
-    time a row is hovered its cover is already in _COVER_CACHE.
-
-    Best effort and cheap to call repeatedly: rows already warmed, already
-    cached, or still inside the refresh cooldown are skipped.
-    """
-    if player is None:
-        return 0
-    pending = []
-    for path in list(paths or [])[:_WARM_BATCH_MAX]:
-        site, db, movie = _resolve_linked_movie(player, path)
-        if not movie:
-            continue
-        slug = str(movie.get("slug") or "")
-        if not slug or not str(movie.get("url") or ""):
-            continue
-        with _COVER_CACHE_LOCK:
-            if slug in _COVER_CACHE:
-                continue
-        if time.time() - float(_WARM_DONE.get(slug, 0.0)) < _REFRESH_COOLDOWN:
-            continue
-        with _WARM_LOCK:
-            if slug in _WARM_RUNNING:
-                continue
-            _WARM_RUNNING.add(slug)
-        pending.append((site, db, movie))
-    if not pending:
-        return 0
-
-    def _apply(site, db, movie, page, transport, elapsed):
-        slug = str(movie.get("slug") or "")
-        hint = str(movie.get("title") or "") or str(movie.get("series") or "")
-        cover = signed_cover_url(page, hint)
-        loop = signed_media_url(page, hint)
-        with _WARM_LOCK:
-            _WARM_RUNNING.discard(slug)
-            _WARM_DONE[slug] = time.time()
-        if not cover and not loop:
-            print(f"[COVER] warm {slug}: no signed asset "
-                  f"({_describe_page(page, transport, elapsed)})")
-            return None
-        record = dict(movie)
-        if cover:
-            record["image"] = cover
-            record["image_expires"] = _image_expiry_epoch(cover)
-        if loop:
-            record["preview"] = loop
-            record["preview_expires"] = _image_expiry_epoch(loop)
-        db.upsert(record)
-        if cover:
-            ensure_cover_async(player, site, slug, cover)
-        return cover or loop
-
-    def _work():
-        try:
-            # Browser-needing rows are grouped by network so one Chromium
-            # serves every row of that network instead of one per row.
-            groups: dict = {}
-            order = []
-            for site, db, movie in pending:
-                url = str(movie.get("url") or "")
-                if not _site_needs_browser(site, url):
-                    continue
-                key = _browser_state_path(db, site, url)
-                if key not in groups:
-                    groups[key] = [site, db, []]
-                    order.append(key)
-                groups[key][2].append(movie)
-            for state_path in order:
-                site, db, movies = groups[state_path]
-                session = None
-                try:
-                    session = _BrowserGallerySession(cookie_path=state_path)
-                    for movie in movies:
-                        url = str(movie.get("url") or "")
-                        try:
-                            page, transport, elapsed = _fetch_page(
-                                site, url, db, session=session)
-                        except Exception as exc:
-                            page, transport, elapsed = (
-                                "", f"browser error {type(exc).__name__}: {exc}", 0)
-                        _apply(site, db, movie, page, transport, elapsed)
-                    db.save()
-                except Exception as exc:
-                    print(f"[COVER] warm batch failed: {type(exc).__name__}: {exc}")
-                    for movie in movies:
-                        with _WARM_LOCK:
-                            _WARM_RUNNING.discard(str(movie.get("slug") or ""))
-                finally:
-                    if session is not None:
-                        session.close()
-            for site, db, movie in pending:
-                url = str(movie.get("url") or "")
-                if _site_needs_browser(site, url):
-                    continue
-                try:
-                    page, transport, elapsed = _fetch_page(site, url, db)
-                except Exception as exc:
-                    page, transport, elapsed = (
-                        "", f"http error {type(exc).__name__}: {exc}", 0)
-                if _apply(site, db, movie, page, transport, elapsed):
-                    db.save()
-        except Exception as exc:
-            print(f"[COVER] warm-up failed: {type(exc).__name__}: {exc}")
-        finally:
-            with _WARM_LOCK:
-                for _site, _db, movie in pending:
-                    _WARM_RUNNING.discard(str(movie.get("slug") or ""))
-
-    threading.Thread(target=_work, daemon=True).start()
-    return len(pending)
 
 
 def _gallery_slug_from_url(url: str) -> str:
@@ -4221,6 +4184,16 @@ class MetadataScraperDialog(QDialog):
             _save_links(self.player)
         except Exception as e:
             print(f"[MetadataScraper] link record error: {e}")
+
+        # A signed cover dies in about an hour, so get it now -- while the
+        # user is sitting in the linker and a few seconds costs nothing --
+        # instead of at the click an hour later.
+        try:
+            refresh_signed_assets_async(
+                self.player, self.site, movie,
+                _metadata_db_for_site(self.player, self.site), force=True)
+        except Exception as e:
+            print(f"[MetadataScraper] link refresh error: {e}")
 
         # Record in rename undo stack & persist
         if not hasattr(self.player, "_rename_undo_stack"):
