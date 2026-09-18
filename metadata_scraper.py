@@ -781,7 +781,11 @@ def _browser_state_path(db, site: dict, url) -> str:
 
 _PROBE_TIMEOUT = 8          # plain HTTP gets this long before we give up
 _BROWSER_TIMEOUT = 12000    # ms; 25000 measured 27 s of dead air per row
-_UNREACHABLE_TTL = 600.0
+# Short on purpose. This exists to stop eleven rows re-proving the same dead
+# host eleven times in a row, not to remember a verdict for the session -- the
+# nubiles block is an IP ban that a VPN lifts, and the user switches one on
+# without restarting the player.
+_UNREACHABLE_TTL = 120.0
 _UNREACHABLE_UNTIL: dict = {}
 _UNREACHABLE_LOCK = threading.Lock()
 
@@ -843,7 +847,8 @@ def _browser_page_html(url: str, state_path: str,
             session.close()
 
 
-def _fetch_page(site: dict, page_url: str, db=None, session=None):
+def _fetch_page(site: dict, page_url: str, db=None, session=None,
+                force: bool = False):
     """Read one page with whichever transport the site actually needs.
 
     Returns ``(html, transport, elapsed_ms)``. ``transport`` names what
@@ -866,7 +871,7 @@ def _fetch_page(site: dict, page_url: str, db=None, session=None):
             return "", f"browser error {type(exc).__name__}: {exc}", _ms()
 
     host = _host_of(page_url)
-    if _host_unreachable(host):
+    if not force and _host_unreachable(host):
         return "", "unreachable", 0
 
     # Plain HTTP first. A site that answers is answered for in a few hundred
@@ -1895,7 +1900,8 @@ def refresh_signed_assets_async(player, site: dict, movie: dict, db,
 
     def _work():
         try:
-            page, transport, elapsed = _fetch_page(site, page_url, db)
+            page, transport, elapsed = _fetch_page(site, page_url, db,
+                                                   force=force)
             cover = page_cover_url(page, hint)
             loop = signed_media_url(page, hint)
             if not cover and not loop:

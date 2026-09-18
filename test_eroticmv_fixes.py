@@ -6915,6 +6915,29 @@ if _have77:
                and (time.time() - _t0) < 0.02,
            'so the next row of the same network costs nothing instead of '
            'another 128 s', f'{_t!r} in {int((time.time()-_t0)*1000)} ms')
+        # The verdict must not outlive the thing that caused it: the nubiles
+        # block is an IP ban, and a VPN lifts it without restarting the player.
+        _probes77 = []
+        _msrc55._fetch_html = lambda url, timeout=20: (_probes77.append(url),
+                                                       None)[1]
+        _msrc55._fetch_page(_site77c, _mov77c['url'], None)
+        report(not _probes77,
+           'a host found dead is not re-probed by the next row')
+        _forced77 = ''
+        try:
+            _msrc55._fetch_page(_site77c, _mov77c['url'], None, force=True)
+        except TypeError as _e77:
+            # A missing parameter has to read as a failure, not abort the
+            # section -- a crash here silently drops every assertion below it.
+            _forced77 = f'{type(_e77).__name__}: {_e77}'
+        report(len(_probes77) == 1,
+           'but a link-time refresh re-probes anyway -- the user asked for '
+           'that row by name, and switching a VPN on must recover it without '
+           'a restart', _forced77 or f'{len(_probes77)} probe(s)')
+        report(0 < _msrc55._UNREACHABLE_TTL <= 120.0,
+           'and the verdict expires in minutes, not the ten it started at, so '
+           'the rest of the playlist recovers on its own',
+           f'{_msrc55._UNREACHABLE_TTL:.0f} s')
         report(_msrc55._PROBE_TIMEOUT * 1000 <= 8000
                and _msrc55._BROWSER_TIMEOUT <= 12000,
            'the probe and the browser are both capped, where the old path '
