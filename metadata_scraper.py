@@ -60,6 +60,13 @@ REPTYLE_SOURCES = [
 DB_FILENAME          = "teamskeet_metadata.json"
 OVERRIDES_FILENAME   = "metadata_name_overrides.json"
 LINKS_FILENAME       = "metadata_links.json"
+
+# Bumped on every change the user has to copy over by hand. Files are copied
+# manually, so "is the running player the one that was just pushed?" has been
+# an open question more than once and has cost whole test runs. This answers it
+# from the first line of the log.
+BUILD = "cov8-turnstile-loud"
+print(f"[MetadataScraper] build {BUILD}")
 MATCH_THRESHOLD      = 0.32
 SCRAPE_DELAY         = 0.8     # seconds between yt-dlp calls
 PAGE_DELAY           = 0.4     # seconds between listing page fetches
@@ -1865,6 +1872,14 @@ _CHALLENGE_TITLE_RE = re.compile(
     r"cloudflare|ddos|enable javascript and cookies)", re.IGNORECASE)
 
 
+def _page_title(html) -> str:
+    """The <title> of a page, '' if it has none."""
+    match = re.search(r"<title[^>]*>(.*?)</title>", html or "",
+                      re.IGNORECASE | re.DOTALL)
+    return (" ".join(html_unescape(match.group(1)).split())[:120]
+            if match else "")
+
+
 def _is_challenge_page(html) -> bool:
     """Is this an interstitial rather than the page that was asked for?
 
@@ -1878,11 +1893,7 @@ def _is_challenge_page(html) -> bool:
     """
     if not html:
         return False
-    match = re.search(r"<title[^>]*>(.*?)</title>", html,
-                      re.IGNORECASE | re.DOTALL)
-    if not match:
-        return False
-    title = html_unescape(match.group(1)).strip()[:120]
+    title = _page_title(html)
     return bool(title) and bool(_CHALLENGE_TITLE_RE.match(title))
 
 
@@ -1979,6 +1990,7 @@ def solve_turnstile_challenge(url: str, timeout: int = 15) -> str:
     try:
         import requests
     except ImportError:
+        print("[TURNSTILE] the requests library is unavailable, cannot solve")
         return ""
     if _TURNSTILE_SESSION is None:
         _TURNSTILE_SESSION = requests.Session()
@@ -1990,7 +2002,12 @@ def solve_turnstile_challenge(url: str, timeout: int = 15) -> str:
         challenge = str(cfg.get("challenge") or "")
         difficulty = int(cfg.get("difficulty") or 0)
         if not challenge or not difficulty:
+            print(f"[TURNSTILE] no gate config in what came back "
+                  f"({len(first.text or '')} byte(s), HTTP {first.status_code},"
+                  f" title {_page_title(first.text)!r}) -- nothing to solve")
             return ""
+        print(f"[TURNSTILE] gate on {urlparse(url).netloc}: "
+              f"difficulty {difficulty}, solving")
         started = time.time()
         nonce = solve_turnstile_pow(challenge, difficulty)
         if not nonce:

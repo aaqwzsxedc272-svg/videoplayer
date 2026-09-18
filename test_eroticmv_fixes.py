@@ -7147,5 +7147,61 @@ if _HAVE79:
         _msrc55.solve_turnstile_challenge = _ost79
         _msrc55._UNREACHABLE_UNTIL.clear()
 
+# ---------------------------------------------------------------------------
+# 80. Which build is running, and no exit that cannot be seen.
+#
+# A run came back with the browser on the challenge page and not one [TURNSTILE]
+# line. solve_turnstile_challenge had two ways out that printed nothing --
+# ImportError, and a page carrying no gate config -- so the log could not
+# distinguish "the solver ran and bailed" from "the solver was never in the
+# file that was running". Both are unobservable failures, and the second has
+# cost whole test runs in this project because files are copied by hand.
+# ---------------------------------------------------------------------------
+print()
+print('--- 80: build marker / observable exits ---')
+
+report(bool(getattr(_msrc55, 'BUILD', '')),
+       'metadata_scraper carries a build marker',
+       str(getattr(_msrc55, 'BUILD', '(none)')))
+_txt80 = open(_msrc55.__file__, encoding='utf-8').read()
+report('print(f"[MetadataScraper] build {BUILD}")' in _txt80,
+       'and prints it on import, so the first line of any log says which file '
+       'is actually running -- files here are copied by hand, and "did the new '
+       'code even run?" has burned test runs before')
+
+_i80 = _txt80.index('def solve_turnstile_challenge(')
+_body80 = _txt80[_i80:_txt80.index('\n\ndef ', _i80 + 10)]
+_lines80 = _body80.split('\n')
+_silent80 = []
+for _n80, _ln80 in enumerate(_lines80):
+    if 'return ""' in _ln80:
+        _ctx80 = '\n'.join(_lines80[max(0, _n80 - 3):_n80])
+        if 'print(' not in _ctx80:
+            _silent80.append(_ln80.strip())
+report(not _silent80,
+       'every way out of the solver says why -- two of them were silent, which '
+       'is exactly why a failed run could not be told apart from a stale file',
+       '; '.join(_silent80) or f'{_body80.count(chr(114) + "eturn") } returns, all narrated')
+report('[TURNSTILE] gate on ' in _body80,
+       'and a gate that IS found announces itself before solving, so a log with '
+       'no [TURNSTILE] line at all now means the code never ran')
+
+_have80t = hasattr(_msrc55, '_page_title')
+report(_have80t, 'the page-title reader the solver narrates with is present',
+       'missing: _page_title')
+if _have80t:
+    report(_msrc55._page_title(
+        '<html><head><title>  Security\n Check </title></head></html>')
+           == 'Security Check',
+           'the page title is read and whitespace-collapsed')
+    report(_msrc55._page_title('<html>no title</html>') == ''
+           and _msrc55._page_title('') == '',
+           'and a page with no title yields empty rather than raising')
+
+    if _HAVE79:
+        report(_msrc55._page_title(_page79) == 'Security Check',
+           'the captured gate page reads as "Security Check"',
+           repr(_msrc55._page_title(_page79)))
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
