@@ -6551,7 +6551,7 @@ report(len(json.load(open(_d75c, encoding='utf-8'))['movies']) == 1,
 # ── 76. A site that challenges a plain HTTP client has to be read in a browser ──
 print()
 print("76. reading a challenged watch page")
-if hasattr(_msrc55, '_browser_page_html'):
+if hasattr(_msrc55, '_fetch_page'):
     _FOLDER76 = 'stepmom_is_a_great_kisser'
     _URL76 = ('https://images.nubiles-porn.com/videos/' + _FOLDER76 +
               '/samples/cover1280.jpg?st=AbCdEfGhIjKlMnOpQrStUv&e=1999999999')
@@ -6573,16 +6573,31 @@ if hasattr(_msrc55, '_browser_page_html'):
     _db76 = _msrc55.MetadataDB(_d76)
     _calls76 = []
     _plain76 = []
-    _ob76 = _msrc55._browser_page_html
+    _ret76 = {'page': _PAGE76}
+
+    class _Sess76:
+        """Stands in for Playwright; _fetch_page builds this directly."""
+
+        def __init__(self, cookie_path=None, on_status=None):
+            self._state = cookie_path
+
+        def get(self, url, wait_selector=None, timeout=None):
+            _calls76.append((url, self._state))
+            return _ret76['page']
+
+        def close(self):
+            pass
+
+    _ob76 = _msrc55._BrowserGallerySession
     _oh76 = _msrc55._fetch_html
     _oby76 = _msrc55._fetch_bytes
     try:
+        _msrc55._BrowserGallerySession = _Sess76
         _msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: (
             b'\xff\xd8' + b'0' * 800)
         _msrc55._fetch_html = lambda url, timeout=20: (
             _plain76.append(url), '')[1]
-        _msrc55._browser_page_html = lambda url, state, **kw: (
-            _calls76.append((url, state)), _PAGE76)[1]
+        _ret76['page'] = _PAGE76
         _msrc55._REFRESH_LAST.pop(_MOV76['slug'], None)
         report(_msrc55.refresh_signed_assets_async(
             _p76, _site76, _MOV76, _db76) is True,
@@ -6610,12 +6625,13 @@ if hasattr(_msrc55, '_browser_page_html'):
 
         # A browser that yields nothing still falls back, so a site that stops
         # needing one does not silently lose covers.
-        _db76b = _msrc55.MetadataDB(_d76)
-        _db76b.movies.clear()
+        _d76b = os.path.join(_tf55.mkdtemp(), 's76b.json')
+        with open(_d76b, 'w', encoding='utf-8') as _fb76:
+            json.dump({'movies': {}}, _fb76)
+        _db76b = _msrc55.MetadataDB(_d76b)
         _calls76.clear()
         _plain76.clear()
-        _msrc55._browser_page_html = lambda url, state, **kw: (
-            _calls76.append((url, state)), None)[1]
+        _ret76['page'] = None
         _msrc55._fetch_html = lambda url, timeout=20: (
             _plain76.append(url), _PAGE76)[1]
         _msrc55._REFRESH_LAST.pop(_MOV76['slug'], None)
@@ -6628,7 +6644,7 @@ if hasattr(_msrc55, '_browser_page_html'):
            'and a browser that yields nothing falls back to a plain request',
            f'{len(_calls76)} browser / {len(_plain76)} plain')
     finally:
-        _msrc55._browser_page_html = _ob76
+        _msrc55._BrowserGallerySession = _ob76
         _msrc55._fetch_html = _oh76
         _msrc55._fetch_bytes = _oby76
         _msrc55._REFRESH_LAST.pop(_MOV76['slug'], None)
@@ -6652,14 +6668,274 @@ if hasattr(_msrc55, '_browser_page_html'):
         dict(_site76, gallery_sources=[]), _MOV76['url']) is False,
        'and a site with no browser-flagged networks is not sent through one')
     _txt76 = open(_msrc55.__file__, encoding='utf-8').read()
-    _i76 = _txt76.index('def _browser_page_html(')
-    _body76 = _txt76[_i76:_txt76.index('\ndef ', _i76 + 10)]
-    report('_BROWSER_FETCH_LOCK' in _body76,
-       'browser fetches are serialized -- each one starts a Chromium, and '
-       'hovers for several different movies arrive in a row')
+    for _fn76 in ('_browser_page_html', '_fetch_page'):
+        _i76 = _txt76.index('def ' + _fn76 + '(')
+        _body76 = _txt76[_i76:_txt76.index('\n\ndef ', _i76 + 10)]
+        report(('_BROWSER_FETCH_LOCK' in _body76
+                or '_browser_fetch_guard' in _body76),
+           f'{_fn76} serializes browser fetches -- each one starts a Chromium, '
+           'and hovers for several different movies arrive in a row',
+           'no guard in ' + _fn76)
 else:
     report(False, 'the browser-backed refresh is present',
-           'missing: _browser_page_html')
+           'missing: _fetch_page')
+
+
+# ---------------------------------------------------------------------------
+# 77. The browser state file, the transport label, and the playlist warm-up.
+#
+# The field log read "browser fetch failed: JSONDecodeError: Expecting value:
+# line 1 column 1 (char 0)". That message is json.loads on an empty string, and
+# the only JSON on that path is the saved browser state -- a full disk truncates
+# it, and Playwright then raises from inside new_context, taking every cover
+# refresh with it. This section pins the cause and the fix.
+# ---------------------------------------------------------------------------
+print()
+print('--- 77: state file / transport label / warm-up ---')
+
+_API77 = ('_storage_state_usable', '_save_storage_state', '_fetch_page',
+          '_resolve_linked_movie', 'warm_previews_async')
+_have77 = all(hasattr(_msrc55, n) for n in _API77)
+report(_have77, 'the state-file, transport and warm-up API is present',
+       'missing: ' + ', '.join(n for n in _API77 if not hasattr(_msrc55, n)))
+
+if _have77:
+    _d77 = _tf55.mkdtemp()
+
+    # -- a truncated state file must not be handed to Playwright -------------
+    _st77 = os.path.join(_d77, 'nubiles-porn_browser_state.json')
+    open(_st77, 'w', encoding='utf-8').close()
+    _sz77 = os.path.getsize(_st77)   # read BEFORE the call moves it aside
+    report(_sz77 == 0, 'fixture: the state file is 0 bytes', str(_sz77))
+    report(_msrc55._storage_state_usable(_st77) is False,
+       'a 0-byte state file is rejected -- handing it to new_context is what '
+       'raised JSONDecodeError in the field')
+    report(not os.path.exists(_st77)
+           and os.path.exists(_st77 + '.unreadable'),
+       'and is moved aside rather than deleted, so the corruption is visible')
+
+    with open(_st77, 'w', encoding='utf-8') as _f77:
+        _f77.write('{"cookies": [], "origins": []}')
+    report(_msrc55._storage_state_usable(_st77) is True,
+       'a state file that still parses is used')
+    with open(_st77, 'w', encoding='utf-8') as _f77:
+        _f77.write('{"cookies": [')
+    report(_msrc55._storage_state_usable(_st77) is False,
+       'and a half-written one is rejected too')
+    _st77b = os.path.join(_d77, 'never_existed.json')
+    report(_msrc55._storage_state_usable(_st77b) is False
+           and not os.path.exists(_st77b + '.unreadable'),
+       'a missing state file is simply absent, not "unreadable"')
+
+    # -- saving must never truncate the live file ---------------------------
+    _wrote77 = []
+
+    class _Ctx77:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def storage_state(self, path=None):
+            _wrote77.append(path)
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.write(self._payload)
+
+    _live77 = os.path.join(_d77, 'live_state.json')
+    with open(_live77, 'w', encoding='utf-8') as _f77:
+        _f77.write('{"cookies": [{"name": "cf_clearance", "value": "KEEP"}]}')
+    _wrote77.clear()
+    report(_msrc55._save_storage_state(_Ctx77(''), _live77) is False,
+       'a save that produces invalid JSON reports failure')
+    report(bool(_wrote77) and _wrote77[0] != _live77
+           and _wrote77[0].endswith('.tmp'),
+       'and only ever writes a sibling .tmp -- the live file is never opened '
+       'for writing, which is what truncated it to 0 bytes on a full disk',
+       str(_wrote77[0]) if _wrote77 else '(nothing written)')
+    report('KEEP' in open(_live77, encoding='utf-8').read(),
+       'so the good state survives a failed save intact')
+    report(_msrc55._save_storage_state(_Ctx77('{"cookies": [], "origins": []}'),
+                                       _live77) is True
+           and json.load(open(_live77, encoding='utf-8')) == {
+               'cookies': [], 'origins': []}
+           and not os.path.exists(_live77 + '.tmp'),
+       'and a good save replaces it, leaving no .tmp behind')
+    report(_msrc55._save_storage_state(None, _live77) is False,
+       'no context, no save -- close() calls this unconditionally')
+
+    # -- the transport label -------------------------------------------------
+    _site77 = dict(_msrc55.METADATA_SITES['nubiles'])
+    _MOV77 = {'slug': '256294-stepmom-is-a-great-kisser-s27e1',
+              'title': 'Stepmom Is A Great Kisser',
+              'url': 'https://nubiles-porn.com/video/watch/256294/slug'}
+
+    class _Sess77:
+        def __init__(self, cookie_path=None, on_status=None):
+            pass
+
+        def get(self, url, wait_selector=None, timeout=None):
+            return '<html><img src="x"></html>'
+
+        def close(self):
+            pass
+
+    _html77, _tr77, _ms77 = _msrc55._fetch_page(
+        _site77, _MOV77['url'], None, session=_Sess77())
+    report(_tr77 == 'browser' and _html77 and isinstance(_ms77, int),
+       '_fetch_page names the transport that produced the bytes -- the field '
+       'log could not tell a browser that failed the challenge from a plain '
+       'request that never tried', f'{_tr77!r} / {_ms77} ms')
+    report('via browser' in _msrc55._describe_page('', _tr77, _ms77)
+           and ' ms' in _msrc55._describe_page('', _tr77, _ms77),
+       'and the diagnostic carries both, so the next log can be judged '
+       'against the ~1.5 s a hover can afford',
+       _msrc55._describe_page('', _tr77, _ms77))
+
+    _oh77 = _msrc55._fetch_html
+    _osess77 = _msrc55._BrowserGallerySession
+    _opened77 = []
+    try:
+        class _SessNone77:
+            def __init__(self, cookie_path=None, on_status=None):
+                _opened77.append(cookie_path)
+
+            def get(self, url, wait_selector=None, timeout=None):
+                return None
+
+            def close(self):
+                pass
+
+        _msrc55._BrowserGallerySession = _SessNone77
+        _msrc55._fetch_html = lambda url, timeout=20: ''
+        _h, _t, _m = _msrc55._fetch_page(_site77, _MOV77['url'], None)
+        report(_t == 'none' and bool(_opened77),
+           'a browser that yields nothing falls back to a plain request, and '
+           'an empty result is labelled "none" rather than left ambiguous',
+           f'{_t!r}')
+    finally:
+        _msrc55._fetch_html = _oh77
+        _msrc55._BrowserGallerySession = _osess77
+
+    # -- the warm-up ---------------------------------------------------------
+    _d77b = _tf55.mkdtemp()
+    _dbf77 = os.path.join(_d77b, 's77.json')
+    _rows77 = []
+    for _i77 in range(3):
+        _rows77.append({
+            'slug': f'25629{_i77}-stepmom-is-a-great-kisser-s27e{_i77}',
+            'title': 'Stepmom Is A Great Kisser',
+            'url': f'https://nubiles-porn.com/video/watch/25629{_i77}/slug'})
+    with open(_dbf77, 'w', encoding='utf-8') as _f77:
+        json.dump({'movies': {r['slug']: r for r in _rows77}}, _f77)
+
+    _site77b = dict(_site77)
+    _site77b['db_filename'] = 's77.json'
+    _msrc55.METADATA_SITES['__s77__'] = _site77b
+    _paths77 = [f'https://watchporn.to/video/11013{_i77}/a-b-c/'
+                for _i77 in range(3)]
+
+    class _Player77:
+        pass
+
+    _p77 = _Player77()
+    _p77.data_dir = _d77b
+    _p77._metadata_links = {
+        _msrc55._meta_norm_path(_paths77[_i77]):
+            {'site': '__s77__', 'slug': _rows77[_i77]['slug']}
+        for _i77 in range(3)}
+
+    _s77, _db77, _m77 = _msrc55._resolve_linked_movie(_p77, _paths77[0])
+    report(_s77 is _site77b and _m77 and _m77['slug'] == _rows77[0]['slug'],
+       'a playlist row resolves to its metadata record through the saved link',
+       str(_m77 or {})[:70])
+    report(_msrc55._resolve_linked_movie(_p77, 'https://x/y')[0] is None,
+       'and an unlinked row resolves to nothing, so it is simply skipped')
+
+    _opens77 = []
+    _gets77 = []
+    _oby77 = _msrc55._fetch_bytes
+    _ec77 = _msrc55.ensure_cover_async
+    _covers77 = []
+    try:
+        class _SessWarm77:
+            def __init__(self, cookie_path=None, on_status=None):
+                _opens77.append(cookie_path)
+
+            def get(self, url, wait_selector=None, timeout=None):
+                _gets77.append(url)
+                return ('<html><img data-srcset="'
+                        'https://images.nubiles-porn.com/videos/'
+                        'stepmom_is_a_great_kisser/samples/cover1280.jpg'
+                        '?st=AbCdEfGhIjKlMnOpQrStUv&e=1999999999 1280w">'
+                        '</html>')
+
+            def close(self):
+                pass
+
+        _msrc55._BrowserGallerySession = _SessWarm77
+        _msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: (
+            b'\xff\xd8' + b'0' * 800)
+        _msrc55.ensure_cover_async = lambda pl, st, slug, url: (
+            _covers77.append(slug), True)[1]
+        _msrc55._WARM_DONE.clear()
+        _msrc55._WARM_RUNNING.clear()
+        with _msrc55._COVER_CACHE_LOCK:
+            _msrc55._COVER_CACHE.clear()
+
+        _n77 = _msrc55.warm_previews_async(_p77, _paths77)
+        report(_n77 == 3, 'the warm-up queues every linked row of the playlist',
+               f'{_n77}')
+        for _ in range(400):
+            if len(_gets77) >= 3 and len(_covers77) >= 3:
+                break
+            time.sleep(0.01)
+        report(len(_gets77) == 3,
+           'and reads all three watch pages', f'{len(_gets77)} fetched')
+        report(len(_opens77) == 1,
+           'through ONE browser for the whole network -- a hover cannot afford '
+           'a launch inside ~1.5 s, so the launch happens once here, in the '
+           'background, before any row is hovered',
+           f'{len(_opens77)} browser(s) opened')
+        report(len(_covers77) == 3,
+           'and each cover is pushed into the hover cache',
+           str(_covers77))
+        def _stored77():
+            return sum(1 for r in _msrc55.MetadataDB(_dbf77).movies.values()
+                       if 'cover1280.jpg' in str(r.get('image') or ''))
+
+        for _ in range(400):        # db.save() runs after the last row
+            if _stored77() >= 3:
+                break
+            time.sleep(0.01)
+        report(_stored77() == 3,
+           'and lands in the database, so a later run does not refetch',
+           f'{_stored77()} of 3 stored')
+
+        _gets77.clear()
+        _opens77.clear()
+        report(_msrc55.warm_previews_async(_p77, _paths77) == 0,
+           'a repeat call inside the cooldown queues nothing',
+           'second call queued work')
+        report(_msrc55.warm_previews_async(_p77, []) == 0
+               and _msrc55.warm_previews_async(None, _paths77) == 0,
+           'and an empty batch or no player is a no-op')
+    finally:
+        _msrc55._BrowserGallerySession = _osess77
+        _msrc55._fetch_bytes = _oby77
+        _msrc55.ensure_cover_async = _ec77
+        _msrc55.METADATA_SITES.pop('__s77__', None)
+        _msrc55._WARM_DONE.clear()
+        _msrc55._WARM_RUNNING.clear()
+
+    # -- main.py actually calls it ------------------------------------------
+    _main77 = open(os.path.join(os.path.dirname(
+        os.path.abspath(_msrc55.__file__)), 'main.py'),
+        encoding='utf-8', errors='replace').read()
+    report('warm_previews_async' in _main77.split('import socket')[0],
+       'main.py imports warm_previews_async')
+    _i77m = _main77.index('def update_video_info(')
+    _body77m = _main77[_i77m:_main77.index('\n    def ', _i77m + 10)]
+    report('warm_previews_async(self, [file_path])' in _body77m,
+       'and update_video_info warms each row as its info resolves, so the '
+       'cover is fetched while the playlist is still loading')
 
 
 print('FAILURES:', FAILS)

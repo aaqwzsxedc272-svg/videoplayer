@@ -585,6 +585,68 @@ def _fetch_html(url: str, timeout: int = 20) -> Optional[str]:
         return None
 
 
+def _discard_storage_state(path) -> None:
+    """Move a state file aside rather than deleting it."""
+    try:
+        os.replace(path, str(path) + ".unreadable")
+    except Exception:
+        pass
+
+
+def _storage_state_usable(path) -> bool:
+    """Is this saved browser state something Playwright can actually load?
+
+    The state file is rewritten after every page, and on a full disk that
+    rewrite truncates it to zero bytes -- after which new_context raises
+    JSONDecodeError from deep inside Playwright. That error surfaced as
+    "browser fetch failed: JSONDecodeError: Expecting value: line 1 column 1
+    (char 0)" and cost every cover refresh the browser it needed. An
+    unreadable state is treated as no state: a fresh browser still passes the
+    challenge, it simply starts without cookies.
+    """
+    try:
+        if not path or not os.path.isfile(path) or os.path.getsize(path) < 2:
+            if path and os.path.isfile(path):
+                _discard_storage_state(path)
+            return False
+        with open(path, encoding="utf-8") as fh:
+            json.load(fh)
+        return True
+    except Exception:
+        _discard_storage_state(path)
+        return False
+
+
+def _save_storage_state(context, path) -> bool:
+    """Persist browser state atomically, and only if it still parses.
+
+    Never open the real path for writing: that truncates it before a byte is
+    written, and a full disk then leaves it empty -- the exact corruption
+    _storage_state_usable exists to survive.
+    """
+    if not context or not path:
+        return False
+    tmp = str(path) + ".tmp"
+    try:
+        context.storage_state(path=tmp)
+        with open(tmp, encoding="utf-8") as fh:
+            json.load(fh)
+        fd = os.open(tmp, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+        return False
+
+
 class _BrowserGallerySession:
     """
     Opens one real, visible Chromium window (via Playwright) and reuses it to
@@ -623,9 +685,8 @@ class _BrowserGallerySession:
         self._pw = sync_playwright().start()
         self._browser = self._pw.chromium.launch(headless=True)
 
-        storage_state = None
-        if self._cookie_path and os.path.isfile(self._cookie_path):
-            storage_state = self._cookie_path
+        storage_state = self._cookie_path if _storage_state_usable(
+            self._cookie_path) else None
 
         self._context = self._browser.new_context(
             storage_state=storage_state,
@@ -645,22 +706,14 @@ class _BrowserGallerySession:
                 # selector never shows (e.g. an empty last page).
                 self._page.wait_for_load_state("networkidle", timeout=timeout)
             html = self._page.content()
-            if self._cookie_path:
-                try:
-                    self._context.storage_state(path=self._cookie_path)
-                except Exception:
-                    pass
+            _save_storage_state(self._context, self._cookie_path)
             return html
         except Exception as e:
             print(f"[Scraper] browser fetch error {url}: {e}")
             return None
 
     def close(self):
-        try:
-            if self._cookie_path and self._context:
-                self._context.storage_state(path=self._cookie_path)
-        except Exception:
-            pass
+        _save_storage_state(self._context, self._cookie_path)
         for obj in (self._context, self._browser):
             try:
                 if obj:
@@ -729,25 +782,80 @@ def _browser_state_path(db, site: dict, url) -> str:
 _BROWSER_FETCH_LOCK = threading.Lock()
 
 
+class _browser_fetch_guard:
+    """No-op stand-in when a caller already holds the browser lock."""
+
+    def __init__(self, lock=_BROWSER_FETCH_LOCK):
+        self._lock = lock
+
+    def __enter__(self):
+        if self._lock is not None:
+            self._lock.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        if self._lock is not None:
+            self._lock.release()
+        return False
+
+
 def _browser_page_html(url: str, state_path: str,
                        wait_selector: str = "a[href*='/video/']",
                        timeout: int = 25000) -> Optional[str]:
-    """Fetch one page through a headless browser.
+    """Fetch one page through a headless browser, one session per call.
 
     Sites that challenge a plain HTTP client -- nubiles answers one with a page
     titled "Security Check" -- can only be read this way. A session is opened
     and closed per call: Playwright's sync API is bound to the thread that
     started it, and this runs on a hover thread.
     """
-    # One at a time. Each call starts a Chromium, and a hover can arrive for
-    # several different movies in a row; without this they would all launch at
-    # once. The per-movie cooldown bounds how often this happens at all.
-    with _BROWSER_FETCH_LOCK:
+    with _browser_fetch_guard():
         session = _BrowserGallerySession(cookie_path=state_path)
         try:
             return session.get(url, wait_selector=wait_selector, timeout=timeout)
         finally:
             session.close()
+
+
+def _fetch_page(site: dict, page_url: str, db=None, session=None):
+    """Read one page with whichever transport the site actually needs.
+
+    Returns ``(html, transport, elapsed_ms)``. ``transport`` names what
+    produced the bytes -- ``browser``, ``http``, or ``none`` -- because the
+    field log could not otherwise tell a browser that failed to clear a
+    challenge from a plain request that never tried one, and those two need
+    opposite fixes. ``elapsed_ms`` is there to judge the fetch against the
+    ~1.5 s a hover can afford, which a browser launch is nowhere near.
+    """
+    started = time.time()
+
+    def _ms():
+        return int((time.time() - started) * 1000)
+
+    if session is not None:
+        # Caller owns the session (a warm-up batch reusing one browser).
+        try:
+            return session.get(page_url) or "", "browser", _ms()
+        except Exception as exc:
+            return "", f"browser error {type(exc).__name__}: {exc}", _ms()
+
+    if _site_needs_browser(site, page_url):
+        # One at a time: each call starts a Chromium, and hovers for several
+        # different movies arrive in a row.
+        with _browser_fetch_guard():
+            opened = _BrowserGallerySession(
+                cookie_path=_browser_state_path(db, site, page_url))
+            try:
+                html = opened.get(page_url) or ""
+                if html:
+                    return html, "browser", _ms()
+            except Exception as exc:
+                print(f"[COVER] browser fetch failed: {type(exc).__name__}: {exc}")
+            finally:
+                opened.close()
+
+    html = _fetch_html(page_url) or ""
+    return html, ("http" if html else "none"), _ms()
 
 
 def _reader_url(url: str) -> str:
@@ -1616,15 +1724,20 @@ _REFRESH_DUMP_MAX = 3
 _REFRESH_LOCK = threading.Lock()
 
 
-def _describe_page(page: str) -> str:
+def _describe_page(page: str, transport: str = "", elapsed_ms=None) -> str:
     """One line saying what a fetched page actually held.
 
     "No signed asset" on its own cannot tell an empty response from a bot
     challenge from real markup that simply carries no signature, and those
     three need completely different fixes.
     """
+    head = []
+    if transport:
+        head.append(f"via {transport}")
+    if elapsed_ms is not None:
+        head.append(f"{int(elapsed_ms)} ms")
     if not page:
-        return "empty response"
+        return ", ".join(head + ["empty response"])
     match = re.search(r"<title[^>]*>(.*?)</title>", page,
                       re.IGNORECASE | re.DOTALL)
     title = " ".join(html_unescape(match.group(1)).split())[:60] if match else ""
@@ -1640,7 +1753,7 @@ def _describe_page(page: str) -> str:
     if ("security check" in low[:6000] or "cf-chl" in low
             or "challenge-platform" in low):
         bits.insert(0, "BOT CHALLENGE, not the page")
-    return ", ".join(bits)
+    return ", ".join(head + bits)
 
 
 def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
@@ -1671,21 +1784,12 @@ def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
 
     def _work():
         try:
-            page = ""
-            if _site_needs_browser(site, page_url):
-                try:
-                    page = _browser_page_html(
-                        page_url, _browser_state_path(db, site, page_url)) or ""
-                except Exception as exc:
-                    print(f"[COVER] {slug}: browser fetch failed: "
-                          f"{type(exc).__name__}: {exc}")
-            if not page:
-                page = _fetch_html(page_url) or ""
+            page, transport, elapsed = _fetch_page(site, page_url, db)
             cover = signed_cover_url(page, hint)
             loop = signed_media_url(page, hint)
             if not cover and not loop:
                 print(f"[COVER] {slug}: watch page carried no signed asset "
-                      f"({_describe_page(page)})")
+                      f"({_describe_page(page, transport, elapsed)})")
                 if page and dump_dir and _REFRESH_DUMPS[0] < _REFRESH_DUMP_MAX:
                     _REFRESH_DUMPS[0] += 1
                     dest = os.path.join(dump_dir, f"watchpage_{slug}.html")
@@ -1706,7 +1810,8 @@ def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
             db.save()
             print(f"[COVER] {slug}: re-signed"
                   + (" cover" if cover else "")
-                  + (" + preview" if loop else ""))
+                  + (" + preview" if loop else "")
+                  + f" (via {transport}, {int(elapsed)} ms)")
             if cover:
                 ensure_cover_async(player, site, slug, cover)
         except Exception as exc:
@@ -1714,6 +1819,154 @@ def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
 
     threading.Thread(target=_work, daemon=True).start()
     return True
+
+
+_WARM_LOCK = threading.Lock()
+_WARM_RUNNING = set()
+_WARM_DONE = {}
+_WARM_BATCH_MAX = 60
+
+
+def _resolve_linked_movie(player, path):
+    """The metadata record a playlist row points at, or ``(None, None, None)``.
+
+    This is the saved-link half of preview_info_for_path, split out so a batch
+    warm-up can resolve a whole playlist without going through the per-hover
+    name-override fallback.
+    """
+    norm = _meta_norm_path(path or "")
+    links = getattr(player, "_metadata_links", {}) or {}
+    link = links.get(norm) or links.get(_meta_norm_path(_unwrap_path(path or "")))
+    if not isinstance(link, dict) or not link.get("slug"):
+        return None, None, None
+    site = METADATA_SITES.get(link.get("site") or DEFAULT_SITE_ID)
+    if not site:
+        return None, None, None
+    db = _metadata_db_for_site(player, site)
+    movie = (getattr(db, "movies", {}) or {}).get(link["slug"])
+    if not movie:
+        return None, None, None
+    return site, db, movie
+
+
+def warm_previews_async(player, paths) -> int:
+    """Warm the hover cache for a whole playlist in the background.
+
+    A hover has about a second and a half before it feels broken, and a browser
+    launch alone costs more than that -- so the fetch does not happen on hover.
+    It happens here, the moment rows land in the playlist: one background
+    thread opens a single browser per network and reuses it across every row of
+    that network, which is what _BrowserGallerySession was built for. By the
+    time a row is hovered its cover is already in _COVER_CACHE.
+
+    Best effort and cheap to call repeatedly: rows already warmed, already
+    cached, or still inside the refresh cooldown are skipped.
+    """
+    if player is None:
+        return 0
+    pending = []
+    for path in list(paths or [])[:_WARM_BATCH_MAX]:
+        site, db, movie = _resolve_linked_movie(player, path)
+        if not movie:
+            continue
+        slug = str(movie.get("slug") or "")
+        if not slug or not str(movie.get("url") or ""):
+            continue
+        with _COVER_CACHE_LOCK:
+            if slug in _COVER_CACHE:
+                continue
+        if time.time() - float(_WARM_DONE.get(slug, 0.0)) < _REFRESH_COOLDOWN:
+            continue
+        with _WARM_LOCK:
+            if slug in _WARM_RUNNING:
+                continue
+            _WARM_RUNNING.add(slug)
+        pending.append((site, db, movie))
+    if not pending:
+        return 0
+
+    def _apply(site, db, movie, page, transport, elapsed):
+        slug = str(movie.get("slug") or "")
+        hint = str(movie.get("title") or "") or str(movie.get("series") or "")
+        cover = signed_cover_url(page, hint)
+        loop = signed_media_url(page, hint)
+        with _WARM_LOCK:
+            _WARM_RUNNING.discard(slug)
+            _WARM_DONE[slug] = time.time()
+        if not cover and not loop:
+            print(f"[COVER] warm {slug}: no signed asset "
+                  f"({_describe_page(page, transport, elapsed)})")
+            return None
+        record = dict(movie)
+        if cover:
+            record["image"] = cover
+            record["image_expires"] = _image_expiry_epoch(cover)
+        if loop:
+            record["preview"] = loop
+            record["preview_expires"] = _image_expiry_epoch(loop)
+        db.upsert(record)
+        if cover:
+            ensure_cover_async(player, site, slug, cover)
+        return cover or loop
+
+    def _work():
+        try:
+            # Browser-needing rows are grouped by network so one Chromium
+            # serves every row of that network instead of one per row.
+            groups: dict = {}
+            order = []
+            for site, db, movie in pending:
+                url = str(movie.get("url") or "")
+                if not _site_needs_browser(site, url):
+                    continue
+                key = _browser_state_path(db, site, url)
+                if key not in groups:
+                    groups[key] = [site, db, []]
+                    order.append(key)
+                groups[key][2].append(movie)
+            for state_path in order:
+                site, db, movies = groups[state_path]
+                session = None
+                try:
+                    session = _BrowserGallerySession(cookie_path=state_path)
+                    for movie in movies:
+                        url = str(movie.get("url") or "")
+                        try:
+                            page, transport, elapsed = _fetch_page(
+                                site, url, db, session=session)
+                        except Exception as exc:
+                            page, transport, elapsed = (
+                                "", f"browser error {type(exc).__name__}: {exc}", 0)
+                        _apply(site, db, movie, page, transport, elapsed)
+                    db.save()
+                except Exception as exc:
+                    print(f"[COVER] warm batch failed: {type(exc).__name__}: {exc}")
+                    for movie in movies:
+                        with _WARM_LOCK:
+                            _WARM_RUNNING.discard(str(movie.get("slug") or ""))
+                finally:
+                    if session is not None:
+                        session.close()
+            for site, db, movie in pending:
+                url = str(movie.get("url") or "")
+                if _site_needs_browser(site, url):
+                    continue
+                try:
+                    page, transport, elapsed = _fetch_page(site, url, db)
+                except Exception as exc:
+                    page, transport, elapsed = (
+                        "", f"http error {type(exc).__name__}: {exc}", 0)
+                if _apply(site, db, movie, page, transport, elapsed):
+                    db.save()
+        except Exception as exc:
+            print(f"[COVER] warm-up failed: {type(exc).__name__}: {exc}")
+        finally:
+            with _WARM_LOCK:
+                for _site, _db, movie in pending:
+                    _WARM_RUNNING.discard(str(movie.get("slug") or ""))
+
+    threading.Thread(target=_work, daemon=True).start()
+    return len(pending)
 
 
 def _gallery_slug_from_url(url: str) -> str:
