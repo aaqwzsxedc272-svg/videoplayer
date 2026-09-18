@@ -326,8 +326,21 @@ class MetadataDB:
                     # DD/MM/YYYY, so anything still MM/DD on disk is a
                     # leftover from an older build and is fixed here.
                     self.migrate_dates()
-            except Exception:
-                pass
+            except Exception as e:
+                # Never carry on quietly from empty: the next save would write
+                # that over the file and the metadata would be gone for good.
+                # Put the unreadable file somewhere it cannot be overwritten
+                # and say so, loudly, once.
+                print(f"[MetadataDB] cannot read {self.db_path}: {e}")
+                try:
+                    kept = self.db_path + ".unreadable"
+                    if os.path.exists(kept):
+                        os.remove(kept)
+                    os.replace(self.db_path, kept)
+                    print(f"[MetadataDB] moved it to {kept} -- the metadata is "
+                          f"still there, fix the cause and rename it back")
+                except Exception as e2:
+                    print(f"[MetadataDB] and could not preserve it: {e2}")
 
     def compact_records(self) -> int:
         """Strip retired fields and dead signed URLs. Returns how many records
@@ -388,12 +401,27 @@ class MetadataDB:
 
     def save(self):
         with self._lock:
+            tmp = self.db_path + ".tmp"
             try:
-                with open(self.db_path, "w", encoding="utf-8") as f:
+                # Write beside the file, then move it into place. open(path,"w")
+                # truncates before a single byte is written, so a disk that
+                # fills up halfway used to leave a few dozen bytes of broken
+                # JSON where megabytes of metadata had been -- and _load() read
+                # that as an empty database. os.replace is atomic: either the
+                # old file stands or the new one does, never half of either.
+                with open(tmp, "w", encoding="utf-8") as f:
                     json.dump(self._data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, self.db_path)
                 self._save_error_at = 0.0
                 self._save_errors_hidden = 0
             except Exception as e:
+                try:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                except Exception:
+                    pass
                 # A full disk made this print on every autosave: fifty
                 # identical lines, burying the one thing worth reading in the
                 # log. Report it, then stay quiet about the same failure.

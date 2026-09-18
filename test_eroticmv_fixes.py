@@ -6367,6 +6367,71 @@ if _have74:
            'and it keeps polling for a row whose cover was pruned, not only a live one')
 
 
-    print()
+print()
+# ── 75. A save that fails cannot destroy the metadata it is saving ────────────
+# The field log showed about fifty "[MetadataDB] save error: [Errno 28] No space
+# left on device". save() used to do open(path, "w"), which truncates the file
+# before a single byte is written -- so each of those left a few dozen bytes of
+# broken JSON where megabytes of records had been, and _load() ended in
+# "except Exception: pass", reading that as an empty database and writing it
+# back on the next save. Ten thousand movies gone, silently. Writes are atomic
+# now, and an unreadable file is put where it cannot be overwritten.
+print()
+print('75. A failed save leaves the metadata intact')
+
+_d75 = os.path.join(_tf55.mkdtemp(), 'db75.json')
+_db75 = _msrc55.MetadataDB(_d75)
+for _i75 in range(3000):
+    _db75.upsert({'slug': f's75-{_i75}', 'title': 'Some Scene Title',
+                  'series': 'MomsTeachSex', 'models': ['Amirah Adara'],
+                  'date': '14/09/2026', 'meta_fetched': True,
+                  'url': f'https://nubiles-porn.com/video/watch/{_i75}/s'})
+_db75.save()
+_good75 = open(_d75, 'rb').read()
+report(len(_good75) > 200_000, 'a populated database is on disk',
+       f'{len(_good75)} bytes')
+
+import unittest.mock as _mock75
+_ERR75 = OSError(28, 'No space left on device')
+for _what75, _tgt75 in (('the write', 'os.fsync'), ('the move', 'os.replace')):
+    # A distinct slug per pass, so the count below really is one per failure.
+    _db75.upsert({'slug': f's75-new-{_what75}', 'title': 'Added After The Disk '
+                  'Filled', 'meta_fetched': True})
+    with _mock75.patch(_tgt75, side_effect=_ERR75):
+        _db75.save()
+    report(open(_d75, 'rb').read() == _good75,
+           f'a disk that fills during {_what75} leaves the previous file intact',
+           f'{os.path.getsize(_d75)} bytes still on disk')
+    report(not os.path.exists(_d75 + '.tmp'),
+           f'and cleans up the partial file it was writing', _what75)
+report(_db75.count() == 3002,
+       'the in-memory database keeps the records it could not write',
+       str(_db75.count()))
+_db75.save()
+report(len(json.load(open(_d75, encoding='utf-8'))['movies']) == 3002,
+       'and once the disk has room those records do reach the file')
+
+# The other half: a file that is already broken -- which fifty failed saves
+# could easily have left behind -- must not be read as an empty database and
+# then overwritten with one.
+_d75b = os.path.join(_tf55.mkdtemp(), 'db75b.json')
+_broken75 = b'{"movies": {"a": {"slug": "a", "tit'
+with open(_d75b, 'wb') as _f75b:
+    _f75b.write(_broken75)
+_db75b = _msrc55.MetadataDB(_d75b)
+report(_db75b.count() == 0, 'an unreadable database starts empty in memory')
+report(os.path.isfile(_d75b + '.unreadable')
+       and open(_d75b + '.unreadable', 'rb').read() == _broken75,
+       'but the bytes are moved aside byte-for-byte, not discarded',
+       str(os.path.getsize(_d75b + '.unreadable') if os.path.isfile(
+           _d75b + '.unreadable') else 'no file') + ' bytes')
+report(not os.path.exists(_d75b),
+       'and the corrupt path is clear, so a later save cannot overwrite it')
+_db75b.upsert({'slug': 's75b', 'title': 'Fresh Start', 'meta_fetched': True})
+_db75b.save()
+report(os.path.isfile(_d75b + '.unreadable')
+       and len(json.load(open(_d75b, encoding='utf-8'))['movies']) == 1,
+       'a new save writes a new file while the old one stays recoverable')
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
