@@ -4984,7 +4984,7 @@ report(not any(hasattr(_msrc55, n) for n in (
 _API74 = ('cover_bytes', 'ensure_cover_async', 'signed_cover_url',
           'signed_media_url', 'refresh_signed_assets_async', '_COVER_CACHE',
           '_COVER_CACHE_LOCK', '_COVER_CACHE_MAX', '_COVER_INFLIGHT',
-          '_REFRESH_INFLIGHT')
+          '_REFRESH_LAST')
 _have74 = all(hasattr(_msrc55, n) for n in _API74)
 report(_have74,
        'the on-demand cover API is present',
@@ -6271,7 +6271,7 @@ if _have74:
             _fetched74.append(url), b'\xff\xd8' + b'0' * 900)[1]
         _msrc55._COVER_CACHE.clear()
         _msrc55._COVER_INFLIGHT.clear()
-        _msrc55._REFRESH_INFLIGHT.clear()
+        _msrc55._REFRESH_LAST.clear()
         report(_msrc55.refresh_signed_assets_async(
             _p74, _site74, _MOV74, _db74) is True,
            'a hover with a dead cover starts a re-mint in the background')
@@ -6288,6 +6288,42 @@ if _have74:
         report(_fetched74 and _fetched74[0] == _URL74,
                'having read the movie\'s own watch page',
                str(_fetched74[0]) if _fetched74 else 'no fetch')
+        _n74 = len([u for u in _fetched74 if u == _URL74])
+        report(_msrc55.refresh_signed_assets_async(
+            _p74, _site74, _MOV74, _db74) is False,
+           'and a second hover inside the cooldown does not fetch it again -- '
+           'the poll re-reads the record every 400 ms, and with only an '
+           'in-flight guard one movie fetched its watch page fifteen times in '
+           'a minute', f'{_n74} page fetch(es) for one movie')
+
+        # The case the field log actually showed: the page arrives and carries
+        # no signature at all. That must be reported with a description, and it
+        # must not be retried on the next poll either.
+        _msrc55._REFRESH_LAST.clear()
+        _fetched74.clear()
+        _bare74 = ('<html><head><title>Stepmom Is A Great Kisser</title></head>'
+                   '<body>Video Player is loading.</body></html>')
+        _msrc55._fetch_html = lambda url, timeout=20: (
+            _fetched74.append(url), _bare74)[1]
+        report(_msrc55.refresh_signed_assets_async(
+            _p74, _site74, _MOV74, _db74) is True,
+           'a page that yields nothing is still tried once')
+        for _ in range(200):
+            if _fetched74:
+                break
+            time.sleep(0.01)
+        time.sleep(0.05)
+        report(_msrc55.refresh_signed_assets_async(
+            _p74, _site74, _MOV74, _db74) is False,
+           'and a page with no signature is not retried on the next poll',
+           f'{len([u for u in _fetched74 if u == _URL74])} fetch(es)')
+        _d74x = _msrc55._describe_page(_bare74)
+        report('byte(s)' in _d74x and 'signed 0' in _d74x and 'title' in _d74x,
+           'the failure says what the page held, not just how big it was -- '
+           'an empty response, a bot challenge and real markup with no '
+           'signature need three different fixes', _d74x)
+        report(_msrc55._describe_page('') == 'empty response',
+           'and an empty response says so rather than looking like markup')
         for _ in range(200):
             if _msrc55.cover_bytes(_MOV74['slug']):
                 break
@@ -6309,7 +6345,7 @@ if _have74:
         _msrc55._fetch_bytes = _orig_bytes74
         _msrc55._COVER_CACHE.clear()
         _msrc55._COVER_INFLIGHT.clear()
-        _msrc55._REFRESH_INFLIGHT.clear()
+        _msrc55._REFRESH_LAST.clear()
 
     # The hover itself must hand the card something to paint and a reason to keep
     # polling, including for a row whose cover has already been pruned away.
@@ -6368,6 +6404,60 @@ if _have74:
 
 
 print()
+
+# Deliberately outside the guard above: this is the defect the field log
+# showed, so it has to be able to fail against any version of the module. One
+# movie fetched its watch page fifteen times in a minute, because the hover
+# poll re-reads the record every 400 ms and an in-flight guard releases the
+# moment a fetch ends.
+class _Player75s:
+    pass
+
+
+_p75s = _Player75s()
+_p75s.data_dir = _tf55.mkdtemp()
+_p75s._metadata_dbs = {}
+_p75s._metadata_links = {}
+_p75s._metadata_name_overrides = {}
+_p75s._meta_norm_path = _msrc55._meta_norm_path
+_d75s = os.path.join(_p75s.data_dir, 'st75.json')
+with open(_d75s, 'w', encoding='utf-8') as _f75s:
+    json.dump({'movies': {}}, _f75s)
+_site75s = dict(_msrc55.METADATA_SITES['nubiles'])
+_site75s['db_filename'] = 'st75.json'
+_MOV75s = {'slug': '75-storm-slug',
+           'title': 'Stepmom Is A Great Kisser', 'series': 'MomsTeachSex',
+           'url': 'https://nubiles-porn.com/video/watch/256294/storm'}
+_seen75s = []
+_orig_html75s = _msrc55._fetch_html
+_orig_bytes75s = _msrc55._fetch_bytes
+_orig_sites75s = _msrc55.METADATA_SITES['nubiles']
+try:
+    _msrc55.METADATA_SITES['nubiles'] = _site75s
+    _msrc55._fetch_html = lambda url, timeout=20: (
+        _seen75s.append(url), '<html><title>x</title></html>')[1]
+    _msrc55._fetch_bytes = lambda url, timeout=20, referer='', diag=None: b''
+    if hasattr(_msrc55, '_REFRESH_LAST'):
+        _msrc55._REFRESH_LAST.pop(_MOV75s['slug'], None)
+    _db75s = _msrc55.MetadataDB(_d75s)
+    for _ in range(25):
+        # Exactly what the hover poll does: re-read the record, which asks for
+        # a refresh whenever the cover is still missing.
+        _msrc55.refresh_signed_assets_async(_p75s, _site75s, _MOV75s, _db75s)
+        time.sleep(0.02)
+    time.sleep(0.3)
+    report(len(_seen75s) == 1,
+           'twenty-five hovers on one movie with no cover fetch its watch page '
+           'once, not twenty-five times',
+           f'{len(_seen75s)} page fetch(es)')
+finally:
+    _msrc55._fetch_html = _orig_html75s
+    _msrc55._fetch_bytes = _orig_bytes75s
+    _msrc55.METADATA_SITES['nubiles'] = _orig_sites75s
+    if hasattr(_msrc55, '_REFRESH_LAST'):
+        _msrc55._REFRESH_LAST.pop(_MOV75s['slug'], None)
+
+
 # ── 75. A save that fails cannot destroy the metadata it is saving ────────────
 # The field log showed about fifty "[MetadataDB] save error: [Errno 28] No space
 # left on device". save() used to do open(path, "w"), which truncates the file

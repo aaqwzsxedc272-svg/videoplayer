@@ -1529,17 +1529,51 @@ def ensure_cover_async(player, site: dict, slug: str, url: str) -> bool:
     return True
 
 
-_REFRESH_INFLIGHT: set = set()
+# A hover polls for a late cover, and each poll re-reads the record, so an
+# in-flight guard alone is not enough: the moment a fetch finishes the next
+# poll would start another. The field log showed one movie fetching its watch
+# page fifteen times in a minute. So the attempt is stamped up front and not
+# retried for a while, whatever the outcome.
+_REFRESH_COOLDOWN = 900.0
+_REFRESH_LAST: dict = {}
+_REFRESH_DUMPS = [0]
+_REFRESH_DUMP_MAX = 3
 _REFRESH_LOCK = threading.Lock()
 
 
-def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
-    """Mint a fresh signature for one movie, on demand, when a hover needs it.
+def _describe_page(page: str) -> str:
+    """One line saying what a fetched page actually held.
 
-    A stored nubiles signature dies in about an hour, and the movie's own watch
-    page mints a new one for its cover every time it is loaded. So a hover can
-    recover a cover with no scrape and nothing on disk: read the page, take the
-    signed URL, store it, fetch the bytes, and the card repaints itself.
+    "No signed asset" on its own cannot tell an empty response from a bot
+    challenge from real markup that simply carries no signature, and those
+    three need completely different fixes.
+    """
+    if not page:
+        return "empty response"
+    match = re.search(r"<title[^>]*>(.*?)</title>", page,
+                      re.IGNORECASE | re.DOTALL)
+    title = " ".join(html_unescape(match.group(1)).split())[:60] if match else ""
+    low = page.lower()
+    bits = [f"{len(page)} byte(s)",
+            f"img-host {low.count('images.nubiles-porn.com')}",
+            f"srcset {low.count('data-srcset')}",
+            f"signed {page.count('st=')}",
+            f"loops {low.count('/loops/')}",
+            f"samples {low.count('/samples/')}"]
+    if title:
+        bits.append(f'title "{title}"')
+    return ", ".join(bits)
+
+
+def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
+    """Try to mint a fresh signature for one movie, on demand, from its page.
+
+    A stored nubiles signature dies in about an hour, so a hover with no cover
+    re-reads the movie's watch page and keeps any signed URL it finds. That is
+    a best effort, not a guarantee: the field log shows those pages arriving as
+    ~14 KB with no signature in them at all, which is why the failure is
+    reported with a description of the page rather than a bare byte count, and
+    why the first few are written out for inspection.
 
     The preview loop is not on that page, so it stays whatever the last scrape
     stored -- which is why previews still need an Update.
@@ -1548,13 +1582,14 @@ def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
     page_url = str((movie or {}).get("url") or "")
     if not slug or not page_url or player is None or db is None:
         return False
-    key = ((site or {}).get("id"), slug)
+    now = time.time()
     with _REFRESH_LOCK:
-        if key in _REFRESH_INFLIGHT:
+        if now - float(_REFRESH_LAST.get(slug, 0.0)) < _REFRESH_COOLDOWN:
             return False
-        _REFRESH_INFLIGHT.add(key)
+        _REFRESH_LAST[slug] = now
     hint = str(movie.get("title") or "") or str(movie.get("series") or "")
     record = dict(movie)
+    dump_dir = str(getattr(player, "data_dir", "") or "")
 
     def _work():
         try:
@@ -1563,7 +1598,16 @@ def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
             loop = signed_media_url(page, hint)
             if not cover and not loop:
                 print(f"[COVER] {slug}: watch page carried no signed asset "
-                      f"({len(page)} byte(s) fetched)")
+                      f"({_describe_page(page)})")
+                if page and dump_dir and _REFRESH_DUMPS[0] < _REFRESH_DUMP_MAX:
+                    _REFRESH_DUMPS[0] += 1
+                    dest = os.path.join(dump_dir, f"watchpage_{slug}.html")
+                    try:
+                        with open(dest, "w", encoding="utf-8") as fh:
+                            fh.write(page)
+                        print(f"[COVER] wrote {dest} for inspection")
+                    except Exception:
+                        pass
                 return
             if cover:
                 record["image"] = cover
@@ -1580,9 +1624,6 @@ def refresh_signed_assets_async(player, site: dict, movie: dict, db) -> bool:
                 ensure_cover_async(player, site, slug, cover)
         except Exception as exc:
             print(f"[COVER] {slug}: {type(exc).__name__}: {exc}")
-        finally:
-            with _REFRESH_LOCK:
-                _REFRESH_INFLIGHT.discard(key)
 
     threading.Thread(target=_work, daemon=True).start()
     return True
