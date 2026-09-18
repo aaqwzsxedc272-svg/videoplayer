@@ -329,18 +329,30 @@ class MetadataDB:
             except Exception as e:
                 # Never carry on quietly from empty: the next save would write
                 # that over the file and the metadata would be gone for good.
-                # Put the unreadable file somewhere it cannot be overwritten
-                # and say so, loudly, once.
-                print(f"[MetadataDB] cannot read {self.db_path}: {e}")
                 try:
-                    kept = self.db_path + ".unreadable"
-                    if os.path.exists(kept):
-                        os.remove(kept)
-                    os.replace(self.db_path, kept)
-                    print(f"[MetadataDB] moved it to {kept} -- the metadata is "
-                          f"still there, fix the cause and rename it back")
-                except Exception as e2:
-                    print(f"[MetadataDB] and could not preserve it: {e2}")
+                    size = os.path.getsize(self.db_path)
+                except Exception:
+                    size = -1
+                if size == 0:
+                    # "Expecting value: line 1 column 1 (char 0)" is what a
+                    # 0-byte file looks like, and it says nothing about why.
+                    # The old save() truncated before writing a single byte, so
+                    # an interrupted one left exactly this behind -- and there
+                    # is nothing in it worth preserving.
+                    print(f"[MetadataDB] {self.db_path} is empty (0 bytes) -- an "
+                          f"interrupted save truncated it and there is nothing "
+                          f"in it to recover")
+                else:
+                    print(f"[MetadataDB] cannot read {self.db_path}: {e}")
+                    try:
+                        kept = self.db_path + ".unreadable"
+                        if os.path.exists(kept):
+                            os.remove(kept)
+                        os.replace(self.db_path, kept)
+                        print(f"[MetadataDB] moved it to {kept} -- the metadata "
+                              f"is still there, fix the cause and rename it back")
+                    except Exception as e2:
+                        print(f"[MetadataDB] and could not preserve it: {e2}")
 
     def compact_records(self) -> int:
         """Strip retired fields and dead signed URLs. Returns how many records

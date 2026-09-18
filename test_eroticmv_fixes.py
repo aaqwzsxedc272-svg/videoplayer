@@ -6433,5 +6433,29 @@ report(os.path.isfile(_d75b + '.unreadable')
        and len(json.load(open(_d75b, encoding='utf-8'))['movies']) == 1,
        'a new save writes a new file while the old one stays recoverable')
 
+# The shape the field log actually showed: not a partial write but a 0-byte
+# file, because the old save() truncated before writing anything. The raw JSON
+# error for that is "Expecting value: line 1 column 1 (char 0)", which names a
+# column and not a cause, so it reads like a parsing bug rather than a file
+# that was emptied.
+_d75c = os.path.join(_tf55.mkdtemp(), 'db75c.json')
+open(_d75c, 'wb').close()
+report(os.path.getsize(_d75c) == 0, 'a truncated database is 0 bytes')
+import io as _io75, contextlib as _ctx75
+_buf75 = _io75.StringIO()
+with _ctx75.redirect_stdout(_buf75):
+    _db75c = _msrc55.MetadataDB(_d75c)
+_out75 = _buf75.getvalue()
+report('empty (0 bytes)' in _out75,
+       'and it is reported as empty, not as a JSON parse error',
+       _out75.strip().splitlines()[0][:110] if _out75.strip() else 'silent')
+report(_db75c.count() == 0, 'it starts as an empty database')
+report(not os.path.exists(_d75c + '.unreadable'),
+       'and no .unreadable file is kept for something with nothing in it')
+_db75c.upsert({'slug': 's75c', 'title': 'Rebuilt', 'meta_fetched': True})
+_db75c.save()
+report(len(json.load(open(_d75c, encoding='utf-8'))['movies']) == 1,
+       'a fresh save writes over the empty one cleanly')
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
