@@ -7492,6 +7492,13 @@ class VideoPlayer(QMainWindow):
         self._hover_clip_watchdog.setSingleShot(True)
         self._hover_clip_watchdog.setInterval(2500)
         self._hover_clip_watchdog.timeout.connect(self._check_hover_clip_started)
+        # The actual loop. EndOfMedia is not guaranteed to arrive, so the
+        # position is watched instead of waiting on a signal.
+        self._hover_clip_repeat_timer = QTimer(self)
+        self._hover_clip_repeat_timer.setInterval(400)
+        self._hover_clip_repeat_timer.timeout.connect(self._on_hover_clip_repeat_tick)
+        self._hover_clip_last_pos = -1
+        self._hover_clip_stall = 0
         self._hover_clip_wanted = False
         self._hover_clip_ready = False
         # The cover is held on screen for this long before the clip takes
@@ -9185,8 +9192,11 @@ class VideoPlayer(QMainWindow):
             audio.setVolume(0.0)
             player.setAudioOutput(audio)
             player.setVideoOutput(self.hover_preview_video)
+            # No setLoops(-1). The FFmpeg backend does not honour it for a
+            # remote stream, and leaving it set can swallow the EndOfMedia the
+            # restart depends on. The loop is driven from the position instead.
             try:
-                player.setLoops(-1)
+                player.setLoops(1)
             except Exception:
                 pass
             player.mediaStatusChanged.connect(self._on_hover_clip_status)
@@ -9278,6 +9288,8 @@ class VideoPlayer(QMainWindow):
         self._hover_cover_poll_timer.stop()
         self.hover_preview_image.hide()
         self.hover_preview_video.show()
+        self._hover_clip_last_pos = -1
+        self._hover_clip_stall = 0
         try:
             # Plain play(). Seeking here looked harmless and was not: at this
             # point the player has parsed the header but not opened the stream,
@@ -9289,6 +9301,47 @@ class VideoPlayer(QMainWindow):
         except Exception:
             self._abandon_hover_clip()
         self._hover_clip_watchdog.start()
+        self._hover_clip_repeat_timer.start()
+
+    def _on_hover_clip_repeat_tick(self):
+        """Wind the clip back when it runs out, without waiting to be told.
+
+        EndOfMedia never arrived for the teamskeet trailers on
+        images.psmcdn.net: they played once and went quiet, and nothing
+        restarted them. Reading the position costs nothing every 400 ms and
+        does not depend on the backend emitting anything at all.
+        """
+        if not (self._hover_clip_wanted and self._hover_clip_ready):
+            self._hover_clip_repeat_timer.stop()
+            return
+        player = self._hover_clip_player
+        if player is None:
+            self._hover_clip_repeat_timer.stop()
+            return
+        try:
+            playing = (player.playbackState()
+                       == QMediaPlayer.PlaybackState.PlayingState)
+            pos = int(player.position() or 0)
+            dur = int(player.duration() or 0)
+        except Exception:
+            return
+        if not playing:
+            self._restart_hover_clip()
+            return
+        if dur > 0 and pos >= dur - 300:
+            self._restart_hover_clip()
+            return
+        if pos == self._hover_clip_last_pos:
+            # Claiming to play but the clock is not moving.
+            self._hover_clip_stall += 1
+            if self._hover_clip_stall >= 6:
+                self._hover_clip_stall = 0
+                self._restart_hover_clip()
+                self._hover_clip_last_pos = pos
+                return
+        else:
+            self._hover_clip_stall = 0
+        self._hover_clip_last_pos = pos
 
     def _check_hover_clip_started(self):
         """Never leave a black rectangle where the cover was.
@@ -9319,6 +9372,8 @@ class VideoPlayer(QMainWindow):
         self._hover_clip_timer.stop()
         if hasattr(self, '_hover_clip_watchdog'):
             self._hover_clip_watchdog.stop()
+        if hasattr(self, '_hover_clip_repeat_timer'):
+            self._hover_clip_repeat_timer.stop()
         self._stop_clip_playback()
         self.hover_preview_video.hide()
         if self._hover_preview_frames:
@@ -9340,6 +9395,10 @@ class VideoPlayer(QMainWindow):
             self._hover_cover_hold_timer.stop()
         if hasattr(self, '_hover_clip_timer'):
             self._hover_clip_timer.stop()
+        if hasattr(self, '_hover_clip_watchdog'):
+            self._hover_clip_watchdog.stop()
+        if hasattr(self, '_hover_clip_repeat_timer'):
+            self._hover_clip_repeat_timer.stop()
         self._stop_clip_playback()
         if hasattr(self, 'hover_preview_video'):
             self.hover_preview_video.hide()

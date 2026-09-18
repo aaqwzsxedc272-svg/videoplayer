@@ -7531,15 +7531,24 @@ class _Player83:
     def __init__(self):
         self.calls = []
         self.state = _PS83.PlayingState
+        self.pos = 0
+        self.dur = 10000
 
     def setPosition(self, v):
         self.calls.append(('setPosition', v))
+        self.pos = v
 
     def play(self):
         self.calls.append(('play',))
 
     def playbackState(self):
         return self.state
+
+    def position(self):
+        return self.pos
+
+    def duration(self):
+        return self.dur
 
 
 class _Hold83:
@@ -7587,6 +7596,9 @@ class _Clip83:
         self._hover_cover_hold_timer = _Hold83(False)
         self._hover_cover_poll_timer = _Timer83()
         self._hover_clip_watchdog = _Hold83(False)
+        self._hover_clip_repeat_timer = _Hold83(True)
+        self._hover_clip_last_pos = -1
+        self._hover_clip_stall = 0
         self.hover_preview_image = _W83()
         self.hover_preview_video = _W83()
         self.events = []
@@ -7601,6 +7613,7 @@ _Clip83._on_hover_clip_status = _vfn83('_on_hover_clip_status')
 _Clip83._restart_hover_clip = _vfn83('_restart_hover_clip')
 _Clip83._swap_to_hover_clip = _vfn83('_swap_to_hover_clip')
 _Clip83._check_hover_clip_started = _vfn83('_check_hover_clip_started')
+_Clip83._on_hover_clip_repeat_tick = _vfn83('_on_hover_clip_repeat_tick')
 
 # Gated separately on purpose. One gate for the whole section meant that a
 # missing watchdog silently skipped the swap test too -- and the swap is the
@@ -7610,6 +7623,9 @@ _have83 = all(getattr(_Clip83, n, None) is not None for n in _core83)
 report(_have83, 'the clip status, swap and restart paths are in main.py',
        'missing: ' + ', '.join(n for n in _core83
                                if getattr(_Clip83, n, None) is None))
+_have_repeat83 = getattr(_Clip83, '_on_hover_clip_repeat_tick', None) is not None
+report(_have_repeat83,
+       'and there is a loop that does not wait to be told the clip ended')
 _have_watch83 = getattr(_Clip83, '_check_hover_clip_started', None) is not None
 report(_have_watch83,
        'and there is a watchdog to give the cover back when a clip fails')
@@ -7668,6 +7684,66 @@ if _have83:
     report(_c83._hover_clip_watchdog.isActive(),
        'a watchdog is armed at the swap, so a clip that parses and then fails '
        'cannot leave a black rectangle behind')
+
+if _have_repeat83:
+    # The teamskeet trailers never signalled EndOfMedia at all, so the loop
+    # cannot depend on being told. These drive the position-watching tick.
+    _c83 = _Clip83()
+    _c83._hover_clip_player.pos = 9800
+    _c83._on_hover_clip_repeat_tick()
+    report(_c83._hover_clip_player.calls == [('setPosition', 0), ('play',)],
+       'a clip that has run to the end of its duration is wound back and '
+       'replayed without waiting for EndOfMedia -- the teamskeet trailers on '
+       'images.psmcdn.net never sent it, which is why only those failed to '
+       'repeat', str(_c83._hover_clip_player.calls))
+
+    _c83 = _Clip83()
+    _c83._hover_clip_player.state = _PS83.StoppedState
+    _c83._hover_clip_player.pos = 4000
+    _c83._on_hover_clip_repeat_tick()
+    report(_c83._hover_clip_player.calls == [('setPosition', 0), ('play',)],
+       'and one the player has quietly stopped is restarted too',
+       str(_c83._hover_clip_player.calls))
+
+    _c83 = _Clip83()
+    for _p83 in (1000, 2000, 3000):
+        _c83._hover_clip_player.pos = _p83
+        _c83._on_hover_clip_repeat_tick()
+    report(_c83._hover_clip_player.calls == [],
+       'a clip still moving through the middle of itself is left alone',
+       str(_c83._hover_clip_player.calls))
+
+    _c83 = _Clip83()
+    _c83._hover_clip_player.pos = 5000
+    _c83._on_hover_clip_repeat_tick()          # takes the baseline
+    for _ in range(5):
+        _c83._on_hover_clip_repeat_tick()
+    report(_c83._hover_clip_player.calls == [],
+       'a clip that has only just stopped moving is given a moment',
+       str(_c83._hover_clip_player.calls))
+    _c83._on_hover_clip_repeat_tick()
+    report(_c83._hover_clip_player.calls == [('setPosition', 0), ('play',)],
+       'and one claiming to play while its clock stands still for six ticks '
+       'is restarted rather than left frozen',
+       str(_c83._hover_clip_player.calls))
+
+    _c83 = _Clip83()
+    _c83._hover_clip_wanted = False
+    _c83._hover_clip_player.pos = 9900
+    _c83._on_hover_clip_repeat_tick()
+    report(_c83._hover_clip_player.calls == []
+           and not _c83._hover_clip_repeat_timer.isActive(),
+       'once the card is gone the loop stops itself and restarts nothing',
+       f'{_c83._hover_clip_player.calls}, timer={_c83._hover_clip_repeat_timer.isActive()}')
+
+    _c83 = _Clip83()
+    _c83._hover_clip_player.dur = 0
+    _c83._hover_clip_player.pos = 0
+    for _ in range(3):
+        _c83._on_hover_clip_repeat_tick()
+    report(_c83._hover_clip_player.calls == [],
+       'a stream that has not reported a duration yet is not restarted on a '
+       'guess', str(_c83._hover_clip_player.calls))
 
 if _have_watch83:
     _c83 = _Clip83()
