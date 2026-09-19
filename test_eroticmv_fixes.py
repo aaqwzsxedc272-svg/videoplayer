@@ -7773,5 +7773,81 @@ if _have_watch83:
     report(_c83.events == [],
        'once the card is gone the watchdog does nothing', str(_c83.events))
 
+# ---------------------------------------------------------------------------
+# 84. Marking one row must not mark another. Two unrelated bunkr links were
+#     marked together, and one porn00 row marked every porn00 row, because
+#     both names yielded the same invented JAV code.
+# ---------------------------------------------------------------------------
+print()
+print('--- 84: seen keys do not collide across unrelated rows ---')
+
+_g84 = {'re': re, 'unquote': unquote}
+_fn84 = next((n for n in TREE.body
+              if isinstance(n, ast.ClassDef) and n.name == 'VideoPlayer'), None)
+_code84 = _bl84 = None
+if _fn84 is not None:
+    for _n84 in _fn84.body:
+        if isinstance(_n84, ast.FunctionDef) and _n84.name == '_extract_jav_code':
+            _m84 = ast.Module(body=[_n84], type_ignores=[])
+            ast.fix_missing_locations(_m84)
+            exec(compile(_m84, '<_extract_jav_code>', 'exec'), _g84)
+            _code84 = _g84['_extract_jav_code']
+        if isinstance(_n84, ast.Assign) and any(
+                getattr(t, 'id', '') == '_JAV_CODE_PREFIX_BLACKLIST'
+                for t in _n84.targets):
+            _m84 = ast.Module(body=[_n84], type_ignores=[])
+            ast.fix_missing_locations(_m84)
+            exec(compile(_m84, '<_JAV_CODE_PREFIX_BLACKLIST>', 'exec'), _g84)
+            _bl84 = _g84['_JAV_CODE_PREFIX_BLACKLIST']
+
+
+class _J84:
+    _extract_jav_code = _code84
+    _JAV_CODE_PREFIX_BLACKLIST = _bl84
+
+
+_have84 = _code84 is not None and _bl84 is not None
+report(_have84, 'the JAV code extractor and its prefix blacklist are in main.py',
+       f'fn={_code84 is not None}, blacklist={_bl84 is not None}')
+
+if _have84:
+    _j84 = _J84()
+    _a84 = 'AnalTherapyXXX.26.06.30.Aleksa.Mink.Do.Not.Disturb.XXX.1080p.mp4'
+    _b84 = 'PerfectGirlfriend.26.07.04.Jessi.Rae.The.Risky.Text.XXX.1080p.mp4'
+    report(_j84._extract_jav_code(_a84) != _j84._extract_jav_code(_b84)
+           or _j84._extract_jav_code(_a84) == '',
+       'two unrelated release names no longer share a key -- both of these '
+       'read as XXX-1080, taken from the porn marker and the resolution, so '
+       'marking one marked the other',
+       f'{_j84._extract_jav_code(_a84)!r} vs {_j84._extract_jav_code(_b84)!r}')
+
+    _sites84 = ['Porn00XXX', 'AnalTherapyXXX', 'PerfectGirlfriendXXX',
+                'WetVRXXX', 'LetsDoeItXXX']
+    _keys84 = {_j84._extract_jav_code(
+        f'{s}.26.07.04.Some.Title.Here.XXX.1080p.mp4') for s in _sites84}
+    report(_keys84 == {''},
+       'and a whole site\'s rows, all named the same way, no longer collapse '
+       'onto one key -- marking one porn00 row used to mark every porn00 row',
+       str(_keys84))
+
+    report('XXX' in _bl84,
+       'XXX is blacklisted as a prefix: it is a porn marker these names '
+       'carry, not a studio label')
+
+    for _real84, _want84 in (('SSIS-123 Some Title 1080p.mp4', 'SSIS-123'),
+                             ('MIDE-480 Another Title.mp4', 'MIDE-480'),
+                             ('IPX-999 Real Code 720p.mkv', 'IPX-999'),
+                             ('ABW-123.mp4', 'ABW-123'),
+                             ('FC2-PPV-1234567 something.mp4', 'FC2-PPV-1234567'),
+                             ('HEYZO-1234 clip.mp4', 'HEYZO-1234')):
+        report(_j84._extract_jav_code(_real84) == _want84,
+           f'a real code is still read out of {_real84!r}',
+           f'{_j84._extract_jav_code(_real84)!r} != {_want84!r}')
+
+    report(_j84._extract_jav_code('MIDE-480 Another Title.mp4') == 'MIDE-480'
+           and _j84._extract_jav_code('Whatever XXX 480p.mp4') == '',
+       'the resolution guard needs the digits to be followed by P, so a code '
+       'that happens to end in 480 survives and 480p does not become one')
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

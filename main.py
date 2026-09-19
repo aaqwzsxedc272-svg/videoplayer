@@ -10789,6 +10789,10 @@ class VideoPlayer(QMainWindow):
         'ID', 'ITEM', 'LIST', 'ML', 'MP3', 'MP4', 'NET', 'ORG', 'SD', 'TV',
         'UHD', 'URL', 'VIEWKEY', 'WATCH', 'WEB', 'WEBDL', 'WEBRIP', 'WWW',
         'X264', 'X265',
+        # 'XXX' is the porn marker these release names carry, not a studio
+        # label. Every "<Site>.<date>.<title>.XXX.1080p.mp4" row matched on it,
+        # so they all shared one seen key and marking one marked the lot.
+        'XXX',
     })
 
     def _extract_jav_code(self, text):
@@ -10819,8 +10823,15 @@ class VideoPlayer(QMainWindow):
         if heyzo_match:
             return f"HEYZO-{heyzo_match.group(1)}"
 
+        # Three digits minimum. Two was enough for a site name to read as a
+        # catalogue number: every "Porn00XXX.<date>.<title>.XXX.1080p.mp4" row
+        # in a playlist produced PORN-00, so marking one porn00 row marked all
+        # of them. Real codes are three digits or more (SSIS-123, MIDE-480,
+        # HEYZO-1234); the cost of missing a rare two-digit code is one row
+        # not grouped with its duplicate, which is far cheaper than the
+        # cross-marking this caused.
         generic_match = re.search(
-            r'(?<![A-Z0-9])([A-Z]{2,6})(?:\s*[-_])?\s*(\d{2,5})(?!\d)',
+            r'(?<![A-Z0-9])([A-Z]{2,6})(?:\s*[-_])?\s*(\d{3,5})(?!\d)',
             value,
             re.IGNORECASE,
         )
@@ -10830,6 +10841,13 @@ class VideoPlayer(QMainWindow):
         prefix = str(generic_match.group(1) or '').upper()
         number = str(generic_match.group(2) or '')
         if prefix in self._JAV_CODE_PREFIX_BLACKLIST:
+            return ""
+        # The number has to be a catalogue number, not a resolution. "…XXX
+        # 1080p.mp4" yields XXX-1080, and every release named that way lands on
+        # the same key -- two unrelated bunkr links were marked together by it.
+        # Requiring the digit run to be followed by P is what tells a
+        # resolution from a real code: MIDE-480 has no trailing P.
+        if re.search(r'(?<![0-9])' + re.escape(number) + r'\s*P(?![A-Z0-9])', value):
             return ""
         return f"{prefix}-{number}"
 
