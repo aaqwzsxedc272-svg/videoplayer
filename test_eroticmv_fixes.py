@@ -8528,20 +8528,24 @@ print('--- 91: supjav server tokens ---')
 
 _gj91 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      'generic_jav_grab.py')
+_src91pre = open(_gj91, encoding='utf-8').read()
+report('_browser_fetch(url)' in _src91pre,
+       'the grab retries a gated page through a real browser -- a plain HTTP '
+       'client gets 403 from supjav and that 403 used to be the verdict')
 _tree91 = ast.parse(open(_gj91, encoding='utf-8').read())
 _fn91 = {}
 for _n91 in _tree91.body:
     if isinstance(_n91, ast.FunctionDef) and _n91.name in (
             'supjav_player_template', 'supjav_server_links',
-            'supjav_destination'):
+            'supjav_destination', '_looks_blocked'):
         _fn91[_n91.name] = _n91
-report(len(_fn91) == 3,
-       'the server-list reader and the redirect reader are in the generic '
-       'grabber, not in a scraper of their own -- supjav hands the URL to '
-       'hosters the app already resolves',
-       'missing: ' + ', '.join(
-           n for n in ('supjav_player_template', 'supjav_server_links',
-                       'supjav_destination') if n not in _fn91))
+_want91 = ('supjav_player_template', 'supjav_server_links',
+           'supjav_destination', '_looks_blocked')
+report(len(_fn91) == len(_want91),
+       'the server-list reader, the redirect reader and the bot-gate test are '
+       'in the generic grabber, not in a scraper of their own -- supjav hands '
+       'the URL to hosters the app already resolves',
+       'missing: ' + ', '.join(n for n in _want91 if n not in _fn91))
 
 _src91g = open(_gj91, encoding='utf-8').read()
 report("'supjav' in host" in _src91g,
@@ -8556,7 +8560,7 @@ report('_SUPJAV_OWN_HOSTS' in _src91g,
        'a hop that lands back on supjav or its ad network is not treated as '
        'an answer')
 
-if len(_fn91) == 3:
+if len(_fn91) == len(_want91):
     from urllib.parse import (urlparse as _up91, urlunparse as _uu91,
                               parse_qsl as _pq91, urlencode as _ue91)
     from html import unescape as _uq91
@@ -8574,6 +8578,35 @@ if len(_fn91) == 3:
         _m91 = ast.Module(body=[_n91], type_ignores=[])
         ast.fix_missing_locations(_m91)
         exec(compile(_m91, '<g>', 'exec'), _g91)
+
+    _lb91 = _g91.get('_looks_blocked')
+    report(_lb91 is not None, 'the bot-gate test is in the grabber')
+    if _lb91 is not None:
+        _gated91 = [(s, b) for s, b in
+                    ((403, ''), (429, ''), (503, ''),
+                     (200, '<title>Just a moment...</title>'),
+                     (200, '<div id="cf-browser-verification"></div>'))
+                    if not _lb91(s, b)]
+        report(not _gated91,
+           'a 403, 429 or 503 and a Cloudflare interstitial are all read as a '
+           'gate -- supjav answers 403 to a plain client and serves the page '
+           'to a real browser, so the HTTP answer cannot be the verdict',
+           str(_gated91))
+        _notgated91 = [(s, b) for s, b in
+                       ((200, '<html><video src=x></video></html>'),
+                        (404, ''), (400, ''))
+                       if _lb91(s, b)]
+        report(not _notgated91,
+           'and a 404 is a real answer, not a gate -- launching a browser for '
+           'a dead link would only make it slow', str(_notgated91))
+    report('headless=False' in _src91g and "--window-position=-32000,-32000" in _src91g
+           and 'launch_persistent_context' in _src91g,
+       'the browser fallback is the same policy javdock uses: the installed '
+       'browser headed, because headless is reliably defeated, off-screen so '
+       'it never appears, with a profile that keeps the clearance cookie')
+    report('status == 0 or _looks_blocked(status)' in _src91g,
+       'the retry happens for a gate or a failed connection, not for every '
+       'non-200')
 
     _req91 = 'https://lk1.supremejav.com/supjav.php?l=abc&bg=undefined'
     _dest91 = _g91['supjav_destination']
@@ -8613,7 +8646,7 @@ _cap91 = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'supjav.txt')
 if not os.path.isfile(_cap91):
     print('  SKIP  supjav.txt is not in the working copy, so the server list '
           'is not read out of a real watch page')
-elif len(_fn91) == 3:
+elif len(_fn91) == len(_want91):
     _html91 = open(_cap91, encoding='utf-8', errors='replace').read()
     _links91 = _g91['supjav_server_links'](_html91)
     report(len(_links91) == 4 and [l for l, _ in _links91][0] == 'ST',

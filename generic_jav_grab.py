@@ -3,9 +3,11 @@
 generic_jav_grab.py  ?"  Extract stream URLs from generic JAV/video pages.
 """
 
+import os
 import sys
 import json
 import re
+import tempfile
 import traceback
 from html import unescape
 from urllib.parse import (urlparse, urljoin, urlunparse, parse_qsl, urlencode)
@@ -43,6 +45,119 @@ EMBED_HOST_TOKENS = (
     'voe.sx', 'voe.ru', 'voe.ws', 'voe.is', 'veev.to', 'govoe', 'chillx',
     'eugenemakedraw', 'javlesbians',
 )
+
+
+# ── Bot gates ─────────────────────────────────────────────────────────────────
+# supjav answers a plain HTTP GET with 403 from a Cloudflare-style gate while
+# serving the page to a real browser. Same policy as javdock_grab: the user's
+# own installed browser, HEADED (headless is reliably defeated), off-screen so
+# it never appears on the desktop, with a persistent profile so the clearance
+# cookie survives between captures and later links pass with no challenge.
+
+def _find_local_browser() -> str:
+    override = globals().get('BROWSER_EXECUTABLE')
+    if override and os.path.isfile(str(override)):
+        return str(override)
+    from shutil import which
+    candidates = []
+    if os.name == 'nt':
+        roots = [os.environ.get('PROGRAMFILES', r'C:\Program Files'),
+                 os.environ.get('PROGRAMFILES(X86)', r'C:\Program Files (x86)')]
+        for root in roots:
+            for rel in (('BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+                        ('Google', 'Chrome', 'Application', 'chrome.exe'),
+                        ('Microsoft', 'Edge', 'Application', 'msedge.exe')):
+                candidates.append(os.path.join(root, *rel))
+        _lad = os.environ.get('LOCALAPPDATA', '')
+        if _lad:
+            candidates.append(os.path.join(
+                _lad, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'))
+    else:
+        candidates.extend(('brave-browser', 'brave', 'google-chrome',
+                           'chromium', 'microsoft-edge'))
+    for cand in candidates:
+        try:
+            if os.path.isfile(cand) or which(cand):
+                return cand
+        except Exception:
+            continue
+    return ''
+
+
+def _browser_fetch(url: str, referer: str = '', settle_ms: int = 2500):
+    """(final_url, html) for *url* through a real browser, or ('', '').
+
+    Used both to read a gated watch page and to follow a gated redirect: the
+    returned final_url is where the browser actually ended up, which for a
+    redirect page is the answer.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print('[grab] playwright not installed -- cannot pass a bot gate',
+              file=sys.stderr)
+        return '', ''
+    final, html = '', ''
+    try:
+        with sync_playwright() as pw:
+            browser = None
+            exe = _find_local_browser()
+            profile = os.path.join(tempfile.gettempdir(), 'generic_jav_profile')
+            args = ['--no-sandbox', '--disable-dev-shm-usage',
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-infobars', '--window-size=1280,800',
+                    '--window-position=-32000,-32000']
+            for attempt in ([exe] if exe else []) + [None]:
+                try:
+                    browser = pw.chromium.launch_persistent_context(
+                        profile, headless=False,
+                        executable_path=attempt or None, args=args,
+                        ignore_default_args=['--enable-automation'],
+                        ignore_https_errors=True, locale='en-US')
+                    break
+                except Exception as exc:
+                    print(f'[grab] browser launch failed '
+                          f'({attempt or "bundled chromium"}): {exc}',
+                          file=sys.stderr)
+                    browser = None
+            if browser is None:
+                return '', ''
+            try:
+                ctx_opts = {}
+                if referer:
+                    ctx_opts['referer'] = referer
+                page = browser.new_page(**ctx_opts)
+                page.goto(url, wait_until='domcontentloaded', timeout=45000)
+                try:
+                    page.wait_for_load_state('networkidle', timeout=8000)
+                except Exception:
+                    pass
+                page.wait_for_timeout(int(settle_ms or 0))
+                final = str(page.url or '')
+                html = page.content() or ''
+            finally:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+    except Exception as exc:
+        print(f'[grab] browser fetch failed: {exc}', file=sys.stderr)
+        return '', ''
+    return final, html
+
+
+def _looks_blocked(status, body='') -> bool:
+    """True for the responses a bot gate answers with instead of the page."""
+    try:
+        code = int(status or 0)
+    except Exception:
+        code = 0
+    if code in (403, 429, 503):
+        return True
+    text = str(body or '')[:4000].lower()
+    return ('cf-browser-verification' in text or 'challenge-platform' in text
+            or 'just a moment' in text or 'checking your browser' in text
+            or 'attention required' in text)
 
 
 # ── supjav.com ────────────────────────────────────────────────────────────────
@@ -157,10 +272,12 @@ def supjav_destination(requested_url: str, status, final_url: str,
     return ''
 
 
-def _supjav_hoster_urls(html: str, page_url: str, limit: int = 4):
+def _supjav_hoster_urls(html: str, page_url: str, limit: int = 4,
+                        use_browser: bool = False):
     """Resolve a supjav watch page to the hoster URLs behind its servers."""
     found = []
     for label, player_url in supjav_server_links(html)[:max(1, int(limit or 1))]:
+        dest, status = '', '?'
         try:
             r = cfreq.get(
                 player_url,
@@ -170,18 +287,27 @@ def _supjav_hoster_urls(html: str, page_url: str, limit: int = 4):
                 headers={'Referer': page_url or player_url,
                          'Accept': 'text/html,*/*;q=0.8'},
             )
+            status = r.status_code
             dest = supjav_destination(player_url, r.status_code,
                                       str(getattr(r, 'url', '') or ''),
                                       r.text)
         except Exception as exc:
             print(f"[SUPJAV] server {label}: {exc}", file=sys.stderr)
-            continue
+        # The gate that 403s the watch page gates this hop too. Following it
+        # in a real browser is also the better way to see a redirect: the
+        # final URL is the answer.
+        if not dest and (use_browser or _looks_blocked(status)):
+            print(f"[SUPJAV] server {label}: HTTP {status} over HTTP, "
+                  f"retrying in a browser", file=sys.stderr)
+            final, body = _browser_fetch(player_url, referer=page_url)
+            if final or body:
+                dest = supjav_destination(player_url, 200, final, body)
         if dest:
             print(f"[SUPJAV] server {label} -> {dest}", file=sys.stderr)
             found.append(dest)
         else:
             print(f"[SUPJAV] server {label}: no hoster in what came back "
-                  f"(HTTP {getattr(r, 'status_code', '?')})", file=sys.stderr)
+                  f"(HTTP {status})", file=sys.stderr)
     return found
 
 
@@ -214,20 +340,36 @@ def grab_all(url: str):
         if parts:
             slug = parts[-1].lower().replace('.html', '')
 
-        r = cfreq.get(
-            url,
-            impersonate="chrome131",
-            timeout=15,
-            headers={
-                'Referer': url,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            }
-        )
-        if r.status_code != 200:
-            result['error'] = f"HTTP {r.status_code}"
+        status, html = 0, ''
+        try:
+            r = cfreq.get(
+                url,
+                impersonate="chrome131",
+                timeout=15,
+                headers={
+                    'Referer': url,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                }
+            )
+            status = r.status_code
+            if status == 200 and not _looks_blocked(status, r.text):
+                html = r.text
+        except Exception as exc:
+            print(f"[grab] HTTP fetch failed: {exc}", file=sys.stderr)
+
+        # A bot gate answers 403 to a plain client and serves the page to a
+        # real browser. supjav does exactly this, so the HTTP answer is only
+        # the first attempt -- never the verdict. A 404 is a real answer
+        # though, and launching a browser for it only makes a dead link slow.
+        if not html and (status == 0 or _looks_blocked(status)):
+            print(f"[grab] {host} answered HTTP {status or 'nothing'}; "
+                  f"retrying through a real browser", file=sys.stderr)
+            _, html = _browser_fetch(url)
+        if not html:
+            result['error'] = f"HTTP {status or 'no response'}"
             return result
-            
-        html = r.text
+
+        result['used_browser'] = bool(status != 200)
         result['title'] = _extract_title(html)
 
         # supjav: the watch page has no stream in it, only server tokens. Make
@@ -239,7 +381,8 @@ def grab_all(url: str):
                 {'label': label, 'player_url': player_url}
                 for label, player_url in supjav_server_links(html)
             ]
-            for dest in _supjav_hoster_urls(html, url):
+            for dest in _supjav_hoster_urls(html, url,
+                                            use_browser=bool(status != 200)):
                 streams_seed.add(dest)
 
         def _unwrap_b64_host(u):
