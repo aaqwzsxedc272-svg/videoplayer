@@ -8529,9 +8529,15 @@ print('--- 91: supjav server tokens ---')
 _gj91 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      'generic_jav_grab.py')
 _src91pre = open(_gj91, encoding='utf-8').read()
-report('_browser_fetch(url)' in _src91pre,
+report(re.search(r'_browser_fetch\(url[,)]', _src91pre) is not None,
        'the grab retries a gated page through a real browser -- a plain HTTP '
        'client gets 403 from supjav and that 403 used to be the verdict')
+report('visible=_looks_blocked(status)' in _src91pre
+       and 'the page target went away mid-wait' in _src91pre,
+       'a gated page gets its window on screen from launch and a tab lost '
+       'mid-wait does not abort the capture -- in the field the challenge '
+       'reload destroyed the target and wait_for_timeout threw the whole '
+       'fetch away after the user had already clicked through')
 report('_GATE_WAIT_MS' in _src91pre and '_raise_window' in _src91pre,
        'and it waits for a challenge to clear with the window on screen. In '
        'the field the window opened off-screen, the captcha sat there '
@@ -8542,10 +8548,12 @@ _fn91 = {}
 for _n91 in _tree91.body:
     if isinstance(_n91, ast.FunctionDef) and _n91.name in (
             'supjav_player_template', 'supjav_server_links',
-            'supjav_destination', '_looks_blocked', '_page_is_gated'):
+            'supjav_destination', '_looks_blocked', '_page_is_gated',
+            '_live_page'):
         _fn91[_n91.name] = _n91
 _want91 = ('supjav_player_template', 'supjav_server_links',
-           'supjav_destination', '_looks_blocked', '_page_is_gated')
+           'supjav_destination', '_looks_blocked', '_page_is_gated',
+           '_live_page')
 report(len(_fn91) == len(_want91),
        'the server-list reader, the redirect reader and the bot-gate test are '
        'in the generic grabber, not in a scraper of their own -- supjav hands '
@@ -8579,13 +8587,50 @@ if len(_fn91) == len(_want91):
             _m91 = ast.Module(body=[_n91], type_ignores=[])
             ast.fix_missing_locations(_m91)
             exec(compile(_m91, '<g>', 'exec'), _g91)
-    for _name91 in ('_looks_blocked', '_page_is_gated', 'supjav_player_template',
-                    'supjav_server_links', 'supjav_destination'):
+    for _name91 in ('_looks_blocked', '_page_is_gated', '_live_page',
+                    'supjav_player_template', 'supjav_server_links',
+                    'supjav_destination'):
         if _name91 not in _fn91:
             continue
         _m91 = ast.Module(body=[_fn91[_name91]], type_ignores=[])
         ast.fix_missing_locations(_m91)
         exec(compile(_m91, '<g>', 'exec'), _g91)
+
+    class _Tab91:
+        def __init__(self, closed):
+            self._c = closed
+
+        def is_closed(self):
+            return self._c
+
+    class _Ctx91:
+        def __init__(self, pages):
+            self._p = pages
+
+        @property
+        def pages(self):
+            return self._p
+
+    _lp91 = _g91.get('_live_page')
+    if _lp91 is not None:
+        report(_lp91(_Ctx91([_Tab91(False)])) is not None
+               and _lp91(_Ctx91([_Tab91(True), _Tab91(False)])) is not None
+               and _lp91(_Ctx91([_Tab91(True)])) is None
+               and _lp91(_Ctx91([])) is None
+               and _lp91(object()) is None,
+           'a tab lost mid-wait is survived by picking up whichever one the '
+           'context still has. In the field the challenge reload took the '
+           'target with it and the whole fetch died on wait_for_timeout, '
+           'losing a capture the user had already clicked through')
+    report('visible=_looks_blocked(status)' in _src91g,
+       'a page that already answered 403 gets its window on screen from '
+       'launch, not raised afterwards -- the first load is the one being '
+       'fingerprinted, and a window parked at -32000 is part of what it sees')
+    report('the page target went away mid-wait' in _src91g,
+       'and losing the page does not lose the capture')
+    report('could not read the page at the end' in _src91g,
+       'the final read is guarded too, so a target that dies on the last '
+       'moment does not throw the whole grab away')
 
     _g91.setdefault('_page_is_gated', None)
     _pg91 = _g91.get('_page_is_gated')

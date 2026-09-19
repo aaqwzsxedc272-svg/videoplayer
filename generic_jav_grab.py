@@ -139,12 +139,34 @@ def _raise_window(page) -> bool:
         return False
 
 
-def _browser_fetch(url: str, referer: str = '', settle_ms: int = 2500):
+def _live_page(context):
+    """A page in *context* that has not been closed, or None."""
+    try:
+        pages = list(getattr(context, 'pages', None) or [])
+    except Exception:
+        return None
+    for cand in reversed(pages):
+        try:
+            if not cand.is_closed():
+                return cand
+        except Exception:
+            continue
+    return None
+
+
+def _browser_fetch(url: str, referer: str = '', settle_ms: int = 2500,
+                   visible: bool = False):
     """(final_url, html) for *url* through a real browser, or ('', '').
 
     Used both to read a gated watch page and to follow a gated redirect: the
     returned final_url is where the browser actually ended up, which for a
     redirect page is the answer.
+
+    *visible* parks the window on screen from launch rather than raising it
+    after the fact. The first load is what a bot check fingerprints, and a
+    window sitting at -32000,-32000 is part of what it sees -- so for a page
+    that already answered 403 over plain HTTP, off-screen is not a neutral
+    choice, it is a signal.
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -161,7 +183,8 @@ def _browser_fetch(url: str, referer: str = '', settle_ms: int = 2500):
             args = ['--no-sandbox', '--disable-dev-shm-usage',
                     '--disable-blink-features=AutomationControlled',
                     '--disable-infobars', '--window-size=1280,800',
-                    '--window-position=-32000,-32000']
+                    '--window-position=80,80' if visible
+                    else '--window-position=-32000,-32000']
             for attempt in ([exe] if exe else []) + [None]:
                 try:
                     browser = pw.chromium.launch_persistent_context(
@@ -194,20 +217,46 @@ def _browser_fetch(url: str, referer: str = '', settle_ms: int = 2500):
                 # were the page -- that is what produced a server list with no
                 # servers in it.
                 waited, raised = 0, False
-                while _page_is_gated(page) and waited < _GATE_WAIT_MS:
+                while waited < _GATE_WAIT_MS:
+                    if not _page_is_gated(page):
+                        break
                     if not raised:
-                        raised = _raise_window(page)
+                        if not visible:
+                            raised = _raise_window(page)
                         _osd('Solve the Cloudflare check in the browser window '
-                             'that just opened -- it is remembered, so this is '
-                             'once per site.')
-                        print('[grab] bot challenge is up; window raised, '
+                             '-- it is remembered, so this is once per site.')
+                        print('[grab] bot challenge is up; window on screen, '
                               f'waiting up to {_GATE_WAIT_MS // 1000}s for it '
                               'to clear', file=sys.stderr)
-                    page.wait_for_timeout(_GATE_POLL_MS)
+                    try:
+                        page.wait_for_timeout(_GATE_POLL_MS)
+                    except Exception:
+                        # Cloudflare's reload after a click can take the tab's
+                        # target with it. Losing the page must not lose the
+                        # capture: pick up whatever the context still has.
+                        alive = _live_page(browser)
+                        if alive is None:
+                            print('[grab] the browser closed during the wait '
+                                  '-- nothing left to read', file=sys.stderr)
+                            break
+                        print('[grab] the page target went away mid-wait; '
+                              'continuing on the live tab', file=sys.stderr)
+                        page = alive
                     waited += _GATE_POLL_MS
 
-                final = str(page.url or '')
-                html = page.content() or ''
+                try:
+                    final = str(page.url or '')
+                    html = page.content() or ''
+                except Exception as exc:
+                    print(f'[grab] could not read the page at the end: {exc}',
+                          file=sys.stderr)
+                    alive = _live_page(browser)
+                    if alive is not None:
+                        try:
+                            final = str(alive.url or '')
+                            html = alive.content() or ''
+                        except Exception:
+                            pass
             finally:
                 try:
                     browser.close()
@@ -442,7 +491,11 @@ def grab_all(url: str):
         if not html and (status == 0 or _looks_blocked(status)):
             print(f"[grab] {host} answered HTTP {status or 'nothing'}; "
                   f"retrying through a real browser", file=sys.stderr)
-            _, html = _browser_fetch(url)
+            # A 403 says a human may be needed, so do not hide the window and
+            # then have to raise it -- that first load is the one being
+            # fingerprinted. A failed connection is different: nothing is
+            # known about the site, so stay out of the way.
+            _, html = _browser_fetch(url, visible=_looks_blocked(status))
         if not html:
             result['error'] = f"HTTP {status or 'no response'}"
             return result
