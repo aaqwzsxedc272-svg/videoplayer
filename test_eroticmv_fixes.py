@@ -8752,6 +8752,58 @@ if len(_fn91) == len(_want91):
        'the Brave capture hands back the same shape the worker already reads, '
        'so the fallback needs no translation')
 
+    # The capture kept only .m3u8, so streamtape -- the server the user was
+    # watching -- was in the network log and never made it into the row.
+    for _n91 in ('_looks_like_m3u8', '_looks_like_direct_media',
+                 '_looks_like_stream', '_is_ad_m3u8', '_AD_M3U8_MARKERS',
+                 '_DIRECT_MEDIA_EXT_RE', '_DIRECT_MEDIA_PATH_MARKERS',
+                 '_host_resolves', '_HOST_RESOLVES'):
+        for _d91 in ast.parse(_gi91b).body:
+            if (getattr(_d91, 'name', None) == _n91
+                    or (isinstance(_d91, ast.Assign)
+                        and isinstance(_d91.targets[0], ast.Name)
+                        and _d91.targets[0].id == _n91)):
+                exec(compile(ast.Module([_d91], []), '<gi91>', 'exec'), _g91)
+                break
+    # Degrade, do not raise: a build without these functions must report
+    # failures, not abort the run half way through.
+    _dm91 = _g91.get('_looks_like_direct_media') or (lambda u: False)
+    _st91 = _g91.get('_looks_like_stream') or (lambda u: False)
+    for _u91 in ['https://streamtape.com/get_video?id=AbCd&expires=1&token=x&stream=1',
+                 'https://tapecontent.net/d/xyz/movie.mp4',
+                 'https://cdn.example.com/v/abc/720p.mp4?token=q',
+                 'https://host.com/file/movie.mkv',
+                 'https://host.com/a.webm']:
+        report(_dm91(_u91) and _st91(_u91),
+           f'a directly playable file is captured, not just an m3u8: {_u91[:52]}')
+    for _u91 in ['https://cdn3.turboviplay.com/seg/00001.ts',
+                 'https://host.com/movie.m3u8.ts',
+                 'https://img.supjav.com/images/2022-02-1dvdes886pl.jpg',
+                 'https://supjav.com/137606.html',
+                 'https://streamtape.com/e/AbCdEf',
+                 'https://host.com/x.flac']:
+        report(not _dm91(_u91),
+           f'and capture noise is not: {_u91[:52]}. HLS segment requests '
+           'alone would add hundreds of rows per stream')
+    report('if not _looks_like_stream(u) or _is_ad_m3u8(u)' in _gi91b
+           and 'if not _looks_like_m3u8(u) or _is_ad_m3u8(u)' not in _gi91b,
+       'and the capture\u2019s collector actually uses the wider test -- '
+       'adding a predicate nobody calls would change nothing')
+
+    # Three of the four captured hosts no longer resolve at all, so the row
+    # offered four mirrors and played none.
+    report(re.search(r"if _host_resolves\(urlparse\(page_url\)\.hostname", _gi91b)
+           is not None,
+       'a link on a host that does not resolve is dropped -- but only after '
+       'the page the user just loaded is checked as a control, so a broken '
+       'resolver drops a whole capture rather than a dead CDN')
+    report('def _probe_m3u8_durations(streams, page_url, dead=None)' in _gi91b
+           and 'dead.append(u)' in _gi91b,
+       'and a master playlist whose variants live on a dead host is dropped '
+       'too: turboviplay answered 200 and mpv still reported "no audio or '
+       'video data played", because every variant was on a host that does '
+       'not resolve')
+
     _lb91 = _g91.get('_looks_blocked')
     report(_lb91 is not None, 'the bot-gate test is in the grabber')
     if _lb91 is not None:

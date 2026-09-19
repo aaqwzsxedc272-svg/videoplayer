@@ -243,6 +243,59 @@ def _looks_like_m3u8(u):
     return bool(re.search(r'\.m3u8(\?|$)', str(u or ''), re.IGNORECASE))
 
 
+_DIRECT_MEDIA_EXT_RE = re.compile(
+    r'\.(?:mp4|m4v|mov|mkv|webm|flv|avi)(?:\?|#|$)', re.IGNORECASE)
+
+# Some hosters hand back the real file from a query endpoint with no video
+# extension at all. streamtape's get_video is what supjav's ST server plays,
+# and it sat in the network log while the capture kept only .m3u8.
+_DIRECT_MEDIA_PATH_MARKERS = ('/get_video',)
+
+
+def _looks_like_direct_media(u):
+    """True for a directly playable file: a video container extension, or a
+    hoster's download endpoint. .ts/.m2ts are deliberately excluded - an HLS
+    stream's segment requests would flood the capture with hundreds of rows."""
+    s = str(u or '')
+    if _DIRECT_MEDIA_EXT_RE.search(s):
+        return True
+    low = s.lower()
+    return any(mk in low for mk in _DIRECT_MEDIA_PATH_MARKERS)
+
+
+def _looks_like_stream(u):
+    return _looks_like_m3u8(u) or _looks_like_direct_media(u)
+
+
+_HOST_RESOLVES = {}
+
+
+def _host_resolves(host):
+    """A host that does not resolve is dead, and cheaply so - no request
+    needed. supjav's capture produced four links and three of them were on
+    cdn02.monaydi.com / cdn55.sunseacf.com, which no longer resolve at all,
+    so the row offered four mirrors and played none of them."""
+    host = str(host or '').split(':')[0].strip()
+    if not host:
+        return False
+    if host in _HOST_RESOLVES:
+        return _HOST_RESOLVES[host]
+    ok = False
+    try:
+        import socket
+        _prev = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(4)
+        try:
+            socket.getaddrinfo(host, None)
+            ok = True
+        finally:
+            socket.setdefaulttimeout(_prev)
+    except Exception:
+        ok = False
+    _HOST_RESOLVES[host] = ok
+    return ok
+
+
 # Ad networks that serve their own (short) HLS playlists; a duration
 # probe alone would already rank them below the movie, but they are
 # filtered up front so they never pollute the mirror list.
@@ -259,7 +312,7 @@ def _is_ad_m3u8(u):
     return any(mk in low for mk in _AD_M3U8_MARKERS)
 
 
-def _probe_m3u8_durations(streams, page_url):
+def _probe_m3u8_durations(streams, page_url, dead=None):
     """Fetch each m3u8 playlist and measure its duration (masters are
     followed into their first variant; duration = sum of #EXTINF). This
     is how a ~10 s preview or an ad clip gets told apart from the full
@@ -285,6 +338,8 @@ def _probe_m3u8_durations(streams, page_url):
             r = cfreq.get(u, impersonate='chrome131', timeout=8,
                           headers={'Referer': page_url, 'Accept': '*/*'})
             text = r.text or ''
+            if r.status_code >= 400 and dead is not None:
+                dead.append(u)
             if '#EXT-X-STREAM-INF' in text:
                 variant = ''
                 lines = [l.strip() for l in text.splitlines()]
@@ -296,12 +351,24 @@ def _probe_m3u8_durations(streams, page_url):
                                 break
                         break
                 if variant:
-                    r2 = cfreq.get(urljoin(u, variant), impersonate='chrome131',
+                    vurl = urljoin(u, variant)
+                    if not _host_resolves(urlparse(vurl).hostname or ''):
+                        # A master whose variants live on a dead host is dead
+                        # too: turboviplay's playlist answered 200 and mpv
+                        # still said "no audio or video data played", because
+                        # every variant was on a host that does not resolve.
+                        if dead is not None:
+                            dead.append(u)
+                        durations[u] = 0.0
+                        continue
+                    r2 = cfreq.get(vurl, impersonate='chrome131',
                                    timeout=8,
                                    headers={'Referer': page_url, 'Accept': '*/*'})
                     text = r2.text or ''
             durations[u] = _sum_extinf(text)
-        except Exception:
+        except Exception as exc:
+            if dead is not None and 'resolve' in str(exc).lower():
+                dead.append(u)
             durations[u] = 0.0
     return durations
 
@@ -312,7 +379,7 @@ def _finalize_m3u8_capture(urls, page_url, title):
     heaviest ones (full movie beats 10 s previews and ad clips; equal
     durations prefer master.m3u8 so mpv gets quality selection)."""
     kept = [u for u in dict.fromkeys(urls)
-            if _looks_like_m3u8(u) and not _is_ad_m3u8(u)]
+            if _looks_like_stream(u) and not _is_ad_m3u8(u)]
     # Guard against STALE streamhls-family links (…/<sig>/<gibberish>/
     # <10-digit-ts>/<id>/x.m3u8). When Brave relaunches with the net-log
     # flag it also RESTORES the previous session's tabs, and a restored
@@ -333,8 +400,28 @@ def _finalize_m3u8_capture(urls, page_url, title):
         fresh.append(u)
     kept = fresh
     candidates = _derive_streamhls_candidates(kept)
+
+    # A host that does not resolve can never play, whatever its playlist says.
+    # This is what turned "4 streams captured" into four dead mirrors.
+    _dead = []
+    # The page the user just loaded in their browser is the control: it must
+    # resolve. If even that fails, the resolver is what is broken, not the
+    # hosts - and filtering then would throw away a good capture.
+    if _host_resolves(urlparse(page_url).hostname or ''):
+        _alive = []
+        for _u in candidates:
+            if _host_resolves(urlparse(_u).hostname or ''):
+                _alive.append(_u)
+            else:
+                print(f'[GENERIC_JAV] dropping link on a host that does not '
+                      f'resolve: {urlparse(_u).hostname}')
+        candidates = _alive
+    else:
+        print(f'[GENERIC_JAV] resolver looks broken (cannot reach '
+              f'{urlparse(page_url).hostname} either); keeping all links')
+
     try:
-        durations = _probe_m3u8_durations(candidates, page_url)
+        durations = _probe_m3u8_durations(candidates, page_url, _dead)
         if durations:
             with_dur = [u for u in candidates if u in durations]
             without_dur = [u for u in candidates if u not in durations]
@@ -351,6 +438,17 @@ def _finalize_m3u8_capture(urls, page_url, title):
                 print(f'  [duration] {d:8.1f}s  {u[:110]}')
     except Exception as exc:
         print(f'[GENERIC_JAV] duration probe failed: {exc}')
+    if _dead:
+        _drop = set(_dead)
+        _kept = [u for u in candidates if u not in _drop]
+        for _u in candidates:
+            if _u in _drop:
+                print(f'[GENERIC_JAV] dropping stream its own playlist is '
+                      f'dead: {_u[:110]}')
+        # Only drop on proof of death - never down to nothing.
+        if _kept:
+            candidates = _kept
+
     seen_tok = set()
     dedup = []
     for u in candidates:
@@ -2146,7 +2244,7 @@ def _vp_main_brave_cache_capture(self, source_url, title=''):
 
     def _collect(new_urls):
         for u in new_urls:
-            if not _looks_like_m3u8(u) or _is_ad_m3u8(u):
+            if not _looks_like_stream(u) or _is_ad_m3u8(u):
                 continue
             urls.setdefault(u, time.time())
 
