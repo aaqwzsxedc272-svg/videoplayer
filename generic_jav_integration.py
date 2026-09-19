@@ -2347,6 +2347,16 @@ def _vp_launch_generic_jav_grab(self, source_url: str, play_first: bool = True) 
                     if _brave:
                         mod.BROWSER_EXECUTABLE = _brave
 
+                    # The grabber may have to raise its window for a Cloudflare
+                    # check. Say so on screen rather than letting the user
+                    # wonder why a browser appeared and nothing happened.
+                    if hasattr(mod, 'OSD_CALLBACK'):
+                        # _on_generic_jav_osd is the thread-safe slot; the
+                        # grabber runs on the worker thread, so it must not
+                        # touch show_osd directly.
+                        mod.OSD_CALLBACK = lambda m: self._on_generic_jav_osd(
+                            str(m), 6000)
+
                     grab_error = ''
                     try:
                         data = mod.grab_all(src_url) or {}

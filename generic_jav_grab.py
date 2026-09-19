@@ -84,6 +84,61 @@ def _find_local_browser() -> str:
     return ''
 
 
+# How long to leave the window open for a human to clear a challenge. Long,
+# because the whole point of the persistent profile is that this happens once:
+# after it is cleared the cookie is on disk and later links pass untouched.
+_GATE_WAIT_MS = 120000
+_GATE_POLL_MS = 1500
+
+
+def _osd(message: str) -> None:
+    """Show a message in the app when the grabber is running inside it."""
+    fn = globals().get('OSD_CALLBACK')
+    if callable(fn):
+        try:
+            fn(str(message))
+        except Exception:
+            pass
+
+
+def _page_is_gated(page) -> bool:
+    """True while the page in front of us is still a challenge, not content."""
+    try:
+        body = page.content() or ''
+    except Exception:
+        return False
+    try:
+        title = page.title() or ''
+    except Exception:
+        title = ''
+    return _looks_blocked(200, str(title) + '\n' + body)
+
+
+def _raise_window(page) -> bool:
+    """Bring the capture window on-screen so a person can clear the check.
+
+    The window launches off-screen on purpose -- nobody wants a browser
+    popping up for a link that resolves on its own. But a challenge that
+    needs a click cannot be cleared by anything the grabber can do, and
+    closing the window on it (which is what it did) turns a solvable page
+    into 'No stream URL captured'. So: off-screen until there is a reason,
+    then on-screen until it clears.
+    """
+    try:
+        cdp = page.context.new_cdp_session(page)
+        wid = cdp.send('Browser.getWindowForTarget').get('windowId')
+        cdp.send('Browser.setWindowBounds',
+                 {'windowId': wid, 'bounds': {'windowState': 'normal'}})
+        cdp.send('Browser.setWindowBounds',
+                 {'windowId': wid, 'bounds': {'left': 80, 'top': 80,
+                                              'width': 1180, 'height': 860}})
+        page.bring_to_front()
+        return True
+    except Exception as exc:
+        print(f'[grab] could not raise the window: {exc}', file=sys.stderr)
+        return False
+
+
 def _browser_fetch(url: str, referer: str = '', settle_ms: int = 2500):
     """(final_url, html) for *url* through a real browser, or ('', '').
 
@@ -133,6 +188,24 @@ def _browser_fetch(url: str, referer: str = '', settle_ms: int = 2500):
                 except Exception:
                     pass
                 page.wait_for_timeout(int(settle_ms or 0))
+
+                # A challenge needs a human. Leave the window up and wait for
+                # it to clear instead of reading the interstitial as if it
+                # were the page -- that is what produced a server list with no
+                # servers in it.
+                waited, raised = 0, False
+                while _page_is_gated(page) and waited < _GATE_WAIT_MS:
+                    if not raised:
+                        raised = _raise_window(page)
+                        _osd('Solve the Cloudflare check in the browser window '
+                             'that just opened -- it is remembered, so this is '
+                             'once per site.')
+                        print('[grab] bot challenge is up; window raised, '
+                              f'waiting up to {_GATE_WAIT_MS // 1000}s for it '
+                              'to clear', file=sys.stderr)
+                    page.wait_for_timeout(_GATE_POLL_MS)
+                    waited += _GATE_POLL_MS
+
                 final = str(page.url or '')
                 html = page.content() or ''
             finally:
@@ -272,9 +345,14 @@ def supjav_destination(requested_url: str, status, final_url: str,
     return ''
 
 
-def _supjav_hoster_urls(html: str, page_url: str, limit: int = 4,
-                        use_browser: bool = False):
-    """Resolve a supjav watch page to the hoster URLs behind its servers."""
+def _supjav_hoster_urls(html: str, page_url: str, limit: int = 4):
+    """Resolve a supjav watch page to the hoster URLs behind its servers.
+
+    Each hop goes to the player host, not to supjav, and that host is not
+    necessarily gated -- so a browser is opened for a hop only when the hop
+    itself comes back blocked. Forcing one per server would mean four
+    launches for a page whose servers answer plain HTTP perfectly well.
+    """
     found = []
     for label, player_url in supjav_server_links(html)[:max(1, int(limit or 1))]:
         dest, status = '', '?'
@@ -293,10 +371,10 @@ def _supjav_hoster_urls(html: str, page_url: str, limit: int = 4,
                                       r.text)
         except Exception as exc:
             print(f"[SUPJAV] server {label}: {exc}", file=sys.stderr)
-        # The gate that 403s the watch page gates this hop too. Following it
-        # in a real browser is also the better way to see a redirect: the
-        # final URL is the answer.
-        if not dest and (use_browser or _looks_blocked(status)):
+        # Only when this hop was itself blocked. Following it in a real
+        # browser is also the better way to see a redirect: the final URL is
+        # the answer, rather than a body that has to be scraped for it.
+        if not dest and (_looks_blocked(status) or status == 0):
             print(f"[SUPJAV] server {label}: HTTP {status} over HTTP, "
                   f"retrying in a browser", file=sys.stderr)
             final, body = _browser_fetch(player_url, referer=page_url)
@@ -368,6 +446,13 @@ def grab_all(url: str):
         if not html:
             result['error'] = f"HTTP {status or 'no response'}"
             return result
+        if _looks_blocked(200, html):
+            # What came back is still the interstitial. Saying "no stream"
+            # here would send the hunt downstream for a page that was never
+            # actually read.
+            result['error'] = ('bot challenge not cleared -- the browser '
+                               'window closed before the check was solved')
+            return result
 
         result['used_browser'] = bool(status != 200)
         result['title'] = _extract_title(html)
@@ -381,8 +466,7 @@ def grab_all(url: str):
                 {'label': label, 'player_url': player_url}
                 for label, player_url in supjav_server_links(html)
             ]
-            for dest in _supjav_hoster_urls(html, url,
-                                            use_browser=bool(status != 200)):
+            for dest in _supjav_hoster_urls(html, url):
                 streams_seed.add(dest)
 
         def _unwrap_b64_host(u):

@@ -8532,15 +8532,20 @@ _src91pre = open(_gj91, encoding='utf-8').read()
 report('_browser_fetch(url)' in _src91pre,
        'the grab retries a gated page through a real browser -- a plain HTTP '
        'client gets 403 from supjav and that 403 used to be the verdict')
+report('_GATE_WAIT_MS' in _src91pre and '_raise_window' in _src91pre,
+       'and it waits for a challenge to clear with the window on screen. In '
+       'the field the window opened off-screen, the captcha sat there '
+       'unsolvable, and it closed again -- the server list came back empty and '
+       'the failure was reported as No stream URL captured')
 _tree91 = ast.parse(open(_gj91, encoding='utf-8').read())
 _fn91 = {}
 for _n91 in _tree91.body:
     if isinstance(_n91, ast.FunctionDef) and _n91.name in (
             'supjav_player_template', 'supjav_server_links',
-            'supjav_destination', '_looks_blocked'):
+            'supjav_destination', '_looks_blocked', '_page_is_gated'):
         _fn91[_n91.name] = _n91
 _want91 = ('supjav_player_template', 'supjav_server_links',
-           'supjav_destination', '_looks_blocked')
+           'supjav_destination', '_looks_blocked', '_page_is_gated')
 report(len(_fn91) == len(_want91),
        'the server-list reader, the redirect reader and the bot-gate test are '
        'in the generic grabber, not in a scraper of their own -- supjav hands '
@@ -8574,10 +8579,64 @@ if len(_fn91) == len(_want91):
             _m91 = ast.Module(body=[_n91], type_ignores=[])
             ast.fix_missing_locations(_m91)
             exec(compile(_m91, '<g>', 'exec'), _g91)
-    for _n91 in _fn91.values():
-        _m91 = ast.Module(body=[_n91], type_ignores=[])
+    for _name91 in ('_looks_blocked', '_page_is_gated', 'supjav_player_template',
+                    'supjav_server_links', 'supjav_destination'):
+        if _name91 not in _fn91:
+            continue
+        _m91 = ast.Module(body=[_fn91[_name91]], type_ignores=[])
         ast.fix_missing_locations(_m91)
         exec(compile(_m91, '<g>', 'exec'), _g91)
+
+    _g91.setdefault('_page_is_gated', None)
+    _pg91 = _g91.get('_page_is_gated')
+
+    class _Page91:
+        def __init__(self, title, body):
+            self._t, self._b = title, body
+
+        def content(self):
+            return self._b
+
+        def title(self):
+            return self._t
+
+    _cf91 = ('<html><head><title>Just a moment...</title></head><body>'
+             '<div id="challenge-form"><div class="cf-turnstile"></div>'
+             'Verifying you are human</div></body></html>')
+    if _pg91 is not None:
+        report(_pg91(_Page91('Just a moment...', _cf91)) is True
+               and _pg91(_Page91('', '')) is False,
+           'a Cloudflare interstitial in the browser is recognised as one, so '
+           'the grab waits instead of reading it as the page')
+        # _cap91 is bound further down; this block runs before it.
+        _cap91e = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'supjav.txt')
+        if os.path.isfile(_cap91e):
+            _real91 = open(_cap91e, encoding='utf-8', errors='replace').read()
+            report(_pg91(_Page91('DVDES-886 ...', _real91)) is False,
+               'and the real watch page is not mistaken for a challenge -- '
+               'waiting on a page that already loaded would stall every '
+               'capture for two minutes')
+    report('_GATE_WAIT_MS' in _src91g and '_raise_window' in _src91g,
+       'when a challenge is up the window comes on screen and stays there for '
+       'up to two minutes. In the field it opened off-screen, the captcha sat '
+       'there unsolvable, and the window closed -- which is what turned a '
+       'solvable page into No stream URL captured')
+    report("result['error'] = ('bot challenge not cleared" in _src91g
+           or 'bot challenge not cleared' in _src91g,
+       'and a page that never cleared says so, rather than reporting no '
+       'stream and sending the hunt downstream for a page that was never read')
+    report('OSD_CALLBACK' in _src91g
+           and 'mod.OSD_CALLBACK' in open(
+               os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'generic_jav_integration.py'),
+               encoding='utf-8').read(),
+       'the app is told on screen that a window needs a click, through the '
+       'thread-safe OSD slot rather than a widget touched from the worker')
+    report('use_browser' not in _src91g,
+       'a browser is opened for a supjav.php hop only when that hop is itself '
+       'blocked -- it goes to the player host, not to supjav, and forcing one '
+       'per server would mean four launches for servers that answer plain HTTP')
 
     _lb91 = _g91.get('_looks_blocked')
     report(_lb91 is not None, 'the bot-gate test is in the grabber')
