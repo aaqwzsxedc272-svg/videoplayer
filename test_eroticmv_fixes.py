@@ -8683,8 +8683,62 @@ if len(_fn91) == len(_want91):
        'blocked -- it goes to the player host, not to supjav, and forcing one '
        'per server would mean four launches for servers that answer plain HTTP')
 
+    _gj91 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              'generic_jav_grab.py'), encoding='utf-8').read()
     _gi91b = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                'generic_jav_integration.py'), encoding='utf-8').read()
+
+    # supjav's check has looped in three field reports: the page reloads the
+    # challenge no matter what is clicked. Waiting out the full 120s gate poll
+    # in a browser that cannot pass only delays the fallback that can.
+    _hostile91 = None
+    for _n91 in ast.parse(_gj91).body:
+        if (isinstance(_n91, ast.Assign) and isinstance(_n91.targets[0], ast.Name)
+                and _n91.targets[0].id == '_BROWSER_HOSTILE_HOSTS'):
+            _hostile91 = ast.literal_eval(_n91.value)
+    report(_hostile91 and 'supjav' in _hostile91,
+       'a site whose bot check a driven browser provably cannot clear is '
+       'reported as gated at once instead of being waited on. The log showed '
+       '31 "waiting up to 120s" lines: the Brave fallback sat BEHIND that '
+       'wait, so the browser that works did not even start for two minutes')
+    _g91f = next(n for n in ast.parse(_gj91).body
+                 if isinstance(n, ast.FunctionDef) and n.name == 'grab_all')
+    _h91 = [n.lineno for n in ast.walk(_g91f)
+            if isinstance(n, ast.Name) and n.id == '_BROWSER_HOSTILE_HOSTS']
+    _b91 = [n.lineno for n in ast.walk(_g91f)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and n.func.id == '_browser_fetch']
+    report(bool(_h91) and bool(_b91) and min(_h91) < min(_b91),
+       'and that check runs before the browser is launched, not after')
+
+    # The coupling that was silently broken: the gate error string is what the
+    # worker matches to decide whether to fall back to the user's Brave. Reword
+    # the message and the fallback stops firing, with nothing to complain.
+    _keys91 = re.search(
+        r"_gated = bool\(grab_error\) and any\(\s*\n"
+        r"\s*k in str\(grab_error\)\.lower\(\)\s*\n"
+        r"\s*for k in \((.*?)\)\)", _gi91b, re.S)
+    _keys91 = ([k.strip().strip('\'"') for k in _keys91.group(1).split(',')]
+               if _keys91 else [])
+    _errs91 = []
+    for _n91 in ast.walk(ast.parse(_gj91)):
+        if (isinstance(_n91, ast.Assign) and len(_n91.targets) == 1
+                and isinstance(_n91.targets[0], ast.Subscript)
+                and isinstance(_n91.targets[0].slice, ast.Constant)
+                and _n91.targets[0].slice.value == 'error'):
+            try:
+                _errs91.append(ast.literal_eval(_n91.value))
+            except Exception:
+                pass
+    _gatey91 = [e for e in _errs91
+                if e.startswith('bot check') or e.startswith('bot challenge')]
+    report(bool(_keys91) and len(_gatey91) >= 2
+           and all(any(k in e.lower() for k in _keys91) for e in _gatey91),
+       'every gate error the grabber can raise contains a word the worker '
+       'triggers on. The first wording of the new message said "cannot '
+       'clear" -- the fallback would then have fired only by way of the '
+       'supjav hostname check, and silently stopped the day that changed')
+
     report('self._main_brave_cache_capture(src_url, title)' in _gi91b,
        'when the app\u2019s own browser cannot clear the check, the capture '
        'falls back to the user\u2019s Brave. _main_brave_cache_capture was '

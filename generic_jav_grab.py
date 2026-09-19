@@ -87,6 +87,14 @@ def _find_local_browser() -> str:
 # How long to leave the window open for a human to clear a challenge. Long,
 # because the whole point of the persistent profile is that this happens once:
 # after it is cleared the cookie is on disk and later links pass untouched.
+# Hosts whose bot check a Playwright-driven browser provably cannot clear.
+# supjav's has looped in three separate field attempts: the page reloads the
+# challenge no matter what is clicked, because the BROWSER is what is being
+# judged and a fresh profile in %TEMP% has no history for it to trust. Waiting
+# out the full gate poll only delays the fallback that does work -- the user's
+# own Brave -- so these are reported as gated at once instead.
+_BROWSER_HOSTILE_HOSTS = ('supjav',)
+
 _GATE_WAIT_MS = 120000
 _GATE_POLL_MS = 1500
 
@@ -483,6 +491,20 @@ def grab_all(url: str):
                 html = r.text
         except Exception as exc:
             print(f"[grab] HTTP fetch failed: {exc}", file=sys.stderr)
+
+        # A site that rejects a driven browser outright: report it now rather
+        # than spending the whole gate poll on a check that will never clear.
+        # The caller turns this straight into the user's-own-Brave fallback.
+        if any(h in host for h in _BROWSER_HOSTILE_HOSTS) and (
+                status == 0 or _looks_blocked(status)):
+            print(f"[grab] {host} answers HTTP {status or 'nothing'} to the "
+                  f"app and its challenge never clears in a driven browser; "
+                  f"skipping the wait", file=sys.stderr)
+            # 'blocked' is load-bearing: the integration worker matches this
+            # string to decide whether to fall back to the user's Brave.
+            result['error'] = ('bot check blocked the app\u2019s browser -- '
+                               'this page has to open in your own browser')
+            return result
 
         # A bot gate answers 403 to a plain client and serves the page to a
         # real browser. supjav does exactly this, so the HTTP answer is only
