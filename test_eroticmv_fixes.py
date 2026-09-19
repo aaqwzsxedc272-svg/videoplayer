@@ -8056,5 +8056,117 @@ if _have86:
        'when the phone cannot be probed the linker says so, instead of weak '
        'matches looking like a matcher that does not work')
 
+# ---------------------------------------------------------------------------
+# 87. A restored session must resume on the row that was playing. current_index
+#     indexes the playlist as it was SAVED; rows can vanish on the way back in
+#     (missing from disk, relinked, mirrors folded), which shifts every row
+#     after them -- so the index then lands on a different file at that file's
+#     own remembered position.
+# ---------------------------------------------------------------------------
+print()
+print('--- 87: a restored session resumes where it left off ---')
+
+_src87 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           'main.py'), encoding='utf-8').read()
+report('elif 0 <= current_index < len(self.playlist):' not in _src87,
+       'the restore no longer reaches for the saved index the moment the '
+       'exact path misses -- that line was what put a different file on '
+       'screen whenever the playlist came back a different length')
+report('def _session_resume_target' in _src87
+       and 'saved index, playlist shape unchanged' in _src87,
+       'the index is now only trusted when the playlist came back the same '
+       'length it was saved at')
+
+_cls87 = next((n for n in TREE.body if isinstance(n, ast.ClassDef)
+               and n.name == 'VideoPlayer'), None)
+_fn87 = {n.name: n for n in _cls87.body
+         if isinstance(n, ast.FunctionDef) and n.name in (
+             '_session_resume_target', '_mirror_path_key',
+             '_mirrors_for_visible_url', '_unique_paths')} if _cls87 else {}
+report(len(_fn87) == 4,
+       'the resume-target choice and the mirror helpers it needs are here',
+       'missing: ' + ', '.join(
+           n for n in ('_session_resume_target', '_mirror_path_key',
+                       '_mirrors_for_visible_url', '_unique_paths')
+           if n not in _fn87))
+
+if len(_fn87) == 4:
+    _g87 = {'os': os, 're': re, 'urlparse': urlparse, 'unquote': unquote,
+            '_meta_norm_path': _msrc55._meta_norm_path}
+    for _n87 in _fn87.values():
+        _m87 = ast.Module(body=[_n87], type_ignores=[])
+        ast.fix_missing_locations(_m87)
+        exec(compile(_m87, '<main.py>', 'exec'), _g87)
+
+    class _Fake87:
+        _REMOTE_FOLDER_PREFIX = 'remotefolder://'
+
+        def __init__(self, mirrors, missing=()):
+            self._playlist_url_mirrors = mirrors
+            self._mirror_path_cache = {}
+            self._missing = set(missing)
+
+        def _is_jav_site_host(self, h):
+            return False
+
+    # _unique_paths too: _mirrors_for_visible_url calls it, and leaving it off
+    # made that call raise, which the resume lookup swallows -- the test would
+    # then pass for the wrong reason by falling through to the first row.
+    for _n87 in ('_session_resume_target', '_mirror_path_key',
+                 '_mirrors_for_visible_url', '_unique_paths'):
+        setattr(_Fake87, _n87, _g87[_n87])
+    # Bound after the real ones so the real _playlist_entry_available does not
+    # shadow the stub and report every synthetic path as missing from disk.
+    _Fake87._playlist_entry_available = lambda self, p: p not in self._missing
+
+    _rows87 = ['/movies/a%d.mp4' % i for i in range(10)]
+    _surv87 = _rows87[1]
+    _mir87 = {_surv87: [_rows87[2], _rows87[3]]}
+    # Rows 2 and 3 folded into row 1, so the playlist comes back 2 shorter and
+    # every row after them moved up.
+    _screen87 = [_rows87[0], _surv87] + _rows87[4:]
+
+    def _old87(playlist, cf, ci):
+        if cf and cf in playlist:
+            return cf
+        if 0 <= ci < len(playlist):
+            return playlist[ci]
+        return playlist[0] if playlist else None
+
+    _t87, _w87 = _Fake87(_mir87)._session_resume_target(
+        _screen87, _rows87[3], 3, len(_rows87))
+    report(_old87(_screen87, _rows87[3], 3) != _rows87[3],
+       'the old rule really does land on a different file once mirrors have '
+       'folded -- that is the reported bug, not a theory',
+       repr(_old87(_screen87, _rows87[3], 3)))
+    report(_t87 == _surv87 and _w87 == 'surviving mirror row',
+       'the row that was playing folded into another row as one of its '
+       'mirrors, and the restore follows it there instead of jumping two '
+       'places down the list', f'{_t87!r} ({_w87})')
+
+    _t87b, _w87b = _Fake87(_mir87)._session_resume_target(
+        list(_rows87), _rows87[6], 6, len(_rows87))
+    report(_t87b == _rows87[6] and _w87b == 'exact path',
+       'when the saved row is still there nothing else is consulted',
+       f'{_t87b!r} ({_w87b})')
+
+    _t87c, _w87c = _Fake87(_mir87)._session_resume_target(
+        list(_rows87), '/movies/gone.mp4', 4, len(_rows87))
+    report(_t87c == _rows87[4] and 'shape unchanged' in _w87c,
+       'the saved index is still trusted when -- and only when -- the '
+       'playlist came back the same length it was saved at',
+       f'{_t87c!r} ({_w87c})')
+
+    _short87 = [_rows87[0], _rows87[1], _rows87[5], _rows87[7]]
+    _t87d, _w87d = _Fake87(_mir87, missing=(_rows87[0],))._session_resume_target(
+        _short87, '/movies/gone.mp4', 6, len(_rows87))
+    report(_t87d == _rows87[1] and _w87d == 'first available row',
+       'with the shape changed the index is not trusted at all: the restore '
+       'starts on the first row that exists, skipping one that is missing',
+       f'{_t87d!r} ({_w87d})')
+
+    _t87e, _w87e = _Fake87({})._session_resume_target([], '', 0, 0)
+    report(_t87e is None, 'and an empty playlist resumes nothing')
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

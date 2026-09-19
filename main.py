@@ -13685,6 +13685,71 @@ try {
 
         self._restore_session_playlist(new_playlist, loaded_metadata, current_file, current_index)
 
+    def _session_resume_target(self, playlist, current_file, current_index,
+                               saved_count):
+        """Which row a restored session should resume, and why.
+
+        Returns ``(path, reason)``; ``path`` is ``None`` for an empty playlist.
+
+        ``current_index`` indexes the playlist *as it was when the player
+        closed*. By the time the rows are back on screen that shape can have
+        changed: entries missing from disk are skipped, paths are relinked
+        through the seen list, and _collapse_duplicate_url_mirrors folds
+        mirrors into a single row. Every one of those shifts the rows after it,
+        so an index that was right when it was saved now points at a different
+        file -- and that file then resumes at its own remembered position. That
+        is the "random file at a random timestamp" a restore is supposed to
+        prevent. The index is therefore only trusted when nothing changed.
+        """
+        rows = list(playlist or [])
+        if not rows:
+            return None, 'empty playlist'
+        cf = str(current_file or '').strip()
+        try:
+            idx = int(current_index or 0)
+        except Exception:
+            idx = 0
+
+        if cf and cf in rows:
+            return cf, 'exact path'
+
+        if cf:
+            # The same row can come back under a different spelling: a
+            # normalised form of the saved path, a case or separator
+            # difference on a local path, or -- the common one -- the saved
+            # row was folded into another row as one of its mirrors.
+            key = self._mirror_path_key(cf)
+            if key:
+                for row in rows:
+                    if self._mirror_path_key(row) == key:
+                        return row, 'normalised path'
+            nc = os.path.normcase(cf)
+            for row in rows:
+                if os.path.normcase(str(row)) == nc:
+                    return row, 'case-normalised path'
+            try:
+                related = list(self._mirrors_for_visible_url(cf) or [])
+            except Exception:
+                related = []
+            for row in rows:
+                if row in related:
+                    return row, 'surviving mirror row'
+
+        try:
+            unchanged = int(saved_count) == len(rows)
+        except Exception:
+            unchanged = False
+        if unchanged and 0 <= idx < len(rows):
+            return rows[idx], 'saved index, playlist shape unchanged'
+
+        for row in rows:
+            try:
+                if self._playlist_entry_available(row):
+                    return row, 'first available row'
+            except Exception:
+                continue
+        return rows[0], 'first row'
+
     def _restore_session_playlist(self, new_playlist, loaded_metadata, current_file='', current_index=0):
         """Load ``new_playlist`` items into the player, resuming at the last track."""
         if not new_playlist:
@@ -13750,13 +13815,14 @@ try {
             self.apply_playlist_filtering()
 
         # Resume at the same track that was playing when the player was closed.
-        target = None
-        if current_file and current_file in self.playlist:
-            target = current_file
-        elif 0 <= current_index < len(self.playlist):
-            target = self.playlist[current_index]
-        if target is None:
-            target = next((p for p in self.playlist if self._playlist_entry_available(p)), None)
+        target, why = self._session_resume_target(
+            self.playlist, current_file, current_index, count)
+        if why != 'exact path':
+            # Worth a line in the log: this is the difference between resuming
+            # where the user left off and opening some other file.
+            print(f"[session restore] resume: saved {current_file!r} at index "
+                  f"{current_index}, {count} item(s) saved, "
+                  f"{len(self.playlist)} on screen -> {target!r} ({why})")
         if target:
             self.set_media(target)
 
