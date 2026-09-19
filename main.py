@@ -18785,6 +18785,17 @@ try {
             content = content.replace('\r\n', '\n').replace('\r', '\n')
             # Normalize malformed SRT arrows (e.g., "->", "- >", "-- >", "- ->")
             content = re.sub(r'-\s*-?\s*>', '-->', content)
+
+            # Checked here rather than at download time so that a track restored
+            # from a saved mapping gets the same treatment as a freshly fetched
+            # one -- a thumbnail VTT already written into subtitle_mappings.json
+            # would otherwise keep coming back.
+            if not self._subtitle_content_is_captions(content):
+                print(f"[SUBTITLE][REJECTED] cue text is not captions, "
+                      f"ignoring: {srt_path}")
+                self.subtitles = []
+                self._invalidate_subtitle_runtime_cache()
+                return
             
             # Normalize spaces around colons/commas/dots in timestamps (e.g. "00: 00: 04, 716")
             content = re.sub(r'(?<=\d)\s*([:.,])\s*(?=\d)', r'\1', content)
@@ -29869,9 +29880,22 @@ try {
         tracks.sort(key=_track_key)
         return tracks
 
+    # Words that mark a .vtt as something other than captions when they sit
+    # right in front of the URL, as in kind="thumbnails" or a JS config key.
+    # Searched over the last 60 characters before a bare .vtt URL, so it
+    # catches both kind="thumbnails" on a tag and a thumbnails: key in a JS
+    # player config, wherever the URL actually sits inside either.
+    _NON_CAPTION_CUE_CTX = re.compile(
+        r'(?:thumbnails?|preview|sprite|storyboard|chapters?|scrubber)'
+        r'["\']?\s*[:=]', re.IGNORECASE)
+
     def _extract_subtitle_tracks_from_html(self, html, page_url):
         tracks = []
         seen = set()
+        # src URLs of tracks that declared themselves as something other than
+        # captions. The catch-all URL scan below would otherwise pick them
+        # straight back up out of the same tag it just rejected.
+        skipped = set()
 
         def _add_track(url, lang='', ext='', name='', automatic=False):
             sub_url = self._normalize_extracted_media_url(url, page_url)
@@ -29894,8 +29918,18 @@ try {
 
         for match in re.finditer(r'<track\b([^>]*)>', str(html or ''), re.IGNORECASE):
             attrs = match.group(1) or ''
+            # kind defaults to "subtitles" when the attribute is absent, so
+            # only an explicit non-caption kind is a reason to skip. Video.js
+            # players declare their preview scrubber as kind="thumbnails" and
+            # point it at a .vtt, which used to be taken for a caption track.
             src = re.search(r'\bsrc=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
             if not src:
+                continue
+            kind = re.search(r'\bkind=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+            if kind and str(kind.group(1)).strip().lower() not in ('subtitles', 'captions'):
+                _norm = self._normalize_extracted_media_url(src.group(1), page_url)
+                if _norm:
+                    skipped.add(str(_norm).lower())
                 continue
             lang = re.search(r'\b(?:srclang|lang)=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
             label = re.search(r'\blabel=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
@@ -29909,7 +29943,12 @@ try {
         for pattern in patterns:
             for match in re.finditer(pattern, str(html or ''), re.IGNORECASE):
                 sub_url = html_unescape(match.group(1)).replace('\\/', '/')
+                _norm = self._normalize_extracted_media_url(sub_url, page_url)
+                if _norm and str(_norm).lower() in skipped:
+                    continue
                 prefix = str(html or '')[max(0, match.start() - 180):match.start()]
+                if self._NON_CAPTION_CUE_CTX.search(prefix[-60:]):
+                    continue
                 lang_match = re.search(r'["\'](?:lang|language|srclang|label)["\']\s*:\s*["\']([^"\']+)["\']', prefix, re.IGNORECASE)
                 auto = bool(re.search(r'auto(?:matic)?', prefix, re.IGNORECASE))
                 _add_track(sub_url, lang_match.group(1) if lang_match else '', automatic=auto)
@@ -42712,6 +42751,55 @@ try {
             self._remote_download_workers = {}
         self._remote_download_workers[job_id] = worker
         worker.start()
+
+    _SUBTITLE_SPRITE_HINTS = ('#xywh',)
+    _SUBTITLE_IMAGE_EXT = re.compile(
+        r'\.(?:jpe?g|png|webp|gif|bmp|avif)(?:[?#]|\s|$)', re.IGNORECASE)
+
+    def _subtitle_content_is_captions(self, content):
+        """True only if the cue payloads look like text a viewer can read.
+
+        A Video.js thumbnail scrubber ships a .vtt whose cue payload is a
+        sprite image URL carrying an ``#xywh=`` fragment. Nothing about it is
+        distinguishable from a real caption track by extension or by timing --
+        it has a ``.vtt`` extension, a WEBVTT header and valid cue times -- so
+        the payload itself is the only thing that can be checked. Without this
+        the player renders the image URL as a subtitle line, which is what
+        appeared on a video that has no captions at all.
+
+        A track is rejected when half or more of its cue lines are an image
+        reference rather than words, so a genuine caption that happens to
+        mention a URL still loads.
+        """
+        text = str(content or '')
+        if '-->' not in text:
+            return False
+        payloads = 0
+        sprites = 0
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line or '-->' in line:
+                continue
+            upper = line.upper()
+            if upper.startswith(('WEBVTT', 'NOTE', 'STYLE', 'REGION',
+                                 'KIND:', 'LANGUAGE:', 'IDENTIFIER:')):
+                continue
+            if line.startswith('::'):
+                continue
+            if re.fullmatch(r'\d+', line):
+                continue
+            if line.lower().startswith(('align:', 'position:', 'size:',
+                                        'line:', 'vertical:')):
+                continue
+            payloads += 1
+            low = line.lower()
+            if (any(h in low for h in self._SUBTITLE_SPRITE_HINTS)
+                    or low.startswith(('http://', 'https://', '//'))
+                    or self._SUBTITLE_IMAGE_EXT.search(low)):
+                sprites += 1
+        if not payloads:
+            return False
+        return sprites * 2 < payloads
 
     def _preferred_remote_subtitle_tracks(self, tracks, limit=4):
         usable = []

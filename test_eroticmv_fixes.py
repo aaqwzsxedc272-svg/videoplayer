@@ -8168,5 +8168,149 @@ if len(_fn87) == 4:
     _t87e, _w87e = _Fake87({})._session_resume_target([], '', 0, 0)
     report(_t87e is None, 'and an empty playlist resumes nothing')
 
+# ---------------------------------------------------------------------------
+# 88. A video with no captions at all played with a subtitle on screen, and the
+#     subtitle was a sprite image URL. The page's preview-scrubber track is a
+#     .vtt too, so every extension filter accepted it.
+# ---------------------------------------------------------------------------
+print()
+print('--- 88: a thumbnail-scrubber VTT is not a subtitle ---')
+
+_src88pre = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             'main.py'), encoding='utf-8').read()
+report("not in ('subtitles', 'captions')" in _src88pre,
+       'the track extractor now reads the kind attribute -- it used to take '
+       'any <track> with a src, so a preview scrubber declared as '
+       'kind="thumbnails" became a caption track')
+report('[SUBTITLE][REJECTED]' in _src88pre,
+       'and the cue payload is checked where subtitle bytes are parsed, so a '
+       'sprite VTT already written into subtitle_mappings.json cannot come '
+       'back on the next load')
+
+_cls88 = next((n for n in TREE.body if isinstance(n, ast.ClassDef)
+               and n.name == 'VideoPlayer'), None)
+_fn88 = {n.name: n for n in _cls88.body
+         if isinstance(n, ast.FunctionDef) and n.name in (
+             '_subtitle_content_is_captions', '_extract_subtitle_tracks_from_html',
+             '_preferred_remote_subtitle_tracks', '_normalize_extracted_media_url')} if _cls88 else {}
+report(len(_fn88) == 4, 'the caption check and the track extractor are here',
+       'missing: ' + ', '.join(
+           n for n in ('_subtitle_content_is_captions',
+                       '_extract_subtitle_tracks_from_html',
+                       '_preferred_remote_subtitle_tracks',
+                       '_normalize_extracted_media_url') if n not in _fn88))
+
+if len(_fn88) == 4:
+    _g88 = {'re': re, 'os': os, 'urlparse': urlparse, 'urljoin': urljoin,
+            'html_unescape': html_unescape}
+    for _n88 in _fn88.values():
+        _m88 = ast.Module(body=[_n88], type_ignores=[])
+        ast.fix_missing_locations(_m88)
+        exec(compile(_m88, '<main.py>', 'exec'), _g88)
+
+    class _Fake88:
+        _SUBTITLE_SPRITE_HINTS = ('#xywh',)
+        _SUBTITLE_IMAGE_EXT = re.compile(
+            r'\.(?:jpe?g|png|webp|gif|bmp|avif)(?:[?#]|\s|$)', re.IGNORECASE)
+        _NON_CAPTION_CUE_CTX = re.compile(
+            r'(?:thumbnails?|preview|sprite|storyboard|chapters?|scrubber)'
+            r'["\']?\s*[:=]', re.IGNORECASE)
+
+    for _n88 in _fn88:
+        setattr(_Fake88, _n88, _g88[_n88])
+    _k88 = _Fake88()
+
+    # The reported file: a Video.js scrubber track. Cue payload is a sprite
+    # image URL with an #xywh= fragment -- the URL the user saw on screen.
+    _thumb88 = (
+        'WEBVTT\n\n'
+        '00:00:00.000 --> 00:00:05.000\n'
+        'https://images.trendyporn.com/thumbs/6/a/3/8/e/'
+        '6a38e4d7f2502.mp4/vtt_002.jpg#xywh=0,0,160,90\n\n'
+        '00:00:05.000 --> 00:00:10.000\n'
+        'https://images.trendyporn.com/thumbs/6/a/3/8/e/'
+        '6a38e4d7f2502.mp4/vtt_002.jpg#xywh=160,0,160,90\n\n'
+        '00:00:10.000 --> 00:00:15.000\n'
+        'https://images.trendyporn.com/thumbs/6/a/3/8/e/'
+        '6a38e4d7f2502.mp4/vtt_003.jpg#xywh=0,90,160,90\n')
+    _realvtt88 = (
+        'WEBVTT\n\n'
+        '00:00:00.000 --> 00:00:04.000\nHey, how are you doing?\n\n'
+        '00:00:04.000 --> 00:00:08.000\nFine. Did you see the site?\n\n'
+        '00:00:08.000 --> 00:00:12.000\n'
+        'Yeah, example.com was down all day.\n')
+    _realsrt88 = (
+        '1\n00:00:00,000 --> 00:00:04,000\nHey, how are you doing?\n\n'
+        '2\n00:00:04,000 --> 00:00:08,000\nFine, thanks.\n')
+    _speech88 = (
+        'WEBVTT\nNOTE Transcript\n\n'
+        '00:00:00.000 --> 00:00:05.000 align:middle position:50%\n'
+        '<v Roger>Good evening.</v>\n')
+
+    report(not _k88._subtitle_content_is_captions(_thumb88),
+       'the reported file is recognised as a sprite sheet, so it is never '
+       'shown as a subtitle -- the payload was an image URL, which is the '
+       'only thing that distinguishes it from a real caption track')
+    report(_k88._subtitle_content_is_captions(_realvtt88)
+           and _k88._subtitle_content_is_captions(_realsrt88)
+           and _k88._subtitle_content_is_captions(_speech88),
+       'a real caption VTT, a real SRT and a transcript with cue settings '
+       'and a NOTE all still load -- including one that mentions a website')
+    report(not _k88._subtitle_content_is_captions('')
+           and not _k88._subtitle_content_is_captions(
+               'https://images.trendyporn.com/thumbs/x/vtt_002.jpg#xywh=0,0,160,90'),
+       'and something that is not a subtitle file at all is not one')
+
+    _src88 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'main.py'), encoding='utf-8').read()
+    report('[SUBTITLE][REJECTED]' in _src88,
+       'the check runs where subtitle bytes are parsed, not only where they '
+       'are downloaded, so a sprite VTT already written into '
+       'subtitle_mappings.json stops coming back')
+
+    _page88a = (
+        '<video><track kind="thumbnails" src="https://videos.trendyporn.com/'
+        'videos/6/a/3/8/e/6a38e4d7f2502.thumbs.vtt" srclang="en" '
+        'label="Thumbnails"><track kind="chapters" '
+        'src="https://videos.trendyporn.com/chapters.vtt">'
+        '<track kind="metadata" src="https://videos.trendyporn.com/meta.vtt">'
+        '<track kind="captions" src="https://videos.trendyporn.com/'
+        'en-captions.vtt" srclang="en" label="English">'
+        '<track src="https://videos.trendyporn.com/default-sub.vtt" '
+        'srclang="de" label="Deutsch"></video>')
+    _page88b = (
+        'var player = { file: "https://cdn.example.com/movie.mp4", '
+        'thumbnails: { src: "https://cdn.example.com/sprites/thumbs.vtt" }, '
+        'tracks: [{ file: "https://cdn.example.com/subs/english.vtt", '
+        'label: "English" }] };')
+    _page88c = ('<div>subs at https://cdn.example.com/subs/movie.en.vtt '
+                'please</div>')
+    _urls88 = [
+        t['url'] for t in _k88._extract_subtitle_tracks_from_html(
+            _page88a, 'https://www.trendyporn.com/video/x.html')]
+    report('https://videos.trendyporn.com/en-captions.vtt' in _urls88
+           and 'https://videos.trendyporn.com/default-sub.vtt' in _urls88
+           and not any('thumbs' in u or 'chapters' in u or 'meta.vtt' in u
+                       for u in _urls88),
+       'kind="thumbnails", "chapters" and "metadata" are dropped at '
+       'extraction, while kind="captions" and a <track> with no kind at all '
+       '-- which HTML defaults to subtitles -- are kept', str(_urls88))
+    report(_urls88 and 'https://videos.trendyporn.com/videos/6/a/3/8/e/'
+           '6a38e4d7f2502.thumbs.vtt' not in _urls88,
+       'and the catch-all bare-URL scan does not pick the rejected track '
+       'straight back up out of the same tag')
+
+    _urls88b = [t['url'] for t in _k88._extract_subtitle_tracks_from_html(
+        _page88b, 'https://cdn.example.com/watch')]
+    report(_urls88b == ['https://cdn.example.com/subs/english.vtt'],
+       'a thumbnail VTT named only by a JS config key is dropped too',
+       str(_urls88b))
+    _urls88c = [t['url'] for t in _k88._extract_subtitle_tracks_from_html(
+        _page88c, 'https://cdn.example.com/watch')]
+    report(_urls88c == ['https://cdn.example.com/subs/movie.en.vtt'],
+       'and a page with no player keywords anywhere still gives up its '
+       'caption track -- nothing is rejected for mentioning nothing',
+       str(_urls88c))
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
