@@ -24082,12 +24082,19 @@ try {
             parsed = urlparse(self._canonicalize_remote_source_url(file_path))
             host = (parsed.netloc or '').replace('www.', '').lower()
             if self._is_fileditch_host(host):
-                file_title = self._fileditch_filename_from_url(file_path)
-                if file_title:
-                    title = file_title
-                else:
-                    _cache[file_path] = ""
-                    return ""
+                # A name the user gave the row through the metadata linker
+                # outranks the filename. The filename rule is there for rows
+                # nobody has named; letting it win over a deliberate rename is
+                # what kept three quality variants of one scene
+                # (..._720 / ..._1080 / ..._2160) as three rows after all three
+                # had been renamed to the same title.
+                if not self._get_name_override(file_path):
+                    file_title = self._fileditch_filename_from_url(file_path)
+                    if file_title:
+                        title = file_title
+                    else:
+                        _cache[file_path] = ""
+                        return ""
             if self._is_vidara_host(host):
                 code = self._jav_code_from_text(title)
                 if code:
@@ -24298,12 +24305,20 @@ try {
             primary_name = self._fileditch_filename_from_url(primary).strip().lower()
             if not primary_name:
                 continue
+            # Two rows the user renamed to the same title are the same video
+            # however their fileditch filenames differ. Without this the
+            # splitter pulls apart exactly the quality variants the group key
+            # has just folded together.
+            primary_override = str(self._get_name_override(primary) or '').strip().lower()
 
             kept = []
             detached = []
             for mirror_url in self._unique_paths(values):
                 mirror_name = self._fileditch_filename_from_url(mirror_url).strip().lower()
-                if self._is_fileditch_host(mirror_url) and mirror_name and mirror_name != primary_name:
+                mirror_override = str(self._get_name_override(mirror_url) or '').strip().lower()
+                same_override = bool(primary_override) and primary_override == mirror_override
+                if (self._is_fileditch_host(mirror_url) and mirror_name
+                        and mirror_name != primary_name and not same_override):
                     detached.append(mirror_url)
                 else:
                     kept.append(mirror_url)

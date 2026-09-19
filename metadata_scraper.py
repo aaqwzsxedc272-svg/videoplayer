@@ -65,7 +65,7 @@ LINKS_FILENAME       = "metadata_links.json"
 # manually, so "is the running player the one that was just pushed?" has been
 # an open question more than once and has cost whole test runs. This answers it
 # from the first line of the log.
-BUILD = "link4-cast"
+BUILD = "link5-combine"
 print(f"[MetadataScraper] build {BUILD}")
 MATCH_THRESHOLD      = 0.32
 SCRAPE_DELAY         = 0.8     # seconds between yt-dlp calls
@@ -3573,6 +3573,18 @@ def _get_metadata_matcher(player, db: MetadataDB, force: bool = False) -> TitleM
 # Integration
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _flush_collapse_after_rename(player):
+    """Fold rows together once a rename has made them the same video."""
+    try:
+        player._collapse_rename_pending = False
+        collapse = getattr(player, "_collapse_duplicate_url_mirrors", None)
+        if callable(collapse):
+            collapse()
+    except Exception as exc:
+        print(f"[MetadataScraper] mirror collapse after rename failed: "
+              f"{type(exc).__name__}: {exc}")
+
+
 ALL_SITES_ID = "__all__"
 
 _SITE_MATCHERS: dict = {}
@@ -4652,6 +4664,19 @@ class MetadataScraperDialog(QDialog):
 
         # Remember WHICH movie this row was linked to, so the hover preview
         # can find it without re-matching. Keyed the same way as the override.
+        # Renaming can turn three separate rows into one video: three quality
+        # variants of the same scene share a title once the linker has named
+        # them. Re-run the mirror collapse so they fold now instead of at the
+        # next playlist load. Deferred and coalesced, because Apply All renames
+        # a row at a time and the collapse walks the whole playlist.
+        try:
+            if not getattr(self.player, "_collapse_rename_pending", False):
+                self.player._collapse_rename_pending = True
+                QTimer.singleShot(
+                    0, lambda: _flush_collapse_after_rename(self.player))
+        except Exception as exc:
+            print(f"[MetadataScraper] could not schedule the mirror collapse: {exc}")
+
         try:
             if not hasattr(self.player, "_metadata_links"):
                 self.player._metadata_links = {}

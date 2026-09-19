@@ -7849,5 +7849,119 @@ if _have84:
        'the resolution guard needs the digits to be followed by P, so a code '
        'that happens to end in 480 survives and 480p does not become one')
 
+# ---------------------------------------------------------------------------
+# 85. Renaming rows through the metadata linker must be allowed to combine
+#     them. Three fileditch quality variants of one scene stayed three rows.
+# ---------------------------------------------------------------------------
+print()
+print('--- 85: a linker rename can combine fileditch variants ---')
+
+_g85 = {'re': re, 'os': os, 'unquote': unquote, 'html_unescape': html_unescape,
+        'urlparse': urlparse, 'parse_qs': parse_qs, 'urlunparse': urlunparse}
+_cls85 = next((n for n in TREE.body if isinstance(n, ast.ClassDef)
+               and n.name == 'VideoPlayer'), None)
+_want85 = ('_mirror_display_group_key', '_fileditch_filename_from_url',
+           '_mirror_title_identity_key', '_is_fileditch_host')
+_got85 = set()
+if _cls85 is not None:
+    for _n85 in _cls85.body:
+        if isinstance(_n85, ast.FunctionDef) and _n85.name in _want85:
+            _m85 = ast.Module(body=[_n85], type_ignores=[])
+            ast.fix_missing_locations(_m85)
+            exec(compile(_m85, f'<{_n85.name}>', 'exec'), _g85)
+            _got85.add(_n85.name)
+
+_urls85 = [
+    'https://fileditchfiles.st/alpha29/3fada8aa128cb6223418/'
+    'pervmom_alex_harper_full_720.mp4',
+    'https://fileditchfiles.st/alpha29/4eeb0b1aa65c0607f6cf/'
+    'pervmom_alex_harper_full_1080.mp4',
+    'https://fileditchfiles.st/alpha29/52899c9bb4bdf2a88309/'
+    'pervmom_alex_harper_full_2160.mp4',
+]
+_name85 = ('PervMom - Alex Harper - Use My Pussy and Keep Your Scolarship! '
+           '- 13/09/2026')
+
+
+class _Fake85:
+    _mirror_display_group_key = _g85.get('_mirror_display_group_key')
+    _fileditch_filename_from_url = _g85.get('_fileditch_filename_from_url')
+    _mirror_title_identity_key = _g85.get('_mirror_title_identity_key')
+    _is_fileditch_host = _g85.get('_is_fileditch_host')
+
+    def __init__(self, overrides):
+        self._ov = overrides
+        self._metadata_name_overrides = {}
+        self._stream_resolution_cache = {}
+        self._mirror_group_cache = {}
+
+    def _is_remote_url(self, v):
+        return str(v).startswith('http')
+
+    def _canonicalize_remote_source_url(self, v):
+        return v
+
+    def _get_name_override(self, p):
+        return self._ov.get(p, '')
+
+    def _recent_file_saved_name(self, p):
+        return ''
+
+    def _playlist_display_name(self, p):
+        return ''
+
+    def _strip_seen_display_prefix(self, t):
+        return t
+
+    def _is_vidara_host(self, h):
+        return False
+
+    def _is_pornhub_host(self, h):
+        return False
+
+    def _jav_code_from_text(self, t):
+        return ''
+
+    def _is_generic_embed_title(self, t, p):
+        return False
+
+
+_have85 = _got85 == set(_want85)
+report(_have85, 'the mirror group key and the fileditch filename rule are here',
+       'missing: ' + ', '.join(sorted(set(_want85) - _got85)))
+
+if _have85:
+    _un85 = [_Fake85({})._mirror_display_group_key(u) for u in _urls85]
+    report(len(set(_un85)) == 3 and all(_un85),
+       'three fileditch files nobody has named still key apart -- that is the '
+       'rule _split_conflicting_fileditch_mirrors depends on, and a rename '
+       'must not weaken it for rows the user has not touched', str(_un85))
+
+    _ov85 = {u: _name85 for u in _urls85}
+    _ren85 = [_Fake85(_ov85)._mirror_display_group_key(u) for u in _urls85]
+    report(len(set(_ren85)) == 1 and bool(_ren85[0]),
+       'and once the linker has named all three the same, they share one key '
+       'so the collapse pass folds them into a single row -- the 720 / 1080 / '
+       '2160 variants of one scene were three rows before', str(_ren85[0]))
+
+    _part85 = dict(_ov85)
+    _part85.pop(_urls85[2])
+    _mix85 = [_Fake85(_part85)._mirror_display_group_key(u) for u in _urls85]
+    report(_mix85[0] == _mix85[1] and _mix85[2] != _mix85[0],
+       'a row the user has not renamed stays separate from the two they have',
+       str(_mix85))
+
+    _txt85 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'main.py'), encoding='utf-8').read()
+    _split85 = _fn_body(_txt85, '    def _split_conflicting_fileditch_mirrors(')
+    report('same_override' in _split85,
+       'and the fileditch splitter agrees, so it does not pull apart the '
+       'variants the group key has just folded together')
+    _ms85 = open(_msrc55.__file__, encoding='utf-8').read()
+    report('_flush_collapse_after_rename' in _ms85
+           and '_collapse_rename_pending' in _ms85,
+       'a rename re-runs the collapse pass instead of waiting for the next '
+       'playlist load, coalesced so Apply All does not run it per row')
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
