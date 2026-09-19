@@ -4773,7 +4773,7 @@ _src56 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 report('_duration_seconds(' in _src56.split('def _site_movie_from_entry')[1].split('def ')[0]
        and '"duration":     _duration_seconds(data.get("duration"))' in _src56,
        'both scrapers store a runtime, so the criterion has something to read')
-report(_src56.count('_player_duration_ms(self.player, fp)') == 1
+report('_player_duration_ms(self.player, fp)' in _src56
        and _src56.count('duration_ms=dur)') == 2,
        'and the linker passes each row runtime into the match -- on the '
        'single-network path and the all-network one alike')
@@ -7986,6 +7986,75 @@ if _have85:
            and '_collapse_rename_pending' in _ms85,
        'a rename re-runs the collapse pass instead of waiting for the next '
        'playlist load, coalesced so Apply All does not run it per row')
+
+# ---------------------------------------------------------------------------
+# 86. Phone and FTP rows are playlist rows too. The saved name was read only
+#     for http(s), so a phone row the user had already renamed was matched
+#     again from its camera filename.
+# ---------------------------------------------------------------------------
+print()
+print('--- 86: phone / FTP rows in the linker ---')
+
+_have86 = all(hasattr(_msrc55, n) for n in
+              ('_is_phone_or_ftp_path', '_best_match_raw_title'))
+report(_have86, 'the phone/FTP predicate and the row-title lookup are here',
+       'missing: ' + ', '.join(
+           n for n in ('_is_phone_or_ftp_path', '_best_match_raw_title')
+           if not hasattr(_msrc55, n)))
+
+if _have86:
+    _ph86 = ('phone:///storage/emulated/0/Download/'
+             'PervMom.26.08.02.Alex.Harper.Use.My.Pussy.1080p.mp4')
+    _ft86 = 'ftp://mou:pw@192.168.1.20:2121/Download/Some.Scene.720p.mp4'
+    _loc86 = os.path.join(_tf55.gettempdir(), 'Local.File.1080p.mp4')
+
+    report(_msrc55._is_phone_or_ftp_path(_ph86)
+           and _msrc55._is_phone_or_ftp_path(_ft86)
+           and not _msrc55._is_phone_or_ftp_path(_loc86)
+           and not _msrc55._is_phone_or_ftp_path('https://bunkr.pk/f/x'),
+       'phone:// and ftp:// are recognised, and a local file or a web URL is '
+       'not mistaken for one')
+
+    class _P86:
+        _metadata_name_overrides = {}
+        _stream_resolution_cache = {}
+        _meta_norm_path = staticmethod(_msrc55._meta_norm_path)
+
+        def _playlist_display_name(self, p):
+            return ''
+
+        def _get_name_override_key(self, k):
+            return _msrc55._meta_norm_path(k)
+
+    _p86 = _P86()
+    report(_msrc55._best_match_raw_title(_p86, _ph86)
+           == 'PervMom.26.08.02.Alex.Harper.Use.My.Pussy.1080p',
+       'with no rename, a phone row still matches on its own filename -- that '
+       'is usually the real scene name and is the best there is')
+
+    _p86._metadata_name_overrides[_msrc55._meta_norm_path(_ph86)] = (
+        'PervMom - Alex Harper - Use My Pussy and Keep Your Scolarship! '
+        '- 13/09/2026')
+    _p86._metadata_name_overrides[_msrc55._meta_norm_path(_ft86)] = (
+        'BrattySis - Bianca Bangs - Stepsis Loves Sex Games - 29/11/2024')
+    report(_msrc55._best_match_raw_title(_p86, _ph86).startswith('PervMom - Alex Harper'),
+       'a phone row the user already renamed matches on the name they gave it, '
+       'not on the camera filename the override lookup used to skip',
+       repr(_msrc55._best_match_raw_title(_p86, _ph86)))
+    report(_msrc55._best_match_raw_title(_p86, _ft86).startswith('BrattySis - Bianca Bangs'),
+       'and the same holds for a plain ftp:// row',
+       repr(_msrc55._best_match_raw_title(_p86, _ft86)))
+    report(_msrc55._best_match_raw_title(_p86, _loc86) == 'Local.File.1080p',
+       'a local file is untouched by any of it',
+       repr(_msrc55._best_match_raw_title(_p86, _loc86)))
+
+    _txt86 = open(_msrc55.__file__, encoding='utf-8').read()
+    report('fetch_remote_page and is_remote' in _txt86,
+       'and the page-title fetch stays web-only -- an FTP path has no page to '
+       'fetch')
+    report('_no_runtime' in _txt86 and 'phone/FTP row(s) have no known ' in _txt86,
+       'when the phone cannot be probed the linker says so, instead of weak '
+       'matches looking like a matcher that does not work')
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

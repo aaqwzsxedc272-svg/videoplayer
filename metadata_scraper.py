@@ -65,7 +65,7 @@ LINKS_FILENAME       = "metadata_links.json"
 # manually, so "is the running player the one that was just pushed?" has been
 # an open question more than once and has cost whole test runs. This answers it
 # from the first line of the log.
-BUILD = "link5-combine"
+BUILD = "link6-phone"
 print(f"[MetadataScraper] build {BUILD}")
 MATCH_THRESHOLD      = 0.32
 SCRAPE_DELAY         = 0.8     # seconds between yt-dlp calls
@@ -3486,12 +3486,26 @@ def _get_name_override(player, path: str) -> str:
     overrides = getattr(player, "_metadata_name_overrides", {}) or {}
     return overrides.get(_meta_norm_path(path)) or ""
 
+_PHONE_OR_FTP_PREFIXES = ("phone://", "ftp://", "ftps://", "sftp://")
+
+
+def _is_phone_or_ftp_path(path) -> bool:
+    """A row that lives on the phone over FTP rather than on a web host."""
+    return str(path or "").strip().lower().startswith(_PHONE_OR_FTP_PREFIXES)
+
+
 def _best_match_raw_title(player, file_path: str, *, fetch_remote_page: bool = False) -> str:
     fp = str(file_path or "")
     inner_fp = _unwrap_path(fp)
     is_remote = inner_fp.startswith(("http://", "https://"))
+    # A phone or FTP row is remote in every way that matters for naming: it can
+    # carry a rename and a display name, and its path basename is the phone's
+    # own filename -- often a camera stamp -- rather than anything the user
+    # chose. Reading the saved name only for http(s) rows meant a phone row the
+    # user had already renamed was matched again from its camera filename.
+    is_named = is_remote or _is_phone_or_ftp_path(inner_fp)
 
-    if is_remote:
+    if is_named:
         for key in (inner_fp, fp):
             raw = str(_get_name_override(player, key) or "").strip()
             if raw:
@@ -3513,7 +3527,8 @@ def _best_match_raw_title(player, file_path: str, *, fetch_remote_page: bool = F
                 if _useful_display_title(raw, fp, inner_fp):
                     return raw
 
-        if fetch_remote_page:
+        # Only a web page can be fetched for its title; an FTP path has none.
+        if fetch_remote_page and is_remote:
             raw = _extract_remote_page_title(inner_fp)
             if raw:
                 return raw
@@ -4556,6 +4571,19 @@ class MetadataScraperDialog(QDialog):
         self._cards.clear()
         matched = 0
         possible = 0
+
+        # Without a connection the phone cannot be probed, so those rows lose
+        # the runtime criterion and match on the name alone. Say so, rather
+        # than letting weak matches look like a matcher that does not work.
+        _no_runtime = [fp for fp in self.file_paths
+                       if _is_phone_or_ftp_path(fp)
+                       and not _player_duration_ms(self.player, fp)]
+        if _no_runtime:
+            self._log_msg(
+                f"\u2139 {len(_no_runtime)} phone/FTP row(s) have no known "
+                f"runtime, so the duration criterion "
+                f"({TitleMatcher._SIGNAL_WEIGHTS['duration']:.2f}) cannot help "
+                f"them. Connect FTP to probe them, or match on the name.")
 
         for fp in self.file_paths:
             raw = _best_match_raw_title(self.player, fp)
