@@ -8804,6 +8804,69 @@ if len(_fn91) == len(_want91):
        'video data played", because every variant was on a host that does '
        'not resolve')
 
+    # The captcha click, copied from the Play clicker's method.
+    def _const91(name):
+        for _n91 in ast.parse(_gi91b).body:
+            if (isinstance(_n91, ast.Assign)
+                    and getattr(_n91.targets[0], 'id', '') == name):
+                return ast.literal_eval(_n91.value)
+        return None
+    _cap91 = _const91('_AUTOCLICK_CAPTCHA_PS1') or ''
+    _play91 = _const91('_AUTOCLICK_PS1') or ''
+    report(bool(_cap91),
+       'a bot-challenge clicker exists, using the same OS-level mechanism as '
+       'the Play clicker: UI Automation to find the widget, user32 for a real '
+       'mouse click. CDP cannot do this -- Chromium 136+ ignores the debug '
+       'port on the default profile, which is why the capture uses the real '
+       'browser at all')
+    report(bool(_cap91) and bool(_play91)
+           and _cap91.split('# ---- bot-challenge click')[0].strip()
+           == _play91.split('# Strategy 1:')[0].strip(),
+       'and it reuses that clicker\u2019s harness verbatim rather than a '
+       'second copy that can drift -- same window search, same foreground '
+       'dance')
+    report(bool(_cap91) and not [c for c in _cap91 if ord(c) > 127]
+           and _cap91.count('{') == _cap91.count('}')
+           and _cap91.count('(') == _cap91.count(')'),
+       'the script stays pure ASCII and balanced: it is written with '
+       'encoding=\'ascii\', so one smart quote or em dash would be '
+       'silently replaced and break the parse on the user\u2019s machine')
+    report('$titleGated = ($wname -match $CHAL)' in _cap91
+           and 'if ($fg -and $titleGated)' in _cap91,
+       'and it only clicks when a challenge is actually on screen -- a '
+       'clicker that fires unconditionally would click whatever is under the '
+       'cursor on a page that never had a gate')
+    report('function Human-Click' in _cap91
+           and 'SetCursorPos' in _cap91.split('function Human-Click')[1]
+           .split('mouse_event')[0],
+       'the pointer walks to the checkbox instead of teleporting onto it: '
+       'Turnstile scores the pointer, and a click with no movement before it '
+       'is the signature it looks for')
+    _drv91 = [n for n in ast.walk(ast.parse(_gi91b))
+              if isinstance(n, ast.FunctionDef)
+              and n.name == '_autoclick_captcha_in_main_brave']
+    _drvsrc91 = (ast.get_source_segment(_gi91b, _drv91[0])
+                 if _drv91 else '')
+    report('_AUTOCLICK_CAPTCHA_PS1' in _drvsrc91
+           and '_AUTOCLICK_PS1' not in _drvsrc91.replace(
+                   '_AUTOCLICK_CAPTCHA_PS1', ''),
+       'the driver writes the challenge script, not the Play one -- a '
+       'copy-paste here would click Play on a page that has no player')
+    report("_autoclick_captcha_in_main_brave('')" in _gi91b,
+       'and it is called with an EMPTY keyword. The challenge page\u2019s '
+       'title is "Just a moment...", never the video\u2019s, so a '
+       'title-keyed window search returns NOWINDOW at exactly the moment the '
+       'click is needed -- which is the auto-click: NOWINDOW in the field log')
+    report('if (-not $fallback) { $fallback = $w }' in _gi91b,
+       'the window search now also falls back to the first Brave window when '
+       'the keyword misses, instead of giving up')
+    _ct91 = [n for n in ast.walk(ast.parse(_gi91b))
+             if isinstance(n, ast.FunctionDef) and n.name == '_captcha_tick']
+    report(bool(_ct91) and _gi91b.count('_captcha_tick(start)') == 2,
+       'the tick runs on both capture channels -- the network log and the '
+       'disk-cache fallback -- and stops once a stream is captured, so it '
+       'cannot click the player after the gate is behind them')
+
     _lb91 = _g91.get('_looks_blocked')
     report(_lb91 is not None, 'the bot-gate test is in the grabber')
     if _lb91 is not None:

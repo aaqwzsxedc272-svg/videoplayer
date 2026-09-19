@@ -506,9 +506,10 @@ function Find-VideoWindow {
       try {
         $p = Get-Process -Id $w.Current.ProcessId -ErrorAction SilentlyContinue
         if (-not $p -or $p.ProcessName -notmatch 'brave') { continue }
+        if (-not $fallback) { $fallback = $w }
         if ($kw) {
           if ($w.Current.Name -like "*$kw*") { return $w }
-        } elseif (-not $fallback) { $fallback = $w }
+        }
       } catch {}
     }
     return $fallback
@@ -639,6 +640,218 @@ try {
 Write-Output 'NOBUTTON'
 exit 2
 """
+
+
+_AUTOCLICK_CAPTCHA_PS1 = r"""
+param([string]$Keyword = '')
+
+$ErrorActionPreference = 'Continue'
+Add-Type -AssemblyName UIAutomationClient | Out-Null
+Add-Type -AssemblyName UIAutomationTypes | Out-Null
+try {
+  Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class AGPLMouse{[DllImport("user32.dll")]public static extern bool SetProcessDPIAware();[DllImport("user32.dll")]public static extern bool SetCursorPos(int x,int y);[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint dx,uint dy,uint d,UIntPtr e);[DllImport("user32.dll")]public static extern bool SetForegroundWindow(IntPtr h);[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern void keybd_event(byte k,uint s,uint f,UIntPtr e);}' | Out-Null
+} catch {}
+try { [AGPLMouse]::SetProcessDPIAware() | Out-Null } catch {}
+
+function Find-VideoWindow {
+  param([string]$kw)
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::RootElement
+    $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Chrome_WidgetWin_1')
+    $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)
+    $fallback = $null
+    foreach ($w in $wins) {
+      try {
+        $p = Get-Process -Id $w.Current.ProcessId -ErrorAction SilentlyContinue
+        if (-not $p -or $p.ProcessName -notmatch 'brave') { continue }
+        if (-not $fallback) { $fallback = $w }
+        if ($kw) {
+          if ($w.Current.Name -like "*$kw*") { return $w }
+        }
+      } catch {}
+    }
+    return $fallback
+  } catch { return $null }
+}
+
+$win = Find-VideoWindow -kw $Keyword
+if (-not $win) { Write-Output 'NOWINDOW'; exit 1 }
+
+$fg = $false
+try {
+  $h = $win.Current.NativeWindowHandle
+  [AGPLMouse]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero) | Out-Null
+  [AGPLMouse]::SetForegroundWindow($h) | Out-Null
+  [AGPLMouse]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero) | Out-Null
+  Start-Sleep -Milliseconds 900
+  $fg = ([AGPLMouse]::GetForegroundWindow() -eq $h)
+} catch {}
+try { $win.SetFocus() } catch {}
+# ---- bot-challenge click ----------------------------------------------------
+# Everything above is the Play clicker's harness, reused verbatim: same window
+# search, same foreground dance. Chromium 136+ ignores the debug port on the
+# DEFAULT profile, so CDP cannot drive the user's real browser; Windows UI
+# Automation works on any window regardless.
+
+$CHAL = 'just a moment|attention required|security check|verify you are human|confirm you are not a robot|not a robot|checking your browser|human verification|one more step|cloudflare'
+
+$wname = ''
+try { $wname = ([string]$win.Current.Name).ToLower() } catch {}
+$titleGated = ($wname -match $CHAL)
+
+# Turnstile scores the pointer, so do not teleport the cursor onto the
+# checkbox - walk it there first.
+function Human-Click {
+  param([int]$cx, [int]$cy)
+  $sx = $cx - 140; $sy = $cy + 60
+  for ($i = 0; $i -le 14; $i++) {
+    $t = $i / 14.0
+    [AGPLMouse]::SetCursorPos([int]($sx + ($cx - $sx) * $t), [int]($sy + ($cy - $sy) * $t)) | Out-Null
+    Start-Sleep -Milliseconds (8 + (Get-Random -Maximum 12))
+  }
+  [AGPLMouse]::SetCursorPos($cx, $cy) | Out-Null
+  Start-Sleep -Milliseconds 130
+  [AGPLMouse]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 70
+  [AGPLMouse]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+}
+
+# Strategy C1: a real checkbox control. The widget sits in a cross-origin
+# frame (challenges.cloudflare.com) but Chromium still publishes it in the
+# accessibility tree once UIA is querying.
+if ($fg) {
+  try {
+    $c = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::CheckBox)
+    $els = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $c)
+    foreach ($e in $els) {
+      try {
+        $r = $e.Current.BoundingRectangle
+        if ($r.Width -lt 10 -or $r.Width -gt 120 -or $r.Height -lt 10 -or $r.Height -gt 120) { continue }
+        $nm = ''
+        try { $nm = ([string]$e.Current.Name).ToLower() } catch {}
+        if ($titleGated -or ($nm -match $CHAL)) {
+          Human-Click ([int]($r.X + $r.Width / 2)) ([int]($r.Y + $r.Height / 2))
+          Write-Output ('CLICKED:checkbox:' + $nm)
+          exit 0
+        }
+      } catch {}
+    }
+  } catch {}
+}
+
+# Strategy C2: the smallest element carrying the challenge's own wording. On a
+# wide widget the box is at the LEFT with the words to its right, so click 32px
+# in rather than the centre.
+if ($fg) {
+  try {
+    $all = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    $best = $null; $bestArea = 0
+    foreach ($e in $all) {
+      $nm = ''
+      try { $nm = ([string]$e.Current.Name).ToLower() } catch {}
+      if (-not ($nm -match 'verify you are human|confirm you are not a robot|not a robot|human verification')) { continue }
+      try {
+        $r = $e.Current.BoundingRectangle
+        if ($r.Width -lt 8 -or $r.Height -lt 8) { continue }
+        $area = $r.Width * $r.Height
+        if (-not $best -or $area -lt $bestArea) { $bestArea = $area; $best = $e }
+      } catch {}
+    }
+    if ($best) {
+      $r = $best.Current.BoundingRectangle
+      if ($r.Width -ge 200) {
+        Human-Click ([int]($r.X + 32)) ([int]($r.Y + $r.Height / 2))
+      } else {
+        Human-Click ([int]($r.X + $r.Width / 2)) ([int]($r.Y + $r.Height / 2))
+      }
+      Write-Output 'CLICKED:challenge-label'
+      exit 0
+    }
+  } catch {}
+}
+
+# Strategy C3: the challenge frame itself, by name and widget-ish size.
+if ($fg) {
+  try {
+    foreach ($ct in @([System.Windows.Automation.ControlType]::Pane, [System.Windows.Automation.ControlType]::Custom, [System.Windows.Automation.ControlType]::Group)) {
+      try {
+        $c = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $ct)
+        $els = $win.FindAll([System.Windows.Automation.TreeScope]::Descendants, $c)
+        foreach ($e in $els) {
+          $nm = ''
+          try { $nm = ([string]$e.Current.Name).ToLower() } catch {}
+          if (-not ($nm -match 'challenge|cloudflare|turnstile')) { continue }
+          try {
+            $r = $e.Current.BoundingRectangle
+            if ($r.Width -lt 180 -or $r.Width -gt 460 -or $r.Height -lt 40 -or $r.Height -gt 160) { continue }
+            Human-Click ([int]($r.X + 32)) ([int]($r.Y + $r.Height / 2))
+            Write-Output ('CLICKED:challenge-frame:' + $nm)
+            exit 0
+          } catch {}
+        }
+      } catch {}
+    }
+  } catch {}
+}
+
+# Strategy C4: last resort, and only when the window TITLE itself is the
+# interstitial -- there is nothing else on that page to click. Cloudflare's
+# full-page check puts the box below centre.
+if ($fg -and $titleGated) {
+  try {
+    $r = $win.Current.BoundingRectangle
+    if ($r.Width -gt 300 -and $r.Height -gt 300) {
+      Human-Click ([int]($r.X + $r.Width / 2)) ([int]($r.Y + $r.Height * 0.58))
+      Write-Output ('CLICKED:interstitial:' + $wname)
+      exit 0
+    }
+  } catch {}
+}
+
+Write-Output 'NOCAPTCHA'
+exit 2
+"""
+
+
+def _autoclick_captcha_in_main_brave(keyword=''):
+    """Best-effort OS-level click on a bot challenge in the user's MAIN Brave.
+
+    Same mechanism as _autoclick_play_in_main_brave: Windows UI Automation
+    finds the widget, user32 puts a real mouse click on it. CDP is not an
+    option here -- Chromium 136+ silently ignores --remote-debugging-port on
+    the DEFAULT profile, which is the whole reason the capture uses the real
+    browser instead of a driven one.
+
+    Called with an EMPTY keyword on purpose: while a challenge is up the
+    window title is 'Just a moment...', not the video's, so a title-keyed
+    search reports NOWINDOW at exactly the moment the click is needed.
+    Returns 'clicked' | 'nocaptcha' | 'nowindow' | 'error'."""
+    ps_path = ''
+    try:
+        ps_path = os.path.join(tempfile.gettempdir(),
+                               'agpl_brave_captcha_click.ps1')
+        with open(ps_path, 'w', encoding='ascii', errors='replace') as f:
+            f.write(_AUTOCLICK_CAPTCHA_PS1)
+    except Exception:
+        return 'error'
+    try:
+        out = subprocess.run(
+            ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+             '-File', ps_path, '-Keyword', str(keyword or '')],
+            capture_output=True, text=True, timeout=120)
+        lines = (out.stdout or '').strip().splitlines()
+        line = lines[0].strip() if lines else ''
+    except Exception as exc:
+        print(f'[GENERIC_JAV] captcha click error: {exc}')
+        return 'error'
+    if line.startswith('CLICKED'):
+        print(f'[GENERIC_JAV] captcha click: {line}')
+        return 'clicked'
+    if line == 'NOCAPTCHA':
+        print('[GENERIC_JAV] captcha click: no challenge on screen')
+        return 'nocaptcha'
+    print(f'[GENERIC_JAV] captcha click: {line or "no output"}')
+    return 'nowindow'
 
 
 def _autoclick_play_in_main_brave(keyword=''):
@@ -2241,6 +2454,7 @@ def _vp_main_brave_cache_capture(self, source_url, title=''):
         print(f'[GENERIC_JAV] net-log setup failed: {exc}')
 
     urls = {}
+    cap = {'last': None, 'warned': False}
 
     def _collect(new_urls):
         for u in new_urls:
@@ -2278,6 +2492,35 @@ def _vp_main_brave_cache_capture(self, source_url, title=''):
             except Exception:
                 pass
 
+    def _captcha_tick(started):
+        """Click the bot challenge while it is still up, then stop.
+
+        Runs only until something is captured -- once a stream is in the log
+        the page is past the gate and further clicking would land on the
+        player. Empty keyword: the challenge page's title is not the
+        video's, so the window search has to fall back to "the Brave
+        window"."""
+        if urls or time.time() - started > 90 or time.time() - started < 8:
+            return
+        if cap['last'] and time.time() - cap['last'] < 8:
+            return
+        cap['last'] = time.time()
+        res = _autoclick_captcha_in_main_brave('')
+        if res == 'clicked':
+            try:
+                self.generic_jav_osd.emit(
+                    'Clicked the verification box in your Brave…', 4000)
+            except Exception:
+                pass
+        elif res == 'nowindow' and not cap['warned']:
+            cap['warned'] = True
+            try:
+                self.generic_jav_osd.emit(
+                    'Could not click the verification box — please click '
+                    'it in the Brave window', 8000)
+            except Exception:
+                pass
+
     if netlog:
         try:
             subprocess.Popen([brave, source_url])
@@ -2298,6 +2541,7 @@ def _vp_main_brave_cache_capture(self, source_url, title=''):
             time.sleep(3)
             found, cursor = _scan_netlog_for_m3u8(netlog, cursor)
             _collect(found)
+            _captcha_tick(start)
             _autoclick_tick(clicks, start)
             if urls and first_hit is None:
                 first_hit = time.time()
@@ -2335,6 +2579,7 @@ def _vp_main_brave_cache_capture(self, source_url, title=''):
         while time.time() - start < 200:
             time.sleep(3)
             _collect(list(_scan_cache_dirs_for_m3u8(cache_dirs, start).keys()))
+            _captcha_tick(start)
             _autoclick_tick(clicks, start)
             if urls and first_hit is None:
                 first_hit = time.time()
