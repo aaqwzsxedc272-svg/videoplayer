@@ -203,7 +203,7 @@ except ImportError:
     QWebEngineScript = None
     _QT_WEBENGINE_AVAILABLE = False
 import xml.etree.ElementTree as ET
-from urllib.parse import unquote, urlparse, urljoin, urlunparse
+from urllib.parse import unquote, urlparse, urljoin, urlunparse, urlsplit
 from html import unescape as html_unescape
 from concurrent.futures import ThreadPoolExecutor
 # Force Python to ignore any stale compiled cache for keybindings_dialog
@@ -240,6 +240,27 @@ def _ftp_url_for_native_client(url_text):
         ))
     except Exception:
         return str(url_text or '')
+
+def _ftp_remote_path_from_url(url_text):
+    """The phone-side path an FTP URL refers to, including anything after a '#'.
+
+    Phone filenames legitimately contain a hash -- '#11-(16)Prologue 1
+    (LUCIA).mp4' is a real one -- and _ftp_url_for_native_client deliberately
+    unescapes the path so ffmpeg can RETR it. urlsplit then reads that '#' as
+    the start of a fragment and hands back the directory instead of the file,
+    so the playback proxy asked the phone for a folder and the video never
+    played while the same file played fine from a local disk. The same happens
+    to a '?' one level up, which urlsplit reads as a query. FTP has neither
+    syntax, so whatever follows either delimiter belongs to the path.
+    """
+    parsed = urlsplit(str(url_text or ''))
+    path = unquote(parsed.path or '')
+    if parsed.query:
+        path = path + '?' + parsed.query
+    if parsed.fragment:
+        path = path + '#' + parsed.fragment
+    return path
+
 
 # ─── Supported format constants (add new formats here) ───────────────────────
 IMAGE_EXTENSIONS = (
@@ -9943,7 +9964,14 @@ class VideoPlayer(QMainWindow):
                     return None
                 remote = path[8:]  # strip phone://
                 from urllib.parse import quote
-                ftp_url = f"ftp://{user}:{pw}@{ip}:{port}/{remote.lstrip('/')}"
+                # quote was imported here and never used, so a '#' in the
+                # filename opened a fragment and everything after it -- the
+                # whole file name -- dropped off the URL.
+                _userinfo = quote(str(user or 'anonymous'), safe='')
+                if pw:
+                    _userinfo += ':' + quote(str(pw), safe='')
+                ftp_url = (f"ftp://{_userinfo}@{ip}:{port}/"
+                           f"{quote(remote.lstrip('/'), safe='/')}")
             if not self._is_ftp_url(ftp_url):
                 return None
             return self._ftp_playback_proxy_url(ftp_url)
@@ -13372,7 +13400,7 @@ try {
             ftp.connect(parsed.hostname, parsed.port or 21, timeout=5)
             ftp.login(unquote(parsed.username) if parsed.username else 'anonymous',
                       unquote(parsed.password) if parsed.password else '')
-            return ftp.size(unquote(parsed.path)) or 0
+            return ftp.size(_ftp_remote_path_from_url(ftp_url)) or 0
         except Exception:
             return 0
         finally:
@@ -19069,7 +19097,7 @@ try {
                 ftp_url = None
             elif self._is_ftp_url(file_path):
                 ftp_url = file_path
-                remote_path = _unquote(urlsplit(file_path).path)
+                remote_path = _ftp_remote_path_from_url(file_path)
             else:
                 return  # Not an FTP/phone path
 
@@ -27008,8 +27036,8 @@ try {
             return ''
         ftp_url = _ftp_url_for_native_client(str(ftp_url))
         from urllib.parse import urlsplit
-        parsed = urlsplit(ftp_url)
-        base_name = os.path.basename((parsed.path or '').rstrip('/')).strip() or 'phone-video.mp4'
+        base_name = os.path.basename(
+            _ftp_remote_path_from_url(ftp_url).rstrip('/')).strip() or 'phone-video.mp4'
         safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', base_name) or 'phone-video.mp4'
         target_id = hashlib.sha1(ftp_url.encode('utf-8', errors='ignore')).hexdigest()[:16]
         sessions = getattr(self, '_local_hls_proxy_sessions', None)
@@ -27058,7 +27086,7 @@ try {
 
         from urllib.parse import urlsplit
         parsed = urlsplit(ftp_url)
-        remote_path = unquote(parsed.path or '')
+        remote_path = _ftp_remote_path_from_url(ftp_url)
         
         # Cache file size to avoid slow FTP connections for ffmpeg HEAD requests
         if not hasattr(self.__class__, '_ftp_size_cache'):

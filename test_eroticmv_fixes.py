@@ -8428,5 +8428,96 @@ report('the scene title alone' in _msrc55.signal_breakdown(['scene']),
        'that does not match the ranking',
        _msrc55.signal_breakdown(['scene']))
 
+# ---------------------------------------------------------------------------
+# 90. A phone file whose name contains '#' played from a local disk but not
+#     over FTP. The playback proxy unescapes the path for ffmpeg and then
+#     urlsplit reads the '#' as a fragment, so it RETR'd the directory.
+# ---------------------------------------------------------------------------
+print()
+print("--- 90: a '#' in a phone filename is not a URL fragment ---")
+
+_src90pre = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              'main.py'), encoding='utf-8').read()
+report('remote_path = _ftp_remote_path_from_url(ftp_url)' in _src90pre,
+       'the proxy serves the path the URL actually refers to -- it used to take '
+       'parsed.path, which for a filename containing a hash is the folder')
+report("quote(remote.lstrip('/'), safe='/')" in _src90pre,
+       'and the thumbnail proxy escapes the URL it builds, which it imported '
+       'quote for and then never did')
+
+_tree90 = ast.parse(_src90pre)
+_fn90 = {}
+for _n90 in _tree90.body:
+    if isinstance(_n90, ast.FunctionDef) and _n90.name in (
+            '_ftp_url_for_native_client', '_ftp_remote_path_from_url'):
+        _fn90[_n90.name] = _n90
+report(len(_fn90) == 2,
+       'the FTP path reader exists alongside the native-client URL builder',
+       'missing: ' + ', '.join(
+           n for n in ('_ftp_url_for_native_client', '_ftp_remote_path_from_url')
+           if n not in _fn90))
+
+if len(_fn90) == 2:
+    from urllib.parse import (urlparse as _up90, urlunparse as _uu90,
+                              urlsplit as _us90, unquote as _uq90,
+                              quote as _q90)
+    _g90 = {'urlparse': _up90, 'urlunparse': _uu90, 'urlsplit': _us90,
+            'unquote': _uq90}
+    for _n90 in _fn90.values():
+        _m90 = ast.Module(body=[_n90], type_ignores=[])
+        ast.fix_missing_locations(_m90)
+        exec(compile(_m90, '<main.py>', 'exec'), _g90)
+    _native90 = _g90['_ftp_url_for_native_client']
+    _rp90 = _g90['_ftp_remote_path_from_url']
+
+    # The file from the report, and the awkward neighbours around it.
+    _cases90 = [
+        'Anime/Prologue/#11-(16)Prologue 1 (LUCIA).mp4',
+        'Movies/Some Scene 1080p.mp4',
+        'Clips/what? ever (2).mp4',
+        'Clips/100% real.mp4',
+        '\u0412\u0438\u0434\u0435\u043e/\u00e9pisode #3.mp4',
+        'a/b #c ?d.mp4',
+        'simple.mp4',
+    ]
+    _bad90 = []
+    for _remote90 in _cases90:
+        _quoted90 = ('ftp://u:pw@192.168.1.20:2121/'
+                     + _q90(_remote90, safe='/'))
+        # exactly the chain the playback proxy runs: escape for the URL, then
+        # unescape for ffmpeg, then read the path back out.
+        _got90 = _rp90(_native90(_quoted90))
+        if _got90 != '/' + _remote90:
+            _bad90.append((_remote90, _got90))
+    report(not _bad90,
+       'a phone path survives the escape, the unescape-for-ffmpeg and the read '
+       'back out -- including the reported file, whose name used to land in '
+       "the URL's fragment so the proxy asked the phone for a folder",
+       str(_bad90))
+    report(_us90(_native90('ftp://u:pw@h:21/' + _q90(
+        'Anime/Prologue/#11-(16)Prologue 1 (LUCIA).mp4', safe='/'))).path
+       == '/Anime/Prologue/',
+       'and plain urlsplit really does truncate it -- that is the bug being '
+       'fixed here, not a hypothetical')
+    _mismatch90 = [r for r in _cases90
+                   if _rp90('ftp://u:pw@h:21/' + _q90(r, safe='/'))
+                   != _rp90(_native90('ftp://u:pw@h:21/' + _q90(r, safe='/')))]
+    report(not _mismatch90,
+       'an escaped URL and its unescaped native form give the same path, so '
+       'the SIZE probe and the RETR agree about which file they mean',
+       str(_mismatch90))
+
+    _src90 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'main.py'), encoding='utf-8').read()
+    report(_src90.count('_ftp_remote_path_from_url(') >= 5,
+       'the path is read through it at every site that used to reach into '
+       'parsed.path -- the playback proxy on both ends, the SIZE probe that '
+       'decides whether to drop a file as dead, and FTP subtitle loading',
+       f"{_src90.count('_ftp_remote_path_from_url(')} call sites")
+    report("quote(remote.lstrip('/'), safe='/')" in _src90,
+       'and the thumbnail proxy escapes the path it builds a URL from -- it '
+       'imported quote and never used it, so a hash dropped the filename '
+       'before the proxy was even reached')
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
