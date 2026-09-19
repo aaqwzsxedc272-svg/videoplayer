@@ -24153,7 +24153,11 @@ try {
             r'\b(?:mkv|mp4|avi|mov|webm|m4v)\b'
         )
         base = re.sub(ignorable_tags, ' ', base)
-        base = re.sub(r'[\[\]\(\)\{\}_\-\./,;:!?"\'`~|<>+=]+', ' ', base, flags=re.UNICODE)
+        # '&' is punctuation, not a word: a bunkr row shown as "Fun &amp;
+        # Games" and a fileditch file named "Fun_Games.mp4" are the same
+        # video, and keeping the ampersand made one key 'fun & games' and
+        # the other 'fun games', so they never grouped.
+        base = re.sub(r'[\[\]\(\)\{\}_\-\./,;:!?"\'`~|<>+=&]+', ' ', base, flags=re.UNICODE)
         base = re.sub(r'\s+', ' ', base).strip()
         return base
 

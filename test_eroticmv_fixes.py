@@ -7889,8 +7889,9 @@ class _Fake85:
     _mirror_title_identity_key = _g85.get('_mirror_title_identity_key')
     _is_fileditch_host = _g85.get('_is_fileditch_host')
 
-    def __init__(self, overrides):
+    def __init__(self, overrides, disp=None):
         self._ov = overrides
+        self._disp = disp or {}
         self._metadata_name_overrides = {}
         self._stream_resolution_cache = {}
         self._mirror_group_cache = {}
@@ -7950,6 +7951,29 @@ if _have85:
     report(_mix85[0] == _mix85[1] and _mix85[2] != _mix85[0],
        'a row the user has not renamed stays separate from the two they have',
        str(_mix85))
+
+    # A bunkr row and a fileditch row of the same video, across hosts, with no
+    # rename on either: the display name carries "Fun &amp; Games" and the
+    # fileditch filename carries "Fun_Games.mp4".
+    _bunkr85 = 'https://bunkr.pk/f/C1WQFFpDS21QN'
+    _fitch85 = ('https://fileditchfiles.st/alpha24/e84a701c612d8ad04ad7/'
+                'Cassie2Sassy_26.08.02_Fun_Games.mp4')
+    _disp85 = {'Cassie2Sassy 26.08.02 Fun &amp; Games.mp4': None}
+    _t85 = 'Cassie2Sassy 26.08.02 Fun &amp; Games.mp4'
+    _d85 = {_bunkr85: _t85, _fitch85: _t85}
+
+    class _Named85(_Fake85):
+        def _playlist_display_name(self, p):
+            return self._disp.get(p, '')
+
+    _cross85 = _Named85({}, _d85)
+    _kb85 = _cross85._mirror_display_group_key(_bunkr85)
+    _kf85 = _cross85._mirror_display_group_key(_fitch85)
+    report(bool(_kb85) and _kb85 == _kf85,
+       'the same video on bunkr and on fileditch groups with no rename at '
+       'all -- "&" is punctuation, not a word, and keeping it made one key '
+       "'fun & games' and the other 'fun games'",
+       f'{_kb85!r} vs {_kf85!r}')
 
     _txt85 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                'main.py'), encoding='utf-8').read()
