@@ -22550,7 +22550,7 @@ try {
         'roshy.tv', 'javgg', 'jav.guru', 'javguru', 'sextb.net', '123av',
         'javdock', 'javhdporn', 'javsubbed', 'javenglish', 'javhd.today',
         'javflix', 'javx', 'jable', 'missav', 'milfnut', 'eporner',
-        'eroticmv',
+        'eroticmv', 'supjav',
     )
 
     def _is_jav_site_host(self, host):

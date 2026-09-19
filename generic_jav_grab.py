@@ -8,7 +8,7 @@ import json
 import re
 import traceback
 from html import unescape
-from urllib.parse import urlparse, urljoin
+from urllib.parse import (urlparse, urljoin, urlunparse, parse_qsl, urlencode)
 import base64
 
 try:
@@ -45,6 +45,146 @@ EMBED_HOST_TOKENS = (
 )
 
 
+# ── supjav.com ────────────────────────────────────────────────────────────────
+# supjav is an aggregator whose watch page carries no stream at all -- only a
+# row of server buttons whose data-link is an encrypted token. The token goes
+# to the player endpoint the page itself iframes (supjav.php?l=<token> on a
+# supremejav host), and that hop is what finally names the real hoster:
+# sextb, jav.guru, roshy, javgg. So the grab has to make that hop before the
+# m3u8 / embed scanning below can find anything.
+
+_SUPJAV_SERVER_RE = re.compile(
+    r'<a[^>]+class="btn-server([^"]*)"[^>]+data-link="([0-9a-fA-F]+)"'
+    r'[^>]*>\s*([^<]*?)\s*<', re.IGNORECASE)
+_SUPJAV_IFRAME_RE = re.compile(
+    r'<iframe[^>]+src=["\']([^"\']*supjav\.php[^"\']*)["\']', re.IGNORECASE)
+# Hosts that are part of supjav's own plumbing or its ad network. A redirect
+# landing back on one of these is not an answer.
+_SUPJAV_OWN_HOSTS = ('supjav', 'supremejav', 'mayzaent', 'mnaspm', 'eix304')
+
+
+def supjav_player_template(html: str) -> str:
+    """The supjav.php URL the page itself iframes, with its token intact."""
+    m = _SUPJAV_IFRAME_RE.search(str(html or ''))
+    return unescape(m.group(1)) if m else ''
+
+
+def supjav_server_links(html: str) -> list:
+    """[(label, player_url)] for a supjav watch page, active server first.
+
+    The player host is read off the page rather than hard-coded: it has been
+    seen as lk1.supremejav.com and the number is exactly the sort of thing
+    that rotates.
+    """
+    template = supjav_player_template(html)
+    if not template:
+        return []
+    try:
+        parsed = urlparse(template)
+        base_query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    except Exception:
+        return []
+    out, seen = [], set()
+    active, rest = [], []
+    for m in _SUPJAV_SERVER_RE.finditer(str(html or '')):
+        classes, token, label = m.group(1), m.group(2), (m.group(3) or '').strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        query = dict(base_query)
+        query['l'] = token
+        url = urlunparse(parsed._replace(query=urlencode(query)))
+        (active if 'active' in (classes or '').lower() else rest).append(
+            (label or f'server{len(seen)}', url))
+    out.extend(active)
+    out.extend(rest)
+    return out
+
+
+def supjav_destination(requested_url: str, status, final_url: str,
+                       body: str) -> str:
+    """The hoster URL a supjav.php response points at, or '' for none.
+
+    Deliberately a pure function of the response, separate from the fetch, so
+    the shapes can be tested without a network. The endpoint is a redirect
+    page and there is no way to know from here which form it will answer in,
+    so every ordinary one is accepted: a real redirect, a meta refresh, an
+    iframe, a location assignment, or a bare URL in the body.
+    """
+    def _foreign(candidate: str) -> str:
+        candidate = unescape(str(candidate or '')).strip()
+        if candidate.startswith('//'):
+            candidate = 'https:' + candidate
+        if not candidate.lower().startswith(('http://', 'https://')):
+            return ''
+        try:
+            host = (urlparse(candidate).netloc or '').lower()
+        except Exception:
+            return ''
+        if not host or any(h in host for h in _SUPJAV_OWN_HOSTS):
+            return ''
+        return candidate
+
+    # A redirect that left supjav's own plumbing is the answer already.
+    moved = _foreign(final_url or '')
+    if moved and str(final_url).strip() != str(requested_url or '').strip():
+        return moved
+
+    text = str(body or '')
+    m = re.search(r'http-equiv=["\']?refresh["\']?[^>]+url=([^"\'>;]+)',
+                  text, re.IGNORECASE)
+    if m:
+        hit = _foreign(m.group(1))
+        if hit:
+            return hit
+    m = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', text, re.IGNORECASE)
+    if m:
+        hit = _foreign(m.group(1))
+        if hit:
+            return hit
+    m = re.search(r'location(?:\.href)?\s*=\s*["\']([^"\']+)["\']', text,
+                  re.IGNORECASE) or \
+        re.search(r'location\.replace\(\s*["\']([^"\']+)["\']', text,
+                  re.IGNORECASE)
+    if m:
+        hit = _foreign(m.group(1))
+        if hit:
+            return hit
+    for m in re.finditer(r'https?://[^\s"\'<>\\]+', text):
+        hit = _foreign(m.group(0))
+        if hit:
+            return hit
+    return ''
+
+
+def _supjav_hoster_urls(html: str, page_url: str, limit: int = 4):
+    """Resolve a supjav watch page to the hoster URLs behind its servers."""
+    found = []
+    for label, player_url in supjav_server_links(html)[:max(1, int(limit or 1))]:
+        try:
+            r = cfreq.get(
+                player_url,
+                impersonate="chrome131",
+                timeout=12,
+                allow_redirects=True,
+                headers={'Referer': page_url or player_url,
+                         'Accept': 'text/html,*/*;q=0.8'},
+            )
+            dest = supjav_destination(player_url, r.status_code,
+                                      str(getattr(r, 'url', '') or ''),
+                                      r.text)
+        except Exception as exc:
+            print(f"[SUPJAV] server {label}: {exc}", file=sys.stderr)
+            continue
+        if dest:
+            print(f"[SUPJAV] server {label} -> {dest}", file=sys.stderr)
+            found.append(dest)
+        else:
+            print(f"[SUPJAV] server {label}: no hoster in what came back "
+                  f"(HTTP {getattr(r, 'status_code', '?')})", file=sys.stderr)
+    return found
+
+
 def _extract_title(html: str) -> str:
     """Best-effort title extraction."""
     # 1. og:title
@@ -63,6 +203,7 @@ def _extract_title(html: str) -> str:
 
 def grab_all(url: str):
     result = {'title': '', 'streams': []}
+    streams_seed = set()
     
     try:
         parsed_url = urlparse(url)
@@ -89,6 +230,18 @@ def grab_all(url: str):
         html = r.text
         result['title'] = _extract_title(html)
 
+        # supjav: the watch page has no stream in it, only server tokens. Make
+        # the supjav.php hop for each server first and carry on with whatever
+        # hoster URLs come back -- sextb / jav.guru / roshy / javgg all have
+        # resolvers already, they just never saw the URL before.
+        if 'supjav' in host:
+            result['supjav_servers'] = [
+                {'label': label, 'player_url': player_url}
+                for label, player_url in supjav_server_links(html)
+            ]
+            for dest in _supjav_hoster_urls(html, url):
+                streams_seed.add(dest)
+
         def _unwrap_b64_host(u):
             try:
                 parsed = urlparse(u)
@@ -108,7 +261,7 @@ def grab_all(url: str):
                 pass
             return u
         
-        streams = set()
+        streams = set(streams_seed)
         
         # 1. Find m3u8
         for m in re.finditer(r'(https?://[^\s\"\'<>]+?\.m3u8[^\s\"\'<>]*)', html):

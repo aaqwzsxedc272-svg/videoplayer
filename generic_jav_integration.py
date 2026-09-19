@@ -48,6 +48,11 @@ def _is_generic_jav_url(url: str) -> bool:
             'javdock.com',
             'eroticmv.com',
             'eroticmv.net',
+            # supjav aggregates sextb / jav.guru / roshy / javgg behind
+            # encrypted server tokens; generic_jav_grab makes the
+            # supjav.php hop before scanning, so the page needs no
+            # scraper of its own.
+            'supjav.com',
         ]
         for t in targets:
             if t in host:

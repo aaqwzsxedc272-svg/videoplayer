@@ -8519,5 +8519,120 @@ if len(_fn90) == 2:
        'imported quote and never used it, so a hash dropped the filename '
        'before the proxy was even reached')
 
+# ---------------------------------------------------------------------------
+# 91. supjav.com -- an aggregator whose watch page carries no stream, only
+#     server buttons whose data-link is an encrypted token.
+# ---------------------------------------------------------------------------
+print()
+print('--- 91: supjav server tokens ---')
+
+_gj91 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     'generic_jav_grab.py')
+_tree91 = ast.parse(open(_gj91, encoding='utf-8').read())
+_fn91 = {}
+for _n91 in _tree91.body:
+    if isinstance(_n91, ast.FunctionDef) and _n91.name in (
+            'supjav_player_template', 'supjav_server_links',
+            'supjav_destination'):
+        _fn91[_n91.name] = _n91
+report(len(_fn91) == 3,
+       'the server-list reader and the redirect reader are in the generic '
+       'grabber, not in a scraper of their own -- supjav hands the URL to '
+       'hosters the app already resolves',
+       'missing: ' + ', '.join(
+           n for n in ('supjav_player_template', 'supjav_server_links',
+                       'supjav_destination') if n not in _fn91))
+
+_src91g = open(_gj91, encoding='utf-8').read()
+report("'supjav' in host" in _src91g,
+       'and the grab makes the supjav.php hop for a supjav page before it '
+       'scans for streams -- the watch page itself contains none')
+_gi91 = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          'generic_jav_integration.py'), encoding='utf-8').read()
+report("'supjav.com'," in _gi91,
+       'the URL gate claims supjav watch pages, so pasting one runs the '
+       'generic grabber')
+report('_SUPJAV_OWN_HOSTS' in _src91g,
+       'a hop that lands back on supjav or its ad network is not treated as '
+       'an answer')
+
+if len(_fn91) == 3:
+    from urllib.parse import (urlparse as _up91, urlunparse as _uu91,
+                              parse_qsl as _pq91, urlencode as _ue91)
+    from html import unescape as _uq91
+    # No 'sys' here: only _supjav_hoster_urls prints to stderr, and it is the
+    # one function this section does not compile out (it does the fetching).
+    _g91 = {'re': re, 'unescape': _uq91, 'urlparse': _up91,
+            'urlunparse': _uu91, 'parse_qsl': _pq91, 'urlencode': _ue91}
+    for _n91 in _tree91.body:
+        if (isinstance(_n91, ast.Assign) and _n91.targets
+                and getattr(_n91.targets[0], 'id', '').startswith('_SUPJAV')):
+            _m91 = ast.Module(body=[_n91], type_ignores=[])
+            ast.fix_missing_locations(_m91)
+            exec(compile(_m91, '<g>', 'exec'), _g91)
+    for _n91 in _fn91.values():
+        _m91 = ast.Module(body=[_n91], type_ignores=[])
+        ast.fix_missing_locations(_m91)
+        exec(compile(_m91, '<g>', 'exec'), _g91)
+
+    _req91 = 'https://lk1.supremejav.com/supjav.php?l=abc&bg=undefined'
+    _dest91 = _g91['supjav_destination']
+    _shapes91 = [
+        ('a real redirect',      200, 'https://sextb.net/embed/xyz123', ''),
+        ('a meta refresh',       200, _req91,
+         '<meta http-equiv="refresh" content="0;url=https://jav.guru/video/4411/">'),
+        ('an iframe',            200, _req91,
+         '<html><iframe src="https://roshy.tv/embed/v/9f2a"></iframe></html>'),
+        ('a location assignment', 200, _req91,
+         "<script>location.href = 'https://javgg.net/javid/88123.html';</script>"),
+        ('a protocol-relative src', 200, _req91,
+         '<iframe src="//roshy.tv/embed/v/77"></iframe>'),
+        ('a bare URL in the body', 200, _req91,
+         'redirecting to https://sextb.net/embed/abc ...'),
+    ]
+    _bad91 = [(l, _dest91(_req91, s, f, b)) for l, s, f, b in _shapes91
+              if not _dest91(_req91, s, f, b)]
+    report(not _bad91,
+       'every ordinary shape a redirect page answers in yields the hoster -- '
+       'there is no way to know from here which one supjav.php will use, so '
+       'the reader accepts all of them', str(_bad91))
+    _none91 = [(l, _dest91(_req91, s, f, b)) for l, s, f, b in [
+        ('nothing but a block page', 200, _req91,
+         '<html><body>blocked</body></html>'),
+        ('a hop back to supjav', 200, _req91,
+         '<meta http-equiv="refresh" content="0;url=https://lk2.supremejav.com/x">'),
+        ('only an ad network', 200, _req91,
+         '<iframe src="https://go.mayzaent.com/smartpop/abc"></iframe>'),
+    ] if _dest91(_req91, s, f, b)]
+    report(not _none91,
+       'and a page that never left supjav, or only reached its ad network, '
+       'is reported as no answer rather than as a stream', str(_none91))
+
+# The capture is a user-uploaded artifact, so its absence is a skip.
+_cap91 = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'supjav.txt')
+if not os.path.isfile(_cap91):
+    print('  SKIP  supjav.txt is not in the working copy, so the server list '
+          'is not read out of a real watch page')
+elif len(_fn91) == 3:
+    _html91 = open(_cap91, encoding='utf-8', errors='replace').read()
+    _links91 = _g91['supjav_server_links'](_html91)
+    report(len(_links91) == 4 and [l for l, _ in _links91][0] == 'ST',
+       'the real DVDES-886 page yields its four servers with the active one '
+       'first, so a dead server is tried after the one supjav itself chose',
+       str([l for l, _ in _links91]))
+    report(_links91 and _links91[0][1] == _g91['supjav_player_template'](_html91),
+       'and the URL built for the active server is byte-for-byte the iframe '
+       'the page already had -- the token substitution is right, not merely '
+       'plausible', (_links91[0][1] if _links91 else '')[:80])
+    report(_links91 and all(
+        _g91['supjav_server_links'](_html91)[i][1]
+        != _g91['supjav_server_links'](_html91)[j][1]
+        for i in range(len(_links91)) for j in range(len(_links91)) if i != j),
+       'each server gets its own player URL, not four copies of one')
+    report('supremejav.com/supjav.php?l=' in (_links91[0][1] if _links91 else ''),
+       'the player host is read off the page rather than hard-coded -- the '
+       'lk1 prefix is exactly the sort of thing that rotates',
+       (_links91[0][1] if _links91 else '')[:60])
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
