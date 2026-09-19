@@ -65,7 +65,7 @@ LINKS_FILENAME       = "metadata_links.json"
 # manually, so "is the running player the one that was just pushed?" has been
 # an open question more than once and has cost whole test runs. This answers it
 # from the first line of the log.
-BUILD = "link6-phone"
+BUILD = "link7-scene"
 print(f"[MetadataScraper] build {BUILD}")
 MATCH_THRESHOLD      = 0.32
 SCRAPE_DELAY         = 0.8     # seconds between yt-dlp calls
@@ -2945,6 +2945,57 @@ def _date_digits(s: str) -> str:
     return re.sub(r"\D", "", s)
 
 
+_QDATE_SEP = r'[./\-]'
+_QDATE_BARE  = re.compile(r'(?<!\d)(\d{8})(?!\d)')
+_QDATE_ISO   = re.compile(r'(?<!\d)(\d{4})' + _QDATE_SEP + r'(\d{1,2})'
+                          + _QDATE_SEP + r'(\d{1,2})(?!\d)')
+_QDATE_DMY   = re.compile(r'(?<!\d)(\d{1,2})' + _QDATE_SEP + r'(\d{1,2})'
+                          + _QDATE_SEP + r'(\d{4})(?!\d)')
+_QDATE_SHORT = re.compile(r'(?<!\d)(\d{2})' + _QDATE_SEP + r'(\d{2})'
+                          + _QDATE_SEP + r'(\d{2})(?!\d)')
+
+
+def _query_date_keys(raw: str) -> set:
+    """Every YYYYMMDD key a date inside a filename or URL could stand for.
+
+    The old pattern wanted a four-digit year and a dash or a slash, which left
+    out the two forms this material is actually named with: YY.MM.DD, as in
+    "MomComes First.26.06.07.Brianna Beach...", and DD.MM.YYYY. The release
+    date was therefore invisible to the matcher for most rows, and the
+    strongest corroborating signal after runtime never fired -- which is how a
+    file could be matched on its scene title with nothing to contradict it.
+
+    A DD.MM.YYYY pair is offered in both orderings, mirroring _date_keys on the
+    record side: which of the two a site meant is not knowable from here, and
+    guessing one silently drops the other. A YY.MM.DD is not, because that
+    convention is unambiguous. Parts that cannot be a month and a day are
+    dropped, so a duration like 10.12.45 never becomes a date.
+    """
+    keys: set = set()
+    text = str(raw or "")
+
+    def _add(year: str, month: str, day: str) -> None:
+        if len(year) == 2:
+            year = ("20" if int(year) <= 69 else "19") + year
+        month, day = month.zfill(2), day.zfill(2)
+        if not 1 <= int(month) <= 12 or not 1 <= int(day) <= 31:
+            return
+        keys.add(f"{year}{month}{day}")
+
+    for m in _QDATE_BARE.finditer(text):
+        s = m.group(1)
+        _add(s[:4], s[4:6], s[6:])
+    for m in _QDATE_ISO.finditer(text):
+        _add(m.group(1), m.group(2), m.group(3))
+    for m in _QDATE_DMY.finditer(text):
+        a, b, y = m.group(1), m.group(2), m.group(3)
+        _add(y, b, a)
+        _add(y, a, b)
+    for m in _QDATE_SHORT.finditer(text):
+        _add(m.group(1), m.group(2), m.group(3))
+    return keys
+
+
 def _date_keys(date: str) -> set[str]:
     """Every digit-ordering a stored date could be queried as.
 
@@ -3005,6 +3056,17 @@ class TitleMatcher:
     # carries the site and/or the scene title alongside the id, so it is
     # unaffected.
     _LONE_ID_STRENGTH = 0.30
+    # A scene title is not an identifier either. "Breaking the Rules" exists in
+    # more than one network, the preview path searches every site and takes the
+    # first hit, so a lone scene signal showed whichever network's copy sorted
+    # first -- 93 titles are shared between the shipped teamskeet and nubiles
+    # databases alone, and a MomComesFirst file whose real record is in neither
+    # was given a Hijab Hookup poster on the strength of the title alone.
+    # Held below HIGH_CONFIDENCE_STRENGTH for the same reason a lone id is:
+    # offered as a possible match to confirm, never auto-applied. A real
+    # filename carries the site, series, a performer or a date alongside the
+    # title, and any one of those corroborates it back above the line.
+    _LONE_SCENE_STRENGTH = 0.45
     # Auto-apply threshold: 'id' or 'scene' alone clears it, while the
     # ('series','site') pair at 0.25 does not.
     HIGH_CONFIDENCE_STRENGTH = 0.60
@@ -3079,8 +3141,7 @@ class TitleMatcher:
         q_norm   = _normalise(raw)
         q_compact = _compact(raw)
         q_tokens = _tokens(raw)
-        q_date   = re.findall(r'\d{8}|\d{4}[-/]\d{2}[-/]\d{2}|\d{2}[-/]\d{2}[-/]\d{4}', raw)
-        q_date_d = set(_date_digits(d) for d in q_date if len(_date_digits(d)) == 8)
+        q_date_d = _query_date_keys(raw)
         q_dur = _query_durations(raw)
         try:
             if int(duration_ms or 0) > 0:
@@ -3187,6 +3248,8 @@ class TitleMatcher:
         sigs = [str(s) for s in (signals or ())]
         if sigs == ["id"]:
             return self._LONE_ID_STRENGTH
+        if sigs == ["scene"]:
+            return self._LONE_SCENE_STRENGTH
         for sig in sigs:
             if str(sig).startswith("model:"):
                 model_total += self._SIGNAL_WEIGHTS["model"]
@@ -3634,6 +3697,10 @@ def signal_breakdown(signals) -> str:
     if sigs == ["id"]:
         return (f"a lone video id = {tm._LONE_ID_STRENGTH:.2f} (held below "
                 f"{tm.HIGH_CONFIDENCE_STRENGTH:.2f} on purpose)")
+    if sigs == ["scene"]:
+        return (f"the scene title alone = {tm._LONE_SCENE_STRENGTH:.2f} (held "
+                f"below {tm.HIGH_CONFIDENCE_STRENGTH:.2f}: titles repeat across "
+                f"networks)")
     parts, total, model_total, model_n = [], 0.0, 0.0, 0
     for sig in sigs:
         if sig.startswith("model:"):

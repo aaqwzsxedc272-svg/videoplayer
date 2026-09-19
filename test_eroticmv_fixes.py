@@ -4580,8 +4580,24 @@ report(_mt55._signal_strength(['series', 'site']) < _HIGH55,
 # An id only exists on the creator's own site, so even corroborated by the
 # site name it is no longer allowed to carry a match by itself -- the name,
 # actors, series, date or runtime has to.
-report(_mt55._signal_strength(['scene']) >= _HIGH55,
-       'while the whole scene title is')
+# A scene title is not an identifier either. 'Breaking the Rules' exists in
+# more than one network and the preview path takes the first site that has it,
+# so the title alone used to hand a row somebody else's poster.
+report(getattr(_msrc55.TitleMatcher, '_LONE_SCENE_STRENGTH', _HIGH55) < _HIGH55
+       and _mt55._signal_strength(['scene']) < _HIGH55,
+       'a lone scene title is offered as a possible match, never auto-applied '
+       '-- 93 titles are shared between the shipped teamskeet and nubiles '
+       'databases, so the title alone cannot pick between networks',
+       f"lone scene {_mt55._signal_strength(['scene'])} < {_HIGH55}")
+report(_mt55._signal_strength(['scene', 'site']) >= _HIGH55
+       and _mt55._signal_strength(['scene', 'model:a']) >= _HIGH55
+       and _mt55._signal_strength(['scene', 'date']) >= _HIGH55,
+       'and any one corroborating signal -- the site, a performer or the '
+       'release date -- carries it back over the line, which is the whole '
+       'point: a real filename is never only a title',
+       str([_mt55._signal_strength(['scene', 'site']),
+            _mt55._signal_strength(['scene', 'model:a']),
+            _mt55._signal_strength(['scene', 'date'])]))
 report(_mt55._signal_strength(['id', 'site']) < _HIGH55,
        'and a creator-site id, even with the site name, is not',
        f"{_mt55._signal_strength(['id','site'])} < {_HIGH55}")
@@ -8311,6 +8327,103 @@ if len(_fn88) == 4:
        'and a page with no player keywords anywhere still gives up its '
        'caption track -- nothing is rejected for mentioning nothing',
        str(_urls88c))
+
+# ---------------------------------------------------------------------------
+# 89. A row nobody had renamed was given a poster and a preview from a scene it
+#     had nothing to do with, because the two shared a title. From problem.txt.
+# ---------------------------------------------------------------------------
+print()
+print('--- 89: a shared scene title is not a match ---')
+
+_q89 = ('MomComes First.26.06.07. Brianna.Beach.Breaking.The.Rules.XXX.1080p')
+
+
+def _db89(movies):
+    d = _msrc55.MetadataDB.__new__(_msrc55.MetadataDB)
+    d._data = {"movies": movies}
+    d.db_path = ''
+    return d
+
+
+def _rec89(slug, title, series, models, date, site):
+    return {slug: {'slug': slug, 'title': title, 'series': series,
+                   'models': models, 'date': date, 'source_site': site,
+                   'image': f'https://x/{slug}.jpg',
+                   'preview': f'https://x/{slug}.mp4', 'duration': 0,
+                   'video_id': '', 'meta_fetched': True}}
+
+
+_hijab89 = _rec89('hijab-hookup-izzy-lush-breaking-the-rules',
+                  'Breaking the Rules', 'Hijab Hookup', ['Izzy Lush'],
+                  '22/08/2021', 'HijabHookup')
+_mcf89 = _rec89('momcomesfirst-brianna-beach-breaking-the-rules',
+                'Breaking The Rules', 'MomComesFirst', ['Brianna Beach'],
+                '07/06/2026', 'MomComesFirst')
+
+_m89 = _msrc55.TitleMatcher(_db89(dict(_hijab89)))
+_c89 = _m89.match_candidates(_q89, limit=5, include_weak=True)
+report(_c89 and _c89[0]['signals'] == ['scene'],
+       'the reported row matches the unrelated scene on its title and nothing '
+       'else -- the file is a MomComesFirst release and that record is in '
+       'neither shipped database, so there was no site, performer, series or '
+       'date to agree with', str(_c89[0]['signals']) if _c89 else 'no candidate')
+report(_m89.match(_q89) is None,
+       'so the preview path shows no poster at all instead of another '
+       "network's scene: match() only returns high-confidence candidates, and "
+       'a lone title is no longer one',
+       repr((_m89.match(_q89) or {}).get('series')))
+report(_c89 and _c89[0]['confidence'] == 'possible',
+       'it is still offered in the linker as a possible match for the user to '
+       'confirm -- dropped, not hidden')
+
+_both89 = dict(_hijab89)
+_both89.update(_mcf89)
+_m289 = _msrc55.TitleMatcher(_db89(_both89))
+_hit89 = _m289.match(_q89)
+report(_hit89 is not None and _hit89['series'] == 'MomComesFirst',
+       'and when the right record does exist it wins outright, with the '
+       'release date now counted as agreement',
+       (_hit89 or {}).get('series'))
+_sig89 = next(c['signals'] for c in _m289.match_candidates(
+    _q89, limit=5, include_weak=True)
+    if c['movie']['series'] == 'MomComesFirst')
+report('date' in _sig89,
+       'the date 26.06.07 in the filename is read as a release date -- the old '
+       'pattern wanted a four-digit year and a dash or a slash, so the date '
+       'carried by nearly every scene name was invisible and nothing could '
+       'contradict a title-only match', str(_sig89))
+
+_qd89 = getattr(_msrc55, '_query_date_keys', None)
+report(_qd89 is not None, 'the filename date reader exists')
+if _qd89 is None:
+    _qd89 = lambda s: set()
+report(sorted(_qd89('26.06.07')) == ['20260607']
+       and sorted(_qd89('Breaking.the.Rules.22.08.2021')) == ['20210822']
+       and sorted(_qd89('2021-08-22')) == ['20210822']
+       and sorted(_qd89('22/08/2021')) == ['20210822'],
+       'YY.MM.DD, DD.MM.YYYY, ISO and DD/MM/YYYY are all read as dates')
+report(not _qd89('10.12.45')
+       and not _qd89('99.99.99')
+       and not _qd89('1080p')
+       and not _qd89('x264'),
+       'and parts that cannot be a month and a day are not dates, so a '
+       'duration or a codec tag never becomes one')
+
+for _lbl89, _q289 in (
+        ('site', 'HijabHookup.21.08.22.Breaking.The.Rules.XXX.1080p'),
+        ('performer', 'Izzy Lush - Breaking the Rules.mp4'),
+        ('date', 'Breaking.the.Rules.22.08.2021.mp4')):
+    report(_msrc55.TitleMatcher(_db89(dict(_hijab89))).match(_q289) is not None,
+           f'a filename that also carries the {_lbl89} still matches '
+           'outright -- the title is only ever refused when it is all there '
+           'is', _q289)
+report(_msrc55.TitleMatcher(_db89(dict(_hijab89))).match(
+           'Breaking the Rules.mp4') is None,
+       'a bare title with nothing else is left for the user to pick')
+report('the scene title alone' in _msrc55.signal_breakdown(['scene']),
+       'and the card explains why it was held back rather than showing a total '
+       'that does not match the ranking',
+       _msrc55.signal_breakdown(['scene']))
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
