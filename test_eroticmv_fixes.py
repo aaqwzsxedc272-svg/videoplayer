@@ -8683,6 +8683,21 @@ if len(_fn91) == len(_want91):
        'blocked -- it goes to the player host, not to supjav, and forcing one '
        'per server would mean four launches for servers that answer plain HTTP')
 
+    _gi91b = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'generic_jav_integration.py'), encoding='utf-8').read()
+    report('self._main_brave_cache_capture(src_url, title)' in _gi91b,
+       'when the app\u2019s own browser cannot clear the check, the capture '
+       'falls back to the user\u2019s Brave. _main_brave_cache_capture was '
+       'installed on VideoPlayer and called by nothing -- the one channel '
+       'that uses a real profile, which is the thing a bot check is actually '
+       'judging, sat unused')
+    report("'supjav' in src_url or _gated" in _gi91b,
+       'and the fallback fires for a supjav row or any grab that failed on a '
+       'gate, not for every failed grab')
+    report("'streams': dedup" in _gi91b,
+       'the Brave capture hands back the same shape the worker already reads, '
+       'so the fallback needs no translation')
+
     _lb91 = _g91.get('_looks_blocked')
     report(_lb91 is not None, 'the bot-gate test is in the grabber')
     if _lb91 is not None:

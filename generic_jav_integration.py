@@ -2369,6 +2369,41 @@ def _vp_launch_generic_jav_grab(self, source_url: str, play_first: bool = True) 
                     title   = data.get('title') or 'Generic Video'
                     streams = data.get('streams') or []
 
+                    # supjav sits behind a Cloudflare check that a
+                    # Playwright-driven browser does not clear -- it reloads
+                    # the challenge no matter what is clicked, because the
+                    # browser is the thing being judged. The user's own Brave
+                    # with their own profile passes it, and _main_brave_cache_
+                    # capture was already built to do exactly that: open the
+                    # page in the real browser, tail --log-net-log, and keep
+                    # every m3u8 it requests. It was installed on VideoPlayer
+                    # and never called by anything.
+                    _gated = bool(grab_error) and any(
+                        k in str(grab_error).lower()
+                        for k in ('challenge', '403', '429', '503', 'blocked'))
+                    if not streams and ('supjav' in src_url or _gated):
+                        try:
+                            self.generic_jav_osd.emit(
+                                'The app\u2019s browser cannot clear this '
+                                'check. Opening it in your Brave \u2014 solve '
+                                'it and start the video; the app captures the '
+                                'stream.', 10000)
+                        except Exception:
+                            pass
+                        print('[GENERIC_JAV] automated grab was gated; '
+                              f'falling back to the user\u2019s Brave: '
+                              f'{grab_error or "no stream"}')
+                        try:
+                            _fb = self._main_brave_cache_capture(src_url, title) or {}
+                        except Exception as _fb_exc:
+                            print(f'[GENERIC_JAV] main-Brave fallback failed: '
+                                  f'{_fb_exc}')
+                            _fb = {}
+                        if _fb.get('streams'):
+                            data = _fb
+                            title = _fb.get('title') or title
+                            streams = _fb.get('streams') or []
+
                     if not streams:
                         raise RuntimeError(grab_error or 'No stream URL captured')
 
