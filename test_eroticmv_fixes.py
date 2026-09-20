@@ -9276,5 +9276,79 @@ report("btn.setAttribute(Qt.WidgetAttribute.WA_Hover, True)" in SRC
    'and the buttons still ask for hover events -- WA_Hover plus mouse '
    'tracking, without which no HoverEnter or MouseMove ever arrives')
 
+# ── 95. A submenu that is already open must not be rebuilt on hover ───────────
+# Hover is not one event: entering a menu button delivers Enter and then a
+# stream of MouseMove / HoverMove while the pointer stays on it, and an 80 ms
+# timer fires too. Re-enabling the hover handler without a guard rebuilt the
+# submenu panel on every one of them -- the list blinked and the UI lagged.
+_vp95 = next((n for n in ast.walk(TREE) if isinstance(n, ast.ClassDef)
+              and n.name == 'VideoPlayer'), None)
+_fn95 = {n.name: n for n in (_vp95.body if _vp95 else [])
+         if isinstance(n, ast.FunctionDef)
+         and n.name in ('_fullscreen_overlay_submenu_open_for',
+                        '_open_fullscreen_overlay_submenu_button',
+                        '_show_fullscreen_overlay_menu')}
+report('_fullscreen_overlay_submenu_open_for' in _fn95,
+   'there is a way to ask whether this button\u2019s submenu is already up',
+   'defined' if '_fullscreen_overlay_submenu_open_for' in _fn95 else 'MISSING')
+if '_fullscreen_overlay_submenu_open_for' in _fn95:
+    _g95 = {}
+    exec(compile(ast.Module([_fn95['_fullscreen_overlay_submenu_open_for']], []),
+                 '<guard95>', 'exec'), _g95)
+    _G95 = _g95['_fullscreen_overlay_submenu_open_for']
+
+    class _Panel95:
+        def __init__(self, anchor, visible=True):
+            self._fullscreen_overlay_anchor = anchor
+            self._visible95 = visible
+
+        def isVisible(self):
+            return self._visible95
+
+    class _Self95:
+        def __init__(self, panels):
+            self._fullscreen_overlay_menu_panels = panels
+
+    class _Btn95:
+        pass
+
+    _a95, _b95 = _Btn95(), _Btn95()
+    for _lbl95, _slf95, _btn95, _want95 in [
+            ('no panels at all', _Self95([]), _a95, False),
+            ('a panel anchored to this button', _Self95([_Panel95(_a95)]),
+             _a95, True),
+            ('a panel anchored to a different button',
+             _Self95([_Panel95(_b95)]), _a95, False),
+            ('this button, but the panel is hidden',
+             _Self95([_Panel95(_a95, visible=False)]), _a95, False),
+            ('two panels, the second one mine',
+             _Self95([_Panel95(_b95), _Panel95(_a95)]), _a95, True),
+            ('a panel with no anchor recorded',
+             _Self95([type('P95', (), {'isVisible': lambda s: True})()]),
+             _a95, False),
+            ('no button at all', _Self95([_Panel95(_a95)]), None, False),
+    ]:
+        report(_G95(_slf95, _btn95) is _want95,
+           f'the guard answers {_want95} for {_lbl95}')
+
+    _osrc95 = ast.get_source_segment(
+        SRC, _fn95['_open_fullscreen_overlay_submenu_button']) or ''
+    _gline95 = _osrc95.find('_fullscreen_overlay_submenu_open_for(button)')
+    _cline95 = _osrc95.find("_fullscreen_overlay_open_submenu'")
+    report(_gline95 > 0 and (_cline95 < 0 or _gline95 < _cline95),
+       'and the opener consults it BEFORE it rebuilds -- checking afterwards '
+       'would still tear the panel down on every mouse move')
+
+_sm95 = _fn95.get('_show_fullscreen_overlay_menu')
+_smsrc95 = ast.get_source_segment(SRC, _sm95) if _sm95 else ''
+report(bool(_sm95) and 'anchor_button=None' in _smsrc95
+       and 'panel._fullscreen_overlay_anchor = anchor_button' in _smsrc95,
+   'the panel records which button opened it -- the only thing the guard has '
+   'to compare against')
+report(SRC.count('anchor_button=b,') + SRC.count('anchor_button=button,') >= 2,
+   'and both routes that open a submenu pass the anchor, so the guard works '
+   'whether the button was built from a spec or from a QMenu snapshot',
+   str(SRC.count('anchor_button=b,') + SRC.count('anchor_button=button,')))
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

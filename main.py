@@ -20307,7 +20307,7 @@ try {
 
         msg.exec()
 
-    def _show_fullscreen_overlay_menu(self, global_pos, actions, title=None, clear_existing_menus=True, level=0, anchor_rect_global=None):
+    def _show_fullscreen_overlay_menu(self, global_pos, actions, title=None, clear_existing_menus=True, level=0, anchor_rect_global=None, anchor_button=None):
         if not self._is_app_fullscreen():
             return False
         if clear_existing_menus:
@@ -20318,6 +20318,10 @@ try {
         panel = QFrame(self)
         panel.setObjectName("fullscreenOverlayMenu")
         panel._fullscreen_overlay_level = int(level or 0)
+        # Which button this panel was opened from. The hover handler needs it
+        # to tell "this submenu is already up" from "open a different one";
+        # without it every MouseMove rebuilds the panel and it blinks.
+        panel._fullscreen_overlay_anchor = anchor_button
         panel.setStyleSheet(
             """
             QFrame#fullscreenOverlayMenu {
@@ -20399,6 +20403,7 @@ try {
                     clear_existing_menus=False,
                     level=next_level,
                     anchor_rect_global=self._make_global_rect(b, b.rect()),
+                    anchor_button=b,
                 )
                 btn._fullscreen_overlay_open_submenu = callback
                 submenu_buttons.append(btn)
@@ -20471,6 +20476,29 @@ try {
             )
         return True
 
+    def _fullscreen_overlay_submenu_open_for(self, button):
+        """True when the submenu panel on screen was opened from this button.
+
+        Hover is not a single event: entering a menu button delivers Enter,
+        then a stream of MouseMove / HoverMove for as long as the pointer
+        stays on it. Treating each one as "open the submenu" tears the panel
+        down and builds it again dozens of times a second.
+        """
+        if button is None:
+            return False
+        for panel in list(
+                getattr(self, '_fullscreen_overlay_menu_panels', []) or []):
+            if getattr(panel, '_fullscreen_overlay_anchor', None) is not button:
+                continue
+            try:
+                if panel.isVisible():
+                    return True
+            except Exception:
+                # A panel we cannot query is still on the list; assume it is
+                # up rather than rebuild over it.
+                return True
+        return False
+
     def _open_fullscreen_overlay_submenu_button(self, button):
         if button is None:
             return False
@@ -20479,6 +20507,12 @@ try {
                 return False
         except Exception:
             return False
+        # Hover arrives on Enter AND on every MouseMove / HoverMove, and the
+        # 80 ms follow-up timer fires as well. Rebuilding a submenu that is
+        # already open is what made the list blink and the UI lag, so a panel
+        # already anchored to this button is a no-op rather than a rebuild.
+        if self._fullscreen_overlay_submenu_open_for(button):
+            return True
         callback = getattr(button, '_fullscreen_overlay_open_submenu', None)
         if callable(callback):
             try:
@@ -20504,6 +20538,7 @@ try {
                 clear_existing_menus=False,
                 level=level + 1,
                 anchor_rect_global=anchor_rect,
+                anchor_button=button,
             )
         except Exception:
             return False
