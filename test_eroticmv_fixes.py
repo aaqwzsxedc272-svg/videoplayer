@@ -9208,5 +9208,73 @@ console.log(JSON.stringify(out));
            'returned segment URLs would hand mpv a single fragment',
            str(_o93.get('count')))
 
+# ── 94. Fullscreen overlay submenus open on hover, including at level 0 ───────
+# The top-level overlay panel stores _fullscreen_overlay_level = 0. The hover
+# guard read it with `int(getattr(...) or -1)`, and `0 or -1` is -1, so the
+# guard was false and hover was switched off for every submenu on the first
+# panel -- Recent Files and Recent Playlists only opened on a click.
+# main.py has several eventFilter methods; this is the one that drives the
+# fullscreen overlay. Picking the first by name silently selects another
+# class's handler and every assertion below passes or fails for the wrong
+# reason.
+_ef94 = next((n for n in ast.walk(TREE)
+              if isinstance(n, ast.FunctionDef) and n.name == 'eventFilter'
+              and '_fullscreen_overlay_submenu' in (
+                  ast.get_source_segment(SRC, n) or '')), None)
+_os94 = next((n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+              and n.name == '_open_fullscreen_overlay_submenu_button'), None)
+report(_ef94 is not None and _os94 is not None,
+   'the fullscreen overlay hover handler and the submenu opener are both here')
+
+
+def _level_expr94(fn, want):
+    """Pull the real statements that compute a menu level out of main.py."""
+    got = []
+    for n in ast.walk(fn) if fn else []:
+        if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                and isinstance(n.targets[0], ast.Name)
+                and n.targets[0].id in want):
+            got.append(n)
+    got.sort(key=lambda n: getattr(n, 'lineno', 0))
+    return got
+
+
+for _fn94, _names94, _var94, _argname94 in (
+        (_ef94, ('_olvl', 'overlay_level'), 'overlay_level', 'obj'),
+        (_os94, ('_blvl', 'level'), 'level', 'button')):
+    _stmts94 = _level_expr94(_fn94, _names94)
+    report(len(_stmts94) == len(_names94),
+       f'{_var94} is computed in {_argname94}\u2019s handler',
+       str([getattr(s.targets[0], 'id', '?') for s in _stmts94]))
+    if len(_stmts94) != len(_names94):
+        continue
+    for _lvl94, _want94 in ((0, 0), (1, 1), (2, 2), (None, -1)):
+        _o94 = type('B', (), {})()
+        if _lvl94 is not None:
+            setattr(_o94, '_fullscreen_overlay_level', _lvl94)
+        _g94 = {_argname94: _o94}
+        for _s94 in _stmts94:
+            exec(compile(ast.Module([_s94], []), '<lvl94>', 'exec'), _g94)
+        report(_g94.get(_var94) == _want94,
+           f'a button at overlay level {_lvl94} reads back as {_want94}'
+           + ('' if _lvl94 != 0 else
+              ' -- level 0 is the panel the user right-clicked, and `0 or -1`'
+              ' is -1, which is what turned hover off'),
+           f'got {_g94.get(_var94)}')
+
+report("_fullscreen_overlay_level', -1) or -1" not in SRC,
+   'and the `or -1` coercion is gone from both places, not just the one that '
+   'was reported -- the same idiom in the submenu opener would have created '
+   'the child panel at level 0, on top of its own parent')
+_efsrc94 = ast.get_source_segment(SRC, _ef94) if _ef94 else ''
+report('if overlay_level >= 0:' in _efsrc94
+       and 'if overlay_submenu and _etype in hover_events:' in _efsrc94,
+   'the hover guard that was being skipped is still the thing that opens the '
+   'submenu, so fixing the level is what re-enables it')
+report("btn.setAttribute(Qt.WidgetAttribute.WA_Hover, True)" in SRC
+       and 'btn.setMouseTracking(True)' in SRC,
+   'and the buttons still ask for hover events -- WA_Hover plus mouse '
+   'tracking, without which no HoverEnter or MouseMove ever arrives')
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

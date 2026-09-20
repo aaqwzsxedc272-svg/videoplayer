@@ -20492,7 +20492,10 @@ try {
         if not submenu_spec:
             return False
         try:
-            level = int(getattr(button, '_fullscreen_overlay_level', -1) or -1)
+            # Same trap as the hover guard: level 0 must stay 0, or the
+            # submenu panel is created at level 0 and collides with its parent.
+            _blvl = getattr(button, '_fullscreen_overlay_level', None)
+            level = int(_blvl) if _blvl is not None else -1
             anchor_rect = self._make_global_rect(button, button.rect())
             return self._show_fullscreen_overlay_menu(
                 anchor_rect.topRight(),
@@ -52768,7 +52771,12 @@ try {
                 return True
 
         overlay_submenu = getattr(obj, '_fullscreen_overlay_submenu', None)
-        overlay_level = int(getattr(obj, '_fullscreen_overlay_level', -1) or -1)
+        # Not `... or -1`: a TOP-LEVEL overlay button carries level 0, and
+        # `0 or -1` is -1, which made the guard below false and silently
+        # switched off hover for every submenu on the first menu panel. That
+        # is why Recent Files / Recent Playlists only opened on a click.
+        _olvl = getattr(obj, '_fullscreen_overlay_level', None)
+        overlay_level = int(_olvl) if _olvl is not None else -1
         hover_events = (_ENT, _MM, _HENT, _HMV)
         if overlay_level >= 0:
             if overlay_submenu and _etype in hover_events:
