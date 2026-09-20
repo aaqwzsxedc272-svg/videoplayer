@@ -10206,5 +10206,210 @@ if _hv100 is not None:
            'a one-line name gets no filter: the menu already tracks those '
            'correctly, which is why only the wrapped ones doubled up')
 
+# ── 101. Captions a site generates itself (auto subs and their translations) ──
+# The reported sites put no caption FILE in the page: the player is handed an
+# endpoint that lists the tracks, so the scan of the page for .vtt/.srt finds
+# nothing and the app offers no subtitles. These run the real functions that
+# look for that endpoint and read whatever JSON comes back.
+report('def _subtitle_endpoint_candidates(' in SRC
+       and 'def _subtitle_tracks_from_payload(' in SRC
+       and 'def _extract_subtitle_tracks_from_endpoints(' in SRC
+       and 'def _subtitle_tracks_from_body(' in SRC
+       and 'def _subtitle_endpoint_body(' in SRC,
+   'the app can read a site\'s own subtitle list, not just a caption file')
+_r101 = SRC.index('def _resolve_stream_from_html(')
+_body101 = SRC[_r101:_r101 + 14000]
+_first101 = _body101.find('_extract_subtitle_tracks_from_html(')
+_second101 = _body101.find('_extract_subtitle_tracks_from_endpoints(')
+report(_first101 != -1, 'the page is still scanned for caption files first')
+report(_second101 != -1,
+   'and when the page holds none, the endpoint it points at is read -- that '
+   'is the resolver the field log\'s [HTML_RESOLVE] lines come from')
+report(-1 < _first101 < _second101,
+   'as a fallback, so a site that does hand over a .vtt is untouched')
+
+_sub_fns = [n for n in TREE.body if isinstance(n, ast.FunctionDef)
+            and n.name in ('_caption_ext_of', '_lang_from_url',
+                           '_subtitle_endpoint_candidates',
+                           '_subtitle_tracks_from_payload')]
+_sub_consts = [n for n in TREE.body if isinstance(n, ast.Assign)
+               and getattr(n.targets[0], 'id', '').startswith(
+                   ('_CAPTION_FILE_EXTS', '_SUB_'))]
+report(len(_sub_fns) == 4, 'the caption helpers sit at module level, reusable',
+       'found %d of 4' % len(_sub_fns))
+from urllib.parse import urlsplit as _us101
+_g101 = {'re': re, 'os': os, 'json': json, 'urlparse': urlparse,
+         'urljoin': urljoin, 'urlsplit': _us101,
+         'html_unescape': html_unescape, 'print': print}
+exec(compile(ast.Module(body=_sub_consts + _sub_fns, type_ignores=[]),
+             'subs101', 'exec'), _g101)
+_candidates = _g101['_subtitle_endpoint_candidates']
+_from_payload = _g101['_subtitle_tracks_from_payload']
+report(_g101['_caption_ext_of']('https://a/b.vtt?x=1') == 'vtt',
+   'a caption file is recognised through a query string')
+report(_g101['_caption_ext_of']('https://a/video-subtitles/9') == '',
+   'and an endpoint is not one, which is how the two are told apart')
+report(_g101['_lang_from_url']('https://cdn/a/en.vtt') == 'en'
+       and _g101['_lang_from_url']('https://cdn/a/s.vtt?lang=ja') == 'ja',
+   'a track\'s language is read off its URL when nothing else states one')
+report(_g101['_lang_from_url']('https://cdn/embed/xyz/a.vtt') == '',
+   'and a path segment that is not a language is not dressed up as one')
+
+# A page that hands over a caption file must not also invent an endpoint out
+# of the kind="captions" attribute it was rejected by.
+_track_page = '<track kind="captions" srclang="en" src="https://cdn.x.com/a/en.vtt">'
+report(_candidates(_track_page, 'https://x.com/v/1') == [],
+   'a page that already gives a caption file invents no endpoint',
+   repr(_candidates(_track_page, 'https://x.com/v/1')))
+report(_candidates('<script>var s="https://cdn.x.com/m/1.m3u8";</script>',
+                   'https://x.com/v/1') == [],
+   'a page with no subtitle reference yields none')
+report(_candidates('', 'https://x.com/v/1') == [], 'an empty page yields none')
+report(_candidates('<a href="subtitles">subs</a>', '') == [],
+   'a bare word is not joined onto the page URL to make one up')
+# What the reported sites look like: an endpoint inside a JS string, so the
+# slashes are escaped.
+_endpoint_page = (
+    '<script>html5player.setSubtitlesUrl('
+    '"https:\\/\\/www.xvideos.com\\/video-subtitles\\/upbutthfd81");'
+    'var cfg = {"captions":"\\/api\\/captions?id=9",'
+    '"other":"https:\\/\\/cdn.elsewhere.com\\/subtitles\\/9.json",'
+    '"thumb":"https:\\/\\/cdn.xvideos.com\\/thumbs\\/1.jpg"};'
+    '</script>')
+_found101 = _candidates(_endpoint_page,
+                        'https://www.xvideos.com/video.upbutthfd81/title')
+report('https://www.xvideos.com/video-subtitles/upbutthfd81' in _found101,
+   'an endpoint written with escaped slashes is found', repr(_found101))
+report('https://www.xvideos.com/api/captions?id=9' in _found101,
+   'and a relative one is joined onto the page it came from')
+report('https://cdn.xvideos.com/thumbs/1.jpg' not in _found101,
+   'while an unrelated CDN URL is not mistaken for one')
+report(bool(_found101) and _found101[0].startswith('https://www.xvideos.com/'),
+   'the page\'s own host is asked first', repr(_found101))
+report(len(_candidates(_endpoint_page, 'https://x.com/v', limit=2)) <= 2,
+   'and the list is capped, so a noisy page costs a few requests, not dozens')
+
+report(_from_payload([
+    {'lang': 'en', 'label': 'English (auto)', 'url': 'https://cdn/a/en.vtt'},
+    {'lang': 'fr', 'label': 'French', 'src': '/subs/fr.vtt', 'auto': True},
+], 'https://cdn/a/list.json') == [
+    {'url': 'https://cdn/a/en.vtt', 'lang': 'en', 'ext': 'vtt',
+     'name': 'English (auto)', 'automatic': True},
+    {'url': 'https://cdn/subs/fr.vtt', 'lang': 'fr', 'ext': 'vtt',
+     'name': 'French', 'automatic': True}],
+   'a flat track list is read, relative URLs resolved against the endpoint')
+_keyed101 = _from_payload({
+    'en': {'url': 'https://cdn/a/en.vtt', 'name': 'English'},
+    'de': {'file': 'de.vtt', 'automatic': True},
+}, 'https://cdn/a/list')
+report([t['lang'] for t in _keyed101] == ['en', 'de'],
+   'a payload keyed by language is read too, whatever shape the site chose')
+report([t['automatic'] for t in _keyed101] == [False, True],
+   'and a machine track is marked as one while an authored one is not')
+_nested101 = _from_payload({'player': {'config': {'subtitleTracks': [
+    {'language': 'ja', 'data': 'https://cdn/a/ja.vtt'},
+    {'language': 'en', 'url': 'https://cdn/a/none.txt'}]}}}, '')
+report([t['lang'] for t in _nested101] == ['ja'],
+   'tracks buried in a player config are found, and a non-caption file is not')
+report(_from_payload({'url': 'https://cdn/a/en.vtt'}, '') == [
+    {'url': 'https://cdn/a/en.vtt', 'lang': 'en', 'ext': 'vtt',
+     'name': '', 'automatic': False}],
+   'a bare caption URL with no language beside it is still a track')
+report(_from_payload({'a': 1}, '') == [] and _from_payload([1, 2], '') == []
+       and _from_payload(None, '') == [],
+   'a payload with no caption URL in it yields nothing rather than raising')
+report(len(_from_payload([{'lang': 'en', 'url': 'https://cdn/a/en.vtt'}] * 3,
+                         '')) == 1,
+   'and a track listed three times is offered once')
+
+# The two methods, against a stub that scripts what each endpoint answers.
+_sub_meths = []
+for _node101 in ast.walk(TREE):
+    if isinstance(_node101, ast.ClassDef) and _node101.name == 'VideoPlayer':
+        for _m101 in _node101.body:
+            if isinstance(_m101, ast.FunctionDef) and _m101.name in (
+                    '_subtitle_tracks_from_body',
+                    '_extract_subtitle_tracks_from_endpoints'):
+                _sub_meths.append(_m101)
+report(len(_sub_meths) == 2, 'both endpoint methods are on VideoPlayer')
+
+
+class _SubStub101(object):
+    def __init__(self, bodies):
+        self.bodies = dict(bodies)
+        self.asked = []
+
+    def _subtitle_endpoint_body(self, url, referer=''):
+        self.asked.append(url)
+        return self.bodies.get(url, '')
+
+    def _preferred_remote_subtitle_tracks(self, tracks, limit=4):
+        return list(tracks)[:max(1, int(limit or 1))]
+
+
+for _m101 in _sub_meths:
+    exec(compile(ast.Module(body=[_m101], type_ignores=[]), 'subm101', 'exec'),
+         _g101)
+_g101['_subtitle_endpoint_body'] = _SubStub101._subtitle_endpoint_body
+_g101['_preferred_remote_subtitle_tracks'] = \
+    _SubStub101._preferred_remote_subtitle_tracks
+_SubStub101._subtitle_tracks_from_body = _g101['_subtitle_tracks_from_body']
+import io as _io101
+import contextlib as _ctx101
+
+
+def _run101(page_html, page_url, bodies):
+    stub = _SubStub101(bodies)
+    buf = _io101.StringIO()
+    with _ctx101.redirect_stdout(buf):
+        out = _g101['_extract_subtitle_tracks_from_endpoints'](
+            stub, page_html, page_url)
+    return stub, out, buf.getvalue()
+
+
+_stub101, _tracks101, _log101 = _run101(
+    _endpoint_page, 'https://www.xvideos.com/video.upbutthfd81/title',
+    {'https://www.xvideos.com/video-subtitles/upbutthfd81':
+     '[{"lang":"en","url":"https://cdn/a/en.vtt"},'
+     '{"lang":"es","url":"https://cdn/a/es.vtt","auto":true}]'})
+report([t['lang'] for t in _tracks101] == ['en', 'es'],
+   'the endpoint pass turns a site\'s subtitle list into real tracks',
+   repr(_tracks101))
+report(bool(_tracks101)
+       and all(t['ext'] == 'vtt' for t in _tracks101),
+   'each carrying the extension the player needs to load it')
+report(_stub101.asked[:1] == [
+    'https://www.xvideos.com/video-subtitles/upbutthfd81'],
+   'the page\'s own endpoint is the one asked first')
+report('[SUBS]' in _log101 and 'subtitle endpoint' in _log101
+       and '2 track(s)' in _log101,
+   'and the attempt is logged, so a site that still misses says why',
+   repr(_log101))
+
+_stub101, _tracks101, _log101 = _run101(_track_page, 'https://x.com/v/1', {})
+report(_tracks101 == [] and _stub101.asked == [],
+   'no endpoint in the page means nothing is fetched and nothing is offered')
+report('no caption file and no subtitle endpoint' in _log101,
+   'and that is said out loud rather than failing silently', repr(_log101))
+
+_stub101, _tracks101, _log101 = _run101(
+    _endpoint_page, 'https://www.xvideos.com/v/1',
+    {'https://www.xvideos.com/video-subtitles/upbutthfd81': ''})
+report(_tracks101 == [] and 'no response' in _log101,
+   'an endpoint that answers nothing is reported, not swallowed',
+   repr(_log101))
+
+_body101fn = _g101['_subtitle_tracks_from_body']
+_vtt101 = _body101fn(None, 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nhello\n',
+                     'https://cdn/a/en.vtt')
+report(len(_vtt101) == 1 and _vtt101[0]['lang'] == 'en'
+       and _vtt101[0]['automatic'] is True,
+   'an endpoint that is the caption file itself is taken as one track',
+   repr(_vtt101))
+report(_body101fn(None, '', 'https://cdn/a/en.vtt') == []
+       and _body101fn(None, '<html>nope</html>', 'https://cdn/a/x') == []
+       and _body101fn(None, '{"broken": ', 'https://cdn/a/x') == [],
+   'and an empty, HTML or malformed answer yields no track instead of raising')
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

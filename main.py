@@ -349,6 +349,217 @@ class _WrappedMenuItemHover(QObject):
         return False
 
 
+# A caption file the player can read as-is.
+_CAPTION_FILE_EXTS = ('vtt', 'srt', 'ass', 'ssa')
+
+# Path fragments that mark a URL as the place the caption TRACKS are listed
+# rather than a caption file itself. A site with auto-generated and machine
+# translated captions puts no .vtt in the page at all -- it hands the player
+# one of these and the browser fetches the tracks from it. That is why a scan
+# of the page for caption files comes back empty on exactly those sites.
+_SUB_ENDPOINT_MARKERS = (
+    'subtitle', 'captions', 'caption', 'timedtext', 'closedcaption', 'subtit',
+)
+
+_SUB_URL_KEYS = ('url', 'src', 'file', 'path', 'href', 'link', 'uri', 'data')
+_SUB_LANG_KEYS = ('lang', 'language', 'srclang', 'locale', 'code', 'iso',
+                  'label', 'name', 'title')
+# Marks a track as machine made rather than authored, so it can be listed
+# after a human one and labelled for what it is.
+_SUB_AUTO_MARKERS = ('auto', 'generated', 'machine', 'translated', 'asr')
+
+# Only real language codes are accepted as one, so a path segment like
+# "embed" or "json" never ends up on screen as a language name.
+_SUB_LANG_CODES = frozenset((
+    'en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'zh', 'ko', 'ar', 'nl',
+    'pl', 'tr', 'sv', 'no', 'da', 'fi', 'cs', 'hu', 'ro', 'el', 'he', 'th',
+    'vi', 'id', 'hi', 'uk', 'bg', 'hr', 'sk', 'sl', 'sr', 'ca', 'et', 'lv',
+    'lt', 'ms', 'fa', 'ur', 'bn', 'ta', 'af', 'is', 'sq', 'mk', 'bs', 'ka',
+    'hy', 'kk', 'uz', 'mn', 'ne', 'si', 'km', 'lo', 'my', 'sw', 'und',
+))
+
+
+def _caption_ext_of(url):
+    """'vtt' for a caption URL, '' for anything the player cannot read."""
+    try:
+        path = urlsplit(str(url or '')).path or ''
+    except Exception:
+        path = ''
+    if not path:
+        path = str(url or '').split('?', 1)[0].split('#', 1)[0]
+    return os.path.splitext(path)[1].lstrip('.').lower()
+
+
+def _lang_from_url(url):
+    """The language a caption URL states about itself, or ''.
+
+    Reads ?lang=fr, a .../fr/... segment and x.fr.vtt alike, and only ever
+    returns a code that is actually a language.
+    """
+    text = str(url or '').lower()
+    match = re.search(
+        r'[?&](?:lang|language|locale|hl|sub_?lang)=([a-z]{2,3})', text)
+    if match and match.group(1) in _SUB_LANG_CODES:
+        return match.group(1)
+    try:
+        path = urlsplit(text).path or text
+    except Exception:
+        path = text
+    for match in re.finditer(r'(?:^|[/._-])([a-z]{2,3})(?=[/._-]|$)', path):
+        if match.group(1) in _SUB_LANG_CODES:
+            return match.group(1)
+    return ''
+
+
+def _subtitle_endpoint_candidates(html, page_url='', limit=4):
+    """URLs in *html* that list caption tracks rather than being one.
+
+    Nothing here knows a site: any quoted http(s) URL with a subtitle marker
+    in it and no caption extension of its own qualifies, so a site that
+    serves its auto captions from its own endpoint is found by the same rule
+    as any other. Same-host candidates come first, because those are the
+    ones the page is actually talking to.
+    """
+    text = str(html or '')
+    if not text:
+        return []
+    lowered = text.lower()
+    if not any(m in lowered for m in _SUB_ENDPOINT_MARKERS):
+        return []
+    try:
+        page_host = (urlparse(str(page_url or '')).netloc or '').lower()
+    except Exception:
+        page_host = ''
+    same_host = []
+    other_host = []
+    seen = set()
+    for match in re.finditer(r'["\']([^"\'\s<>]{6,600})["\']', text):
+        raw = match.group(1)
+        low = raw.lower()
+        if not any(m in low for m in _SUB_ENDPOINT_MARKERS):
+            continue
+        url = html_unescape(raw).replace('\\/', '/')
+        if '/' not in url:
+            # Not a URL or a path. kind="captions" and a subtitles: config key
+            # both land here, and joining either onto the page URL invents an
+            # endpoint that was never in the page.
+            continue
+        if url.startswith('//'):
+            url = 'https:' + url
+        elif not url.lower().startswith('http'):
+            if not str(page_url or ''):
+                continue
+            try:
+                url = urljoin(str(page_url), url)
+            except Exception:
+                continue
+        if _caption_ext_of(url) in _CAPTION_FILE_EXTS:
+            # A caption file. The scan of the page for those already has it.
+            continue
+        try:
+            host = (urlparse(url).netloc or '').lower()
+        except Exception:
+            continue
+        if not host:
+            continue
+        key = url.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        (same_host if host == page_host else other_host).append(url)
+    return (same_host + other_host)[:max(1, int(limit or 1))]
+
+
+def _subtitle_tracks_from_payload(payload, base_url=''):
+    """Pull caption tracks out of a subtitle-list payload.
+
+    Every site shapes this differently -- a list of objects, a dict keyed by
+    language, tracks nested under a player config -- so nothing here knows a
+    site. Any dict that carries a caption URL is a track, wherever in the
+    document it sits; the language comes from a language-ish key beside it,
+    or failing that from the URL itself.
+    """
+    tracks = []
+    seen = set()
+
+    def _lang_of(node):
+        for key in _SUB_LANG_KEYS:
+            value = node.get(key)
+            if not isinstance(value, str):
+                continue
+            value = value.strip()
+            if not value:
+                continue
+            head = re.split(r'[^A-Za-z]+', value.lower())[0]
+            if head in _SUB_LANG_CODES:
+                return head
+        return ''
+
+    def _auto_of(node):
+        blob = ' '.join(
+            str(v) for v in list(node.keys()) + list(node.values())
+            if isinstance(v, (str, bool, int, float)))
+        blob = blob.lower()
+        return any(m in blob for m in _SUB_AUTO_MARKERS)
+
+    def _emit(url, lang='', name='', automatic=False):
+        if not isinstance(url, str):
+            return
+        candidate = url.replace('\\/', '/').strip()
+        if not candidate:
+            return
+        if candidate.startswith('//'):
+            candidate = 'https:' + candidate
+        elif not candidate.lower().startswith('http'):
+            if not base_url:
+                return
+            try:
+                candidate = urljoin(base_url, candidate)
+            except Exception:
+                return
+        ext = _caption_ext_of(candidate)
+        if ext not in _CAPTION_FILE_EXTS:
+            return
+        key = (str(lang or '').lower(), candidate.lower())
+        if key in seen:
+            return
+        seen.add(key)
+        tracks.append({
+            'url': candidate,
+            'lang': str(lang or '').strip() or _lang_from_url(candidate) or 'und',
+            'ext': ext,
+            'name': str(name or '').strip(),
+            'automatic': bool(automatic),
+        })
+
+    def _walk(node, depth=0):
+        if depth > 8:
+            return
+        if isinstance(node, dict):
+            lang = _lang_of(node)
+            auto = _auto_of(node)
+            label = ''
+            for key in ('label', 'name', 'title'):
+                value = node.get(key)
+                if isinstance(value, str) and value.strip():
+                    label = value.strip()
+                    break
+            for key in _SUB_URL_KEYS:
+                _emit(node.get(key), lang, label, auto)
+            for value in node.values():
+                if isinstance(value, str):
+                    if _caption_ext_of(value) in _CAPTION_FILE_EXTS:
+                        _emit(value, lang, '', auto)
+                elif isinstance(value, (dict, list)):
+                    _walk(value, depth + 1)
+        elif isinstance(node, list):
+            for value in node:
+                _walk(value, depth + 1)
+
+    _walk(payload)
+    return tracks
+
+
 # ─── Supported format constants (add new formats here) ───────────────────────
 IMAGE_EXTENSIONS = (
     '.jpg', '.jpeg', '.png', '.gif', '.bmp',
@@ -30458,6 +30669,103 @@ try {
         r'(?:thumbnails?|preview|sprite|storyboard|chapters?|scrubber)'
         r'["\']?\s*[:=]', re.IGNORECASE)
 
+    def _subtitle_endpoint_body(self, url, referer=''):
+        """Fetch a subtitle-list endpoint. curl_cffi first: these sit behind
+        the same CDN edge as the video and a bare `requests` GET tends to get
+        a challenge page instead of the JSON."""
+        headers = self._stream_request_headers(
+            url, {'Accept': 'application/json, text/plain, */*'})
+        if referer:
+            headers['Referer'] = referer
+        try:
+            import curl_cffi.requests as cfreq
+        except Exception:
+            cfreq = None
+        if cfreq is not None:
+            try:
+                response = cfreq.Session(impersonate='chrome131').get(
+                    url, headers=headers, timeout=12, allow_redirects=True)
+                if response is not None and response.ok and response.text:
+                    return response.text
+            except Exception:
+                pass
+        try:
+            import requests
+        except Exception:
+            return ''
+        try:
+            response = requests.get(
+                url, headers=headers, timeout=12, allow_redirects=True)
+            if response is not None and response.ok:
+                return response.text or ''
+        except Exception:
+            pass
+        return ''
+
+    def _subtitle_tracks_from_body(self, body, base_url=''):
+        """Read one endpoint's response: a track list, or a caption file."""
+        text = str(body or '').strip()
+        if not text:
+            return []
+        if text[:1] in ('{', '['):
+            try:
+                return _subtitle_tracks_from_payload(json.loads(text), base_url)
+            except Exception:
+                pass
+        if text.startswith('WEBVTT') or '-->' in text[:4000]:
+            # The endpoint was the caption file all along.
+            return [{
+                'url': base_url,
+                'lang': _lang_from_url(base_url) or 'und',
+                'ext': _caption_ext_of(base_url) or 'vtt',
+                'name': '',
+                'automatic': True,
+            }]
+        return []
+
+    def _extract_subtitle_tracks_from_endpoints(self, html, page_url, limit=3):
+        """Second pass: read the caption list from the page's own endpoint.
+
+        _extract_subtitle_tracks_from_html can only see caption FILES. A site
+        with auto-generated and machine-translated captions puts none in the
+        page -- it hands the player an endpoint that returns the tracks -- so
+        the first pass comes back empty on exactly the sites that have the
+        feature. This finds that endpoint in the same HTML, fetches it, and
+        reads whatever shape of JSON comes back. It logs either way: what it
+        tried and what came back is what says whether a site is reachable at
+        all.
+        """
+        host = (urlparse(str(page_url or '')).netloc or '').lower() or '?'
+        candidates = _subtitle_endpoint_candidates(html, page_url)
+        if not candidates:
+            print(f'[SUBS] {host}: no caption file and no subtitle endpoint '
+                  f'referenced in the page', flush=True)
+            return []
+        picked = candidates[:max(1, int(limit or 1))]
+        print(f'[SUBS] {host}: page holds no caption file; trying '
+              f'{len(picked)} subtitle endpoint(s)', flush=True)
+        tracks = []
+        for endpoint in picked:
+            body = self._subtitle_endpoint_body(endpoint, page_url)
+            if not body:
+                print(f'[SUBS]   {endpoint[:120]} -> no response', flush=True)
+                continue
+            found = self._subtitle_tracks_from_body(body, endpoint)
+            langs = [str(t.get('lang') or '') for t in found]
+            print(f'[SUBS]   {endpoint[:120]} -> {len(found)} track(s)'
+                  + (f' [{", ".join(langs[:8])}]' if langs else '')
+                  + (f', {len(body)} byte(s)' if not found else ''), flush=True)
+            for track in found:
+                if track not in tracks:
+                    tracks.append(track)
+        if not tracks:
+            print(f'[SUBS] {host}: no caption tracks in what those '
+                  f'endpoint(s) returned', flush=True)
+            return []
+        print(f'[SUBS] {host}: {len(tracks)} caption track(s) offered by the '
+              f'site', flush=True)
+        return self._preferred_remote_subtitle_tracks(tracks, limit=6)
+
     def _extract_subtitle_tracks_from_html(self, html, page_url):
         tracks = []
         seen = set()
@@ -41957,6 +42265,11 @@ try {
         page_url = response.url or source_url
         page_title = self._clean_remote_title(self._html_page_title(html))
         subtitle_tracks = self._extract_subtitle_tracks_from_html(html, page_url)
+        if not subtitle_tracks:
+            # Sites with auto-generated captions have no caption file in the
+            # page to find; the tracks live behind an endpoint of their own.
+            subtitle_tracks = self._extract_subtitle_tracks_from_endpoints(
+                html, page_url)
         page_host = (urlparse(page_url).netloc or '').lower()
         if self._is_fileditch_host(page_host):
             file_title = self._clean_remote_title(
