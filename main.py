@@ -317,6 +317,38 @@ def _wrap_menu_label(text, width=None, max_lines=None):
     return '\n'.join(kept)
 
 
+class _WrappedMenuItemHover(QObject):
+    """Keeps a menu's highlight in step with a wrapping item.
+
+    A menu highlights whatever item it believes the pointer is on, but a
+    pointer over a QWidgetAction's widget is inside that widget: the menu
+    never sees the move, so it leaves the item it highlighted before lit
+    next to the one now under the mouse (QTBUG-10605). The label paints its
+    own highlight; this filter tells the menu which action is current at
+    the same moment, and QMenuPrivate::setCurrentAction repaints the rect
+    of the action it is replacing -- which is what turns the stale
+    highlight off. Qt clears its own highlight the same way, with
+    setActiveAction(0) from QMenu::leaveEvent.
+    """
+
+    def __init__(self, menu, action, parent=None):
+        super().__init__(parent)
+        self._wrap_menu = menu
+        self._wrap_action = action
+
+    def eventFilter(self, obj, event):
+        try:
+            if event.type() == QEvent.Type.Enter:
+                menu = self._wrap_menu
+                if menu is not None and self._wrap_action is not None:
+                    menu.setActiveAction(self._wrap_action)
+        except Exception:
+            pass
+        # Never swallow the event: the label still needs the Enter, and the
+        # press still has to reach the menu to trigger the action.
+        return False
+
+
 # ─── Supported format constants (add new formats here) ───────────────────────
 IMAGE_EXTENSIONS = (
     '.jpg', '.jpeg', '.png', '.gif', '.bmp',
@@ -20629,6 +20661,11 @@ try {
         tracking and is deliberately NOT made transparent to them -- and a
         QLabel ignores a mouse press, so the press still travels up to the
         menu, which is what triggers the action.
+
+        Seeing the mouse is also what breaks the menu's own bookkeeping: it
+        stops noticing the pointer has moved, and leaves the item it
+        highlighted before lit beside this one. _WrappedMenuItemHover tells
+        it otherwise.
         """
         label_text = _wrap_menu_label(text)
         if '\n' not in label_text:
@@ -20651,6 +20688,14 @@ try {
             "QLabel { background: transparent; color: #dddddd;"
             " padding: 6px 22px 6px 24px; }"
             "QLabel:hover { background: #444444; color: #dddddd; }")
+        try:
+            hover_sync = _WrappedMenuItemHover(menu, action, label)
+            # Kept on the label as well: parenting it is what Qt needs, the
+            # attribute is what keeps the Python wrapper reachable.
+            label._wrap_menu_hover = hover_sync
+            label.installEventFilter(hover_sync)
+        except Exception:
+            pass
         layout.addWidget(label, 1)
         action.setDefaultWidget(row)
         try:

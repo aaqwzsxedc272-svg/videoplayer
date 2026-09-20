@@ -9787,6 +9787,10 @@ class _Lab99:
         self.style99 = ''
         self.fmt99 = None
         self.tracking99 = None
+        self.filters99 = []
+
+    def installEventFilter(self, f):
+        self.filters99.append(f)
 
     def setTextFormat(self, f):
         self.fmt99 = f
@@ -10080,6 +10084,127 @@ report(SRC.count("'label': _wrap_menu_label(") == 2,
    'and the overlay fallback used when the snapshot comes up empty wraps its '
    'labels too, so fullscreen behaves the same either way',
    str(SRC.count("'label': _wrap_menu_label(")))
+
+# ── 100. Two highlights at once: the menu never learns the pointer moved ──────
+# With the label seeing the mouse, the menu stops tracking it, so the item it
+# highlighted before stayed lit next to the wrapped one under the pointer
+# (QTBUG-10605). QMenu::setActiveAction clears that -- Qt does it itself from
+# leaveEvent, with setActiveAction(0) -- and setCurrentAction repaints the
+# rect of the action it replaces. This runs the real filter that calls it.
+_hv100 = next((n for n in TREE.body if isinstance(n, ast.ClassDef)
+               and n.name == '_WrappedMenuItemHover'), None)
+report(_hv100 is not None,
+   'something tells the menu which item the pointer is really on',
+   'defined' if _hv100 is not None else 'MISSING')
+report('_WrappedMenuItemHover(menu, action, label)' in SRC
+       and 'label.installEventFilter(hover_sync)' in SRC,
+   'and every wrapped item installs one on its own label, so the menu is '
+   'told at the moment the pointer arrives rather than by something '
+   'watching the menu and guessing')
+if _hv100 is not None:
+
+    class _Obj100:
+        def __init__(self, parent=None):
+            self.parent100 = parent
+
+    class _QE100:
+        class Type:
+            Enter = 'enter'
+            Leave = 'leave'
+            MouseMove = 'move'
+
+    class _Ev100:
+        def __init__(self, t):
+            self._t = t
+
+        def type(self):
+            return self._t
+
+    class _Menu100:
+        def __init__(self, raises=False):
+            self.active100 = []
+            self._raises = raises
+
+        def setActiveAction(self, a):
+            self.active100.append(a)
+            if self._raises:
+                raise RuntimeError('menu gone')
+
+    _g100 = {'QObject': _Obj100, 'QEvent': _QE100}
+    exec(compile(ast.Module([_hv100], []), '<hover100>', 'exec'), _g100)
+    _H100 = _g100['_WrappedMenuItemHover']
+
+    _act100 = object()
+    _menu100 = _Menu100()
+    _f100 = _H100(_menu100, _act100)
+    report(_f100.eventFilter(None, _Ev100('enter')) is False,
+       'entering the wrapped item hands the menu that action')
+    report(_menu100.active100 == [_act100],
+       'and nothing else -- setActiveAction is what repaints the rect of the '
+       'item it replaces, which is the highlight that was left behind',
+       str(len(_menu100.active100)))
+    for _t100 in ('leave', 'move'):
+        _menu100 = _Menu100()
+        _H100(_menu100, _act100).eventFilter(None, _Ev100(_t100))
+        report(_menu100.active100 == [],
+           f'a {_t100} event changes nothing: the menu is still tracking the '
+           'pointer wherever it is not inside this widget')
+    report(_H100(None, _act100).eventFilter(None, _Ev100('enter')) is False
+           and _H100(_Menu100(), None).eventFilter(
+               None, _Ev100('enter')) is False,
+       'with no menu or no action there is nothing to tell, and it says '
+       'nothing')
+    report(_H100(_Menu100(raises=True), _act100).eventFilter(
+        None, _Ev100('enter')) is False,
+       'a menu that has gone away mid-hover does not take the menu down with '
+       'it')
+    _menu100 = _Menu100()
+    for _ in range(3):
+        _f100b = _H100(_menu100, _act100)
+        report(_f100b.eventFilter(None, _Ev100('enter')) is False,
+           'and the filter never swallows the event -- the label still needs '
+           'the Enter, and the press still has to reach the menu to trigger '
+           'the action')
+
+    _asrc100 = ast.get_source_segment(SRC, _am99) if _am99 else ''
+    report('_WrappedMenuItemHover(menu, action, label)' in _asrc100
+           and 'label.installEventFilter(hover_sync)' in _asrc100,
+       'every wrapped item gets one, parented to its own label so it lives '
+       'exactly as long as the row does')
+    if _am99 is not None:
+        _g100b = dict(_g99)   # the real _wrap_menu_label and its constants
+        _built100 = []
+
+        class _H100b:
+            def __init__(self, menu, action, parent=None):
+                self.args100 = (menu, action, parent)
+                _built100.append(self)
+
+        _g100b.update({'_WrappedMenuItemHover': _H100b,
+                       'QWidgetAction': _Act99, 'QWidget': _Row99,
+                       'QHBoxLayout': _Lay99b, 'QLabel': _Lab99,
+                       'Qt': _Qt99})
+        exec(compile(ast.Module([_am99], []), '<addwrap100>', 'exec'), _g100b)
+        _m100 = _Menu99()
+        _a100 = _g100b['_add_wrapped_menu_action'](None, _m100, _LONG99)
+        _lab100 = _a100.defaultWidget()._lay99.items[0][0]
+        report(len(_built100) == 1, 'building a wrapped item builds one',
+           str(len(_built100)))
+        if _built100:
+            report(_built100[0].args100[0] is _m100
+                   and _built100[0].args100[1] is _a100
+                   and _built100[0].args100[2] is _lab100,
+               'wired to this menu, this action and this label -- not to '
+               'whichever menu was built last')
+        report(_lab100.filters99 and _lab100.filters99[0] is _built100[0],
+           'and installed on the label, which is the widget the pointer '
+           'actually lands on')
+        _m100 = _Menu99()
+        _n100 = len(_built100)
+        _g100b['_add_wrapped_menu_action'](None, _m100, 'Dressage (1986)')
+        report(len(_built100) == _n100,
+           'a one-line name gets no filter: the menu already tracks those '
+           'correctly, which is why only the wrapped ones doubled up')
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
