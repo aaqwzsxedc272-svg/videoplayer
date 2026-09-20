@@ -21008,12 +21008,19 @@ try {
                     pass
             self._close_fullscreen_overlay_menu()
 
-            # If an overlay fallback is provided, use it immediately in fullscreen.
-            # Native QMenu objects are unreliable in borderless-maximized mode.
-            if fullscreen_fallback is not None:
-                QTimer.singleShot(0, fullscreen_fallback)
-                return None
-
+            # Show the NATIVE menu, exactly as out of fullscreen. This used to
+            # be skipped outright -- "Native QMenu objects are unreliable in
+            # borderless-maximized mode" -- and the hand-drawn overlay used
+            # instead. That overlay is what lagged and blinked: it rebuilds a
+            # QFrame and its buttons on every hover event, and hover is a
+            # stream of MouseMove, not a single Enter.
+            #
+            # Everything below was already written for this and was dead code:
+            # _prepare_popup_menu reparents the menu and sets
+            # Popup/Frameless/StaysOnTop, _show_menu popups and raises it, and
+            # _fallback_to_overlay switches to the overlay after 140 ms ONLY
+            # IF the native popup never became visible. So the overlay stays
+            # as a safety net rather than the default.
             self._active_popup_menu = menu
 
             def _clear_menu_ref(_menu=menu):

@@ -9350,5 +9350,42 @@ report(SRC.count('anchor_button=b,') + SRC.count('anchor_button=button,') >= 2,
    'whether the button was built from a spec or from a QMenu snapshot',
    str(SRC.count('anchor_button=b,') + SRC.count('anchor_button=button,')))
 
+# ── 96. In fullscreen, show the native menu; the overlay is only a fallback ──
+# The overlay existed because of a note that "Native QMenu objects are
+# unreliable in borderless-maximized mode". Everything needed to show one
+# anyway was already written and unreachable behind an early return, so the
+# hand-drawn panel was the default -- and rebuilding it on a stream of
+# MouseMove events is what made the app lag.
+_ep96 = next((n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+              and n.name == '_exec_popup_menu'), None)
+_esrc96 = ast.get_source_segment(SRC, _ep96) if _ep96 else ''
+report(_ep96 is not None, 'the fullscreen popup path is here')
+report('QTimer.singleShot(0, fullscreen_fallback)' not in _esrc96,
+   'the overlay is no longer shown INSTEAD of the native menu. That early '
+   'return is why fullscreen menus were hand-drawn at all, and a hand-drawn '
+   'panel rebuilds its QFrame and buttons on every hover event')
+report('menu.popup(target_pos)' in _esrc96,
+   'the native QMenu is popped up in fullscreen, so submenus open on hover '
+   'the way Qt does it out of fullscreen -- no custom hover handling, and '
+   'nothing rebuilt per mouse move')
+_i96 = _esrc96.find('QTimer.singleShot(0, _show_menu)')
+_j96 = _esrc96.find('QTimer.singleShot(140, _fallback_to_overlay)')
+report(0 < _i96 < _j96,
+   'and the popup is attempted first, with the overlay scheduled after it',
+   f'popup at {_i96}, fallback at {_j96}')
+report('_menu.isVisible()' in _esrc96,
+   'the overlay only takes over if the native popup never became visible -- '
+   'the safety net stays, it just is not the default any more')
+_pp96 = next((n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+              and n.name == '_prepare_popup_menu'), None)
+_ppsrc96 = ast.get_source_segment(SRC, _pp96) if _pp96 else ''
+report(bool(_pp96)
+       and 'menu.setParent(None)' in _ppsrc96
+       and 'Qt.WindowType.Popup' in _ppsrc96
+       and 'WindowStaysOnTopHint' in _ppsrc96,
+   'the menu is reparented and flagged Popup/Frameless/StaysOnTop first, '
+   'which is what lets a native popup appear over a borderless-maximized '
+   'window -- the preparation this path was skipping')
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
