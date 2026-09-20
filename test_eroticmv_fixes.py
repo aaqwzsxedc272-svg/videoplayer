@@ -10354,6 +10354,7 @@ _g101['_subtitle_endpoint_body'] = _SubStub101._subtitle_endpoint_body
 _g101['_preferred_remote_subtitle_tracks'] = \
     _SubStub101._preferred_remote_subtitle_tracks
 _SubStub101._subtitle_tracks_from_body = _g101['_subtitle_tracks_from_body']
+_SubStub101._report_subtitle_page = lambda self, html, page_url: ''
 import io as _io101
 import contextlib as _ctx101
 
@@ -10410,6 +10411,145 @@ report(_body101fn(None, '', 'https://cdn/a/en.vtt') == []
        and _body101fn(None, '<html>nope</html>', 'https://cdn/a/x') == []
        and _body101fn(None, '{"broken": ', 'https://cdn/a/x') == [],
    'and an empty, HTML or malformed answer yields no track instead of raising')
+
+# ── 102. When a page's captions cannot be read, the page is written down ───────
+# xvideos proves the feature exists -- a CC video's page carries a Subtitles
+# menu of 25 languages and a non-CC video's page carries no such menu at all
+# -- but the caption URLs are in markup that cannot be read from here. So the
+# app keeps the subtitle-bearing lines of any page that yielded no track, in
+# subtitles_debug.txt, which is what says where the files actually are.
+report('def _subtitle_page_fragments(' in SRC
+       and 'def _dump_subtitle_report(' in SRC
+       and 'def _report_subtitle_page(' in SRC,
+   'a page that yields no caption track is written down instead of dropped')
+report(SRC.count("subtitles_debug.txt") >= 2,
+   'and it lands in one named file, so it can just be sent over')
+_pass102 = SRC[SRC.index('def _extract_subtitle_tracks_from_endpoints('):]
+_pass102 = _pass102[:_pass102.index('\n    def ')]
+report(_pass102.count('self._report_subtitle_page(html, page_url)') == 2,
+   'both ways of finding nothing are reported -- no endpoint in the page, '
+   'and an endpoint that returned no track',
+   'found %d' % _pass102.count('self._report_subtitle_page(html, page_url)'))
+
+_frag_fn = [n for n in TREE.body if isinstance(n, ast.FunctionDef)
+            and n.name == '_subtitle_page_fragments']
+_frag_const = [n for n in TREE.body if isinstance(n, ast.Assign)
+               and getattr(n.targets[0], 'id', '') == '_SUB_REPORT_KEYWORDS']
+report(len(_frag_fn) == 1 and len(_frag_const) == 1,
+   'the fragment picker is a module-level function')
+from urllib.parse import (urlparse as _up102, urljoin as _uj102,
+                          urlsplit as _us102b)
+_g102 = {'os': os, 're': re, 'time': time, 'print': print, 'json': json,
+         'urlparse': _up102, 'urljoin': _uj102, 'urlsplit': _us102b,
+         'html_unescape': html_unescape}
+_sub_all102 = [n for n in TREE.body if isinstance(n, ast.FunctionDef)
+               and n.name in ('_caption_ext_of', '_lang_from_url',
+                              '_subtitle_endpoint_candidates',
+                              '_subtitle_tracks_from_payload',
+                              '_subtitle_page_fragments')]
+_sub_const102 = [n for n in TREE.body if isinstance(n, ast.Assign)
+                 and getattr(n.targets[0], 'id', '').startswith(
+                     ('_CAPTION_FILE_EXTS', '_SUB_'))]
+exec(compile(ast.Module(body=_sub_const102 + _sub_all102, type_ignores=[]),
+             'frag102', 'exec'), _g102)
+_frags = _g102['_subtitle_page_fragments']
+
+_cc_page = (
+    '<html><head><title>x</title></head><body>\n'
+    '<div class="videoPlayer">nothing to see</div>\n'
+    '<li class="subtitle-option" data-lang="en">English</li>\n'
+    '<li class="subtitle-option" data-lang="es">Espanol</li>\n'
+    '<script>var x = 1;</script>\n'
+    '</body></html>')
+_got = _frags(_cc_page)
+report(len(_got) == 2 and all('subtitle-option' in g for g in _got),
+   'only the lines that talk about subtitles are kept', repr(_got))
+report(_frags('<html><body><p>no media here</p></body></html>') == [],
+   'a page with no subtitle markup yields nothing')
+report(_frags('') == [] and _frags(None) == [], 'an empty page yields nothing')
+_dupe = ('<li class="subtitle-option">English</li>\n'
+         '<li class="subtitle-option">English</li>\n')
+report(len(_frags(_dupe)) == 1, 'an identical line is kept once')
+report(len(_frags('\n'.join('<i class="caption">%d</i>' % i
+                            for i in range(50)), limit=5)) == 5,
+   'and the list is capped, so a huge page stays a small file')
+_long = ('<script>' + 'a' * 400 + ' setSubtitles("https://cdn/x/en.vtt") '
+         + 'b' * 400 + '</script>')
+_cut = _frags(_long)
+report(len(_cut) == 1 and len(_cut[0]) <= 401 and 'setSubtitles' in _cut[0],
+   'a minified line is cut down around the keyword rather than kept whole',
+   '%d chars' % (len(_cut[0]) if _cut else -1))
+
+_dump_meths = []
+for _node102 in ast.walk(TREE):
+    if isinstance(_node102, ast.ClassDef) and _node102.name == 'VideoPlayer':
+        for _m102 in _node102.body:
+            if isinstance(_m102, ast.FunctionDef) and _m102.name in (
+                    '_dump_subtitle_report', '_report_subtitle_page',
+                    '_extract_subtitle_tracks_from_endpoints',
+                    '_subtitle_tracks_from_body'):
+                _dump_meths.append(_m102)
+report(len(_dump_meths) == 4, 'the report writer and the pass are both present',
+       'found %d' % len(_dump_meths))
+
+
+class _SubStub102(object):
+    def __init__(self, bodies, data_dir):
+        self.bodies = dict(bodies)
+        self.asked = []
+        self.data_dir = data_dir
+
+    def _subtitle_endpoint_body(self, url, referer=''):
+        self.asked.append(url)
+        return self.bodies.get(url, '')
+
+    def _preferred_remote_subtitle_tracks(self, tracks, limit=4):
+        return list(tracks)[:max(1, int(limit or 1))]
+
+
+for _m102 in _dump_meths:
+    exec(compile(ast.Module(body=[_m102], type_ignores=[]), 'dump102', 'exec'),
+         _g102)
+_g102['_subtitle_endpoint_body'] = _SubStub102._subtitle_endpoint_body
+_g102['_preferred_remote_subtitle_tracks'] = \
+    _SubStub102._preferred_remote_subtitle_tracks
+_SubStub102._subtitle_tracks_from_body = _g102['_subtitle_tracks_from_body']
+_SubStub102._dump_subtitle_report = _g102['_dump_subtitle_report']
+_SubStub102._report_subtitle_page = _g102['_report_subtitle_page']
+
+import io as _io102
+import contextlib as _ctx102
+_dir102 = tempfile.mkdtemp(prefix='subs102_')
+_stub102 = _SubStub102({}, _dir102)
+_path102, _count102 = _g102['_dump_subtitle_report'](
+    _stub102, _cc_page, 'https://www.xvideos.com/video.omkdvbufe4d/x')
+report(_path102 == os.path.join(_dir102, 'subtitles_debug.txt')
+       and os.path.exists(_path102),
+   'the report is written next to the app\'s own data files', _path102)
+report(_count102 == 2, 'and it says how many subtitle lines it kept')
+_text102 = open(_path102, encoding='utf-8').read()
+report('video.omkdvbufe4d' in _text102 and 'subtitle-option' in _text102,
+   'carrying both the page it came from and the markup itself')
+_g102['_dump_subtitle_report'](_stub102, _cc_page,
+                               'https://xhamster.com/videos/second-xhb0btt')
+_text102 = open(_path102, encoding='utf-8').read()
+report('video.omkdvbufe4d' in _text102 and 'second-xhb0btt' in _text102,
+   'a second page is appended, so one file covers a whole session')
+shutil.rmtree(_dir102, ignore_errors=True)
+
+# The whole pass, end to end, on a page that has captions but no readable URL.
+_stub102 = _SubStub102({}, tempfile.mkdtemp(prefix='subs102b_'))
+_buf102 = _io102.StringIO()
+with _ctx102.redirect_stdout(_buf102):
+    _out102 = _g102['_extract_subtitle_tracks_from_endpoints'](
+        _stub102, _cc_page, 'https://www.xvideos.com/video.omkdvbufe4d/x')
+_log102 = _buf102.getvalue()
+report(_out102 == [], 'a page whose captions cannot be read yields no track')
+report('subtitles_debug.txt' in _log102,
+   'and the run says where the evidence went', repr(_log102))
+report(os.path.exists(os.path.join(_stub102.data_dir, 'subtitles_debug.txt')),
+   'the file is really there')
+shutil.rmtree(_stub102.data_dir, ignore_errors=True)
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

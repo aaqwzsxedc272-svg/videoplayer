@@ -411,6 +411,41 @@ def _lang_from_url(url):
     return ''
 
 
+# Markup worth keeping when a page advertises captions the app could not turn
+# into a track. These lines are the evidence for why: they show whether the
+# page names a caption file at all, and if not, what it hands the player
+# instead.
+_SUB_REPORT_KEYWORDS = (
+    'subtitle', 'caption', 'timedtext', '.vtt', '.srt', '.ass', '<track',
+    'srclang', 'webvtt',
+)
+
+
+def _subtitle_page_fragments(html, limit=60):
+    """The subtitle-bearing lines of a page, for subtitles_debug.txt."""
+    fragments = []
+    seen = set()
+    text = str(html or '').replace('\r\n', '\n').replace('\r', '\n')
+    for line in text.split('\n'):
+        low = line.lower()
+        hits = [k for k in _SUB_REPORT_KEYWORDS if k in low]
+        if not hits:
+            continue
+        piece = line.strip()
+        if len(piece) > 400:
+            # A minified line can run to tens of thousands of characters.
+            # Keep the neighbourhood of the keyword, not the whole line.
+            at = low.find(hits[0])
+            piece = piece[max(0, at - 160):at + 240].strip()
+        if not piece or piece in seen:
+            continue
+        seen.add(piece)
+        fragments.append(piece)
+        if len(fragments) >= max(1, int(limit or 1)):
+            break
+    return fragments
+
+
 def _subtitle_endpoint_candidates(html, page_url='', limit=4):
     """URLs in *html* that list caption tracks rather than being one.
 
@@ -30723,6 +30758,50 @@ try {
             }]
         return []
 
+    def _dump_subtitle_report(self, html, page_url):
+        """Write what a page says about subtitles to subtitles_debug.txt.
+
+        Called only when a page yielded no caption track. What the page does
+        with its captions is the one thing that cannot be settled by reading
+        this code, and these fragments settle it: whether a caption file is
+        named at all, and if not, what the player is given instead.
+        """
+        try:
+            fragments = _subtitle_page_fragments(html)
+            directory = str(getattr(self, 'data_dir', '') or '') or os.getcwd()
+            path = os.path.join(directory, 'subtitles_debug.txt')
+            block = ['=== %s  %s' % (time.strftime('%Y-%m-%d %H:%M:%S'),
+                                     page_url),
+                     '--- %d subtitle line(s) in the page ---' % len(fragments)]
+            block.extend(fragments)
+            block.append('')
+            text = '\n'.join(block) + '\n'
+            existing = ''
+            try:
+                if os.path.exists(path):
+                    with open(path, 'r', encoding='utf-8',
+                              errors='replace') as handle:
+                        existing = handle.read()
+            except Exception:
+                existing = ''
+            if len(existing) > 400000:
+                existing = existing[-200000:]
+            with open(path, 'w', encoding='utf-8') as handle:
+                handle.write(existing + text)
+            return path, len(fragments)
+        except Exception as exc:
+            print(f'[SUBS] could not write subtitles_debug.txt: {exc}',
+                  flush=True)
+            return '', 0
+
+    def _report_subtitle_page(self, html, page_url):
+        path, count = self._dump_subtitle_report(html, page_url)
+        if path:
+            print(f'[SUBS] wrote {count} subtitle line(s) from the page to '
+                  f'{path} -- that file says what the site actually offers',
+                  flush=True)
+        return path
+
     def _extract_subtitle_tracks_from_endpoints(self, html, page_url, limit=3):
         """Second pass: read the caption list from the page's own endpoint.
 
@@ -30740,6 +30819,7 @@ try {
         if not candidates:
             print(f'[SUBS] {host}: no caption file and no subtitle endpoint '
                   f'referenced in the page', flush=True)
+            self._report_subtitle_page(html, page_url)
             return []
         picked = candidates[:max(1, int(limit or 1))]
         print(f'[SUBS] {host}: page holds no caption file; trying '
@@ -30761,6 +30841,7 @@ try {
         if not tracks:
             print(f'[SUBS] {host}: no caption tracks in what those '
                   f'endpoint(s) returned', flush=True)
+            self._report_subtitle_page(html, page_url)
             return []
         print(f'[SUBS] {host}: {len(tracks)} caption track(s) offered by the '
               f'site', flush=True)
