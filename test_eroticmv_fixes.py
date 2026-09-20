@@ -10576,7 +10576,7 @@ shutil.rmtree(_stub102.data_dir, ignore_errors=True)
 # and silent on a skipped 404 alike: "found the wrong file", "found nothing"
 # and "never looked" all printed the same thing. Every step now speaks, and
 # this runs the consumer that used to be mute.
-report('caption detection build 3' in SRC,
+report('caption detection build' in SRC,
    'the running main.py announces itself, so a log says which copy it is')
 _resolve103 = SRC[SRC.index('def _resolve_stream_from_html('):]
 _resolve103 = _resolve103[:_resolve103.index('\n    def ')]
@@ -10754,6 +10754,12 @@ class _FetchStub104(object):
                 'Referer': str(page_url or ''),
                 'Origin': 'https://xhamster.com'}
 
+    def _cookie_header_for(self, url):
+        return ''
+
+    def _refusal_snippet(self, response):
+        return ''
+
 
 class _FakeRequests104(object):
     def __init__(self, resp):
@@ -10807,6 +10813,125 @@ _body104, _calls104 = _fetch104(_Resp104(b'<html>403 Forbidden</html>' * 20,
 report(_body104 == (b'', 403),
    'and a refusal comes back as a status the caller can report, not silence',
    repr(_body104))
+
+# ── 105. Send the cookies mpv sends, and print why a fetch is refused ──────────
+# Referer and Origin did not clear the 403 -- the field log proved that. The
+# video from the same CDN family plays, and the one request in this app that
+# carries cookies.txt is mpv's. So the caption request now carries it too, and
+# a refusal now prints the CDN's own reason instead of discarding it.
+report('caption detection build 4' in SRC,
+   'the running copy is identifiable from the log')
+report('def _cookie_header_for(' in SRC and 'def _refusal_snippet(' in SRC,
+   'the caption request can carry cookies, and a refusal has a reason')
+_ck_fns = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+           and n.name in ('_cookie_header_for', '_refusal_snippet',
+                          '_fetch_caption_body')]
+report(len(_ck_fns) == 3, 'all three are on VideoPlayer', 'found %d' % len(_ck_fns))
+_g105 = {'print': print, 're': re, 'os': os, 'urlparse': urlparse}
+exec(compile(ast.Module(body=_ck_fns, type_ignores=[]), 'ck105', 'exec'), _g105)
+
+_ck_dir = tempfile.mkdtemp(prefix='ck105_')
+_ck_file = os.path.join(_ck_dir, 'cookies.txt')
+with open(_ck_file, 'w', encoding='utf-8') as _fh:
+    _fh.write('# Netscape HTTP Cookie File\n')
+    _fh.write('.xhcdn.com\tTRUE\t/\tFALSE\t0\tsessionid\tabc123\n')
+    _fh.write('.xhamster.com\tTRUE\t/\tFALSE\t0\tsitepref\tdark\n')
+
+
+class _CkStub105(object):
+    def _cookies_txt_paths(self, domains=None):
+        return [_ck_file]
+
+    def _media_playback_headers(self, page_url=None, media_url=None,
+                                extra=None):
+        return {'User-Agent': 'stub-agent', 'Referer': str(page_url or ''),
+                'Origin': 'https://xhamster.com'}
+
+
+_CkStub105._cookie_header_for = _g105['_cookie_header_for']
+_CkStub105._refusal_snippet = _g105['_refusal_snippet']
+_CkStub105._fetch_caption_body = _g105['_fetch_caption_body']
+
+_hdr105 = _CkStub105()._cookie_header_for(
+    'https://thumb-v1.xhcdn.com/a/hvm1kQu2FMDvlNaaCaiWMA/030/627/881/sw_en_1.vtt')
+report('sessionid=abc123' in _hdr105,
+   'the cookie for the caption CDN is picked up out of cookies.txt',
+   repr(_hdr105))
+report('sitepref' not in _hdr105,
+   'and a cookie for another site is not sent to this one')
+report(_CkStub105()._cookie_header_for('not a url') == '',
+   'a URL with no host yields no cookie header')
+
+import sys as _sys105
+import types as _types105
+
+
+class _R105(object):
+    def __init__(self, content, status):
+        self.content = content
+        self.status_code = status
+        self.ok = 200 <= status < 400
+        self.text = content.decode('utf-8', 'replace')
+
+
+class _Fake105(object):
+    def __init__(self, resp):
+        self.resp = resp
+        self.calls = []
+
+    def get(self, url, headers=None, timeout=None, allow_redirects=True):
+        self.calls.append((url, dict(headers or {})))
+        return self.resp
+
+
+def _ck_fetch105(resp):
+    fake = _Fake105(resp)
+    mod = _types105.ModuleType('requests')
+    mod.get = fake.get
+    saved = _sys105.modules.get('requests')
+    saved_cc = _sys105.modules.get('curl_cffi')
+    _sys105.modules['requests'] = mod
+    _sys105.modules['curl_cffi'] = None
+    buf = _io105.StringIO()
+    try:
+        with _ctx105.redirect_stdout(buf):
+            out = _g105['_fetch_caption_body'](
+                _CkStub105(), _XH_EN, 'https://xhamster.com/videos/xhb0btt')
+    finally:
+        if saved is None:
+            _sys105.modules.pop('requests', None)
+        else:
+            _sys105.modules['requests'] = saved
+        if saved_cc is None:
+            _sys105.modules.pop('curl_cffi', None)
+        else:
+            _sys105.modules['curl_cffi'] = saved_cc
+    return out, fake.calls, buf.getvalue()
+
+
+import io as _io105
+import contextlib as _ctx105
+_out105, _calls105, _log105 = _ck_fetch105(
+    _R105(b'<html><head><title>403 Forbidden</title></head>'
+          b'<body>Referer denied by CDN edge</body></html>', 403))
+report(_out105 == (b'', 403), 'a refusal still comes back as a status',
+   repr(_out105))
+_h105b = _calls105[0][1] if _calls105 else {}
+report('sessionid=abc123' in str(_h105b.get('Cookie', '')),
+   'and the caption request now goes out with the cookies mpv uses',
+   repr(_h105b.get('Cookie')))
+report('cookies=yes' in _log105, 'the log says cookies were attached',
+   repr(_log105))
+report('Referer denied by CDN edge' in _log105,
+   'and it prints the reason the CDN gave, which is the thing that was being '
+   'thrown away', repr(_log105))
+_out105, _calls105, _log105 = _ck_fetch105(
+    _R105(b'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nhello\n', 200))
+report(_out105[1] == 200 and _out105[0].startswith(b'WEBVTT'),
+   'an accepted caption still comes back as bytes')
+report('refused' not in _log105, 'and a success logs no refusal',
+   repr(_log105))
+shutil.rmtree(_ck_dir, ignore_errors=True)
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

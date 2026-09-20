@@ -8325,8 +8325,8 @@ class VideoPlayer(QMainWindow):
         self._deferred_playlist_analysis_active = False
         self._stream_resolution_cache = {}
         self._stream_resolution_failures = {}
-        print('[SUBS] caption detection build 3 (page scan, subtitle '
-              'endpoint, subtitles_debug.txt)', flush=True)
+        print('[SUBS] caption detection build 4 (page scan, subtitle '
+              'endpoint, cookies, refusal reason)', flush=True)
         self._dood_resolve_lock = threading.Lock()
         self._playlist_url_mirrors = {}
         self._gofile_guest_token = None
@@ -30713,42 +30713,110 @@ try {
         r'(?:thumbnails?|preview|sprite|storyboard|chapters?|scrubber)'
         r'["\']?\s*[:=]', re.IGNORECASE)
 
+    def _cookie_header_for(self, url):
+        """A Cookie header for *url*, from the same cookies.txt mpv plays with.
+
+        The video itself comes back fine through mpv from this CDN family, and
+        mpv is the one thing in this app that sends cookies.txt. The caption
+        request that sends nothing is answered 403.
+        """
+        try:
+            host = (urlparse(str(url or '')).hostname or '').lower()
+        except Exception:
+            host = ''
+        if not host:
+            return ''
+        parts = host.split('.')
+        domains = ['.'.join(parts[k:]) for k in range(len(parts) - 1)]
+        pairs = []
+        seen = set()
+        try:
+            import http.cookiejar
+            for path in self._cookies_txt_paths(domains):
+                jar = http.cookiejar.MozillaCookieJar(path)
+                jar.load(ignore_discard=True, ignore_expires=True)
+                for cookie in jar:
+                    cookie_domain = str(
+                        getattr(cookie, 'domain', '') or '').lower().lstrip('.')
+                    if not any(cookie_domain == d
+                               or cookie_domain.endswith('.' + d)
+                               for d in domains):
+                        continue
+                    name = str(getattr(cookie, 'name', '') or '')
+                    if not name or name in seen:
+                        continue
+                    seen.add(name)
+                    value = getattr(cookie, 'value', '') or ''
+                    pairs.append(name + '=' + str(value))
+        except Exception as exc:
+            print(f'[SUBS] could not read cookies for {host}: {exc}',
+                  flush=True)
+        return '; '.join(pairs)
+
+    def _refusal_snippet(self, response):
+        """What a refused response says about itself, on one line."""
+        try:
+            body = getattr(response, 'content', None) or b''
+            if not body:
+                body = str(getattr(response, 'text', '') or '').encode(
+                    'utf-8', 'replace')
+            snippet = body[:400].decode('utf-8', 'replace')
+            return re.sub(r'\s+', ' ', snippet).strip()[:220]
+        except Exception:
+            return ''
+
     def _fetch_caption_body(self, url, page_url=''):
         """Fetch one caption file, as the bytes to hand the player.
 
-        curl_cffi first, with the page's own Referer and Origin: caption files
-        sit behind the same CDN edge as the video, and a bare `requests` GET
-        with only a user agent is answered 403. A field log showed exactly
-        that for xhamster's thumb-v1.xhcdn.com .vtt files -- the page named
-        six captions and every fetch came back HTTP 403, 564 bytes of error
-        page, so the app reported tracks it could never load.
+        Sends the page's own Referer and Origin, a browser TLS fingerprint
+        when curl_cffi is available, and the cookies mpv plays the video with.
+        A field log showed the caption CDN refusing a header-only request with
+        HTTP 403 while the video from the same CDN family played fine through
+        mpv -- the one request here that does send cookies.txt.
+
+        When a fetch is still refused, the reason is printed. The CDN says why
+        in the body it sends back; throwing that away is what made this take
+        several runs to find.
         """
         headers = self._media_playback_headers(page_url, url)
         headers['Accept'] = 'text/vtt, application/octet-stream, text/plain, */*'
         headers['Sec-Fetch-Dest'] = 'empty'
+        cookie_header = self._cookie_header_for(url)
+        if cookie_header:
+            headers['Cookie'] = cookie_header
         status = 0
+        via = 'requests'
+        detail = ''
         try:
             import curl_cffi.requests as cfreq
         except Exception:
             cfreq = None
         if cfreq is not None:
+            via = 'curl_cffi'
             try:
                 response = cfreq.Session(impersonate='chrome131').get(
                     url, headers=headers, timeout=20, allow_redirects=True)
                 if response is not None and response.ok and response.content:
                     return response.content, response.status_code
                 status = int(getattr(response, 'status_code', 0) or 0)
-            except Exception:
+                detail = self._refusal_snippet(response)
+            except Exception as exc:
                 status = 0
-        try:
-            import requests
-            response = requests.get(
-                url, headers=headers, timeout=20, allow_redirects=True)
-            if response is not None and response.ok and response.content:
-                return response.content, response.status_code
-            status = int(getattr(response, 'status_code', 0) or 0) or status
-        except Exception:
-            pass
+                detail = (type(exc).__name__ + ': ' + str(exc))[:160]
+        if not status or status >= 400:
+            try:
+                import requests
+                response = requests.get(
+                    url, headers=headers, timeout=20, allow_redirects=True)
+                if response is not None and response.ok and response.content:
+                    return response.content, response.status_code
+                status = int(getattr(response, 'status_code', 0) or 0) or status
+                detail = self._refusal_snippet(response) or detail
+            except Exception as exc:
+                detail = detail or (type(exc).__name__ + ': ' + str(exc))[:160]
+        print(f'[SUBS]   {str(url)[:110]} -> refused, HTTP {status} via '
+              f'{via}, cookies='
+              f'{"yes" if cookie_header else "none"}: {detail}', flush=True)
         return b'', status
 
     def _subtitle_endpoint_body(self, url, referer=''):
