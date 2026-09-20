@@ -2,7 +2,7 @@
 C:\Users\Mouad\Desktop>cd /d "C:\Users\Mouad\Desktop\video_player"
 
 C:\Users\Mouad\Desktop\video_player>python main.py
-[MetadataScraper] build link6-phone
+[MetadataScraper] build link7-scene
 [JAVGURU] VideoPlayer patched — jav.guru URL detection active.
 [GENERIC_JAV] VideoPlayer patched — URL detection active. (build R63-page-row)
 [JAVHD] VideoPlayer patched — javhd.today URL detection active.
@@ -14,132 +14,37 @@ qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.3 LGPL version
 [video_backend] mpv renderer: native D3D11 window
 [PASSWORDS] Loaded 41 cached passwords from disk
 No headphones detected at startup, using default audio output
-QWidgetWindow(0x13fad0cf760, name="QWidgetClassWindow") must be a top level window.
-[RECENT_PLAYLIST][LOAD] C:/Users/Mouad/Desktop/video_player/family.agpl
-[RECENT_PLAYLIST][DONE] C:/Users/Mouad/Desktop/video_player/family.agpl items=113
-[FAVICON] gofile.io: 3 declared icon(s) — https://gofile.io/assets/img/favicon16.png
-[FAVICON] www.trendyporn.com: 4 declared icon(s) — https://www.trendyporn.com/chrome-touch-icon-192x192.png
-[FAVICON] www.tnaflix.com: 14 declared icon(s) — https://www.tnaflix.com/assets/img/favicon/tnaflix/android-icon-192x192.png
-[FAVICON] bunkr.cr: 1 declared icon(s) — https://bunkr.cr/images/fav.ico
-[FAVICON] gofile.io: got site icon from https://gofile.io/assets/img/favicon16.png
-[FAVICON] bunkr.cr: got site icon from https://bunkr.cr/images/fav.ico
-[FAVICON] www.trendyporn.com: got site icon from https://www.trendyporn.com/chrome-touch-icon-192x192.png
-[FAVICON] www.tnaflix.com: got site icon from https://www.tnaflix.com/assets/img/favicon/tnaflix/android-icon-192x192.png
-[PLAYBACK][LOADFILE] https://videos.trendyporn.com/videos/6/a/3/8/e/6a38e4d7f2502.mp4?md5=Bye_sN0g19SHka8XW3xtZA&expires=1789789601
-[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=False target=https://videos.trendyporn.com/videos/6/a/3/8/e/6a38e4d7f2502.mp4?md5=Bye_sN0g19SHka8XW3xtZA&expires=1789789601
-Looking for subtitle mapping for: https://www.trendyporn.com/video/brianna-beach-step-son-learns-2026-06-21-176047.html
-Found mapping under key: https://www.trendyporn.com/video/brianna-beach-step-son-learns-2026-06-21-176047.html
-Found mapping! Loading: C:\Users\Mouad\AppData\Local\Temp\antigravity_player_remote_subs\MomComesFirst.26.06.20.Brianna.Beach.Step.Son.Learns.XXX.1080p.mp4.und.vtt
-DEBUG: Parsing subtitle file: C:\Users\Mouad\AppData\Local\Temp\antigravity_player_remote_subs\MomComesFirst.26.06.20.Brianna.Beach.Step.Son.Learns.XXX.1080p.mp4.und.vtt
-[SUBTITLE][REJECTED] cue text is not captions, ignoring: C:\Users\Mouad\AppData\Local\Temp\antigravity_player_remote_subs\MomComesFirst.26.06.20.Brianna.Beach.Step.Son.Learns.XXX.1080p.mp4.und.vtt
+[FAVICON] xhamster.com: 15 declared icon(s) — https://static-ah.xhcdn.com/xh-desktop/images/favicon/favicon-v2-512x512.png?v=1
+[FAVICON] xhamster.com: got site icon from https://static-ah.xhcdn.com/xh-desktop/images/favicon/favicon-v2-512x512.png?v=1
+[FAVICON] www.xvideos.com: 4 declared icon(s) — https://assets-cdn77.xvideos-cdn.com/v3/img/skins/default/logo/xv.white.svg
+[FAVICON] www.xvideos.com: got site icon from https://assets-cdn77.xvideos-cdn.com/v3/img/skins/default/logo/xv.white.svg
+[HTML_RESOLVE] chose https://video5.xhcdn.com/key=v5Iw0RTWXUEkMj0JaE19sg,end=1789952400,limit=3/data=105.72.201.76-dvp/referer=force,.xhcdn.com,.xhamst (0s) from 129 candidate(s)
+[PLAYBACK][LOADFILE] https://video-nss-h.xhcdn.com/ofpc354oFXG0st8W_oW7Xw==,1789952400/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x2160:2160p/030/627/881/2160p.h264.mp4.m3u8
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://video-nss-h.xhcdn.com/ofpc354oFXG0st8W_oW7Xw==,1789952400/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920
+Looking for subtitle mapping for: https://xhamster.com/videos/my-stepson-invites-his-classmate-home-to-study-and-i-catch-them-having-sex-in-my-bed-xhb0btt
+No saved subtitle for this video or its mirrors: https://xhamster.com/videos/my-stepson-invites-his-classmate-home-to-study-and-i-catch-them-having-sex-in-my-bed-xhb0btt
 [MPV][error][ffmpeg] tls: error:0A000086:lib(20)::reason(134)
 
-[PLAYBACK][END_FILE] https://videos.trendyporn.com/videos/6/a/3/8/e/6a38e4d7f2502.mp4?md5=Bye_sN0g19SHka8XW3xtZA&expires=1789789601 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'error', 'playlist_entry_id': 1, 'file_error': b'loading failed'}>
-[MPV][error][stream] Failed to open https://videos.trendyporn.com/videos/6/a/3/8/e/6a38e4d7f2502.mp4?md5=Bye_sN0g19SHka8XW3xtZA&expires=1789789601.
+[PLAYBACK][END_FILE] https://video-nss-h.xhcdn.com/ofpc354oFXG0st8W_oW7Xw==,1789952400/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x2160:2160p/030/627/881/2160p.h264.mp4.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'error', 'playlist_entry_id': 1, 'file_error': b'loading failed'}>
+[MPV][error][stream] Failed to open https://video-nss-h.xhcdn.com/ofpc354oFXG0st8W_oW7Xw==,1789952400/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x2160:2160p/030/627/881/2160p.h264.mp4.m3u8.
 
-[PLAYBACK][LOAD_FAILED] retrying direct (tls_verify=False) current=https://www.trendyporn.com/video/brianna-beach-step-son-learns-2026-06-21-176047.html playback=https://videos.trendyporn.com/videos/6/a/3/8/e/6a38e4d7f2502.mp4?md5=Bye_sN0g19SHka8XW3xtZA&expires=1789789601 error=loading failed
-[PLAYBACK][LOADFILE] https://videos.trendyporn.com/videos/6/a/3/8/e/6a38e4d7f2502.mp4?md5=Bye_sN0g19SHka8XW3xtZA&expires=1789789601
-[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=False target=https://videos.trendyporn.com/videos/6/a/3/8/e/6a38e4d7f2502.mp4?md5=Bye_sN0g19SHka8XW3xtZA&expires=1789789601
-[PLAYBACK][FILE_LOADED] https://videos.trendyporn.com/videos/6/a/3/8/e/6a38e4d7f2502.mp4?md5=Bye_sN0g19SHka8XW3xtZA&expires=1789789601
-[mpv][perf] profile=base 1280x720 fps=29.97 bitrate=0kbps hwdec=['d3d11va-copy'] config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
-DEBUG: Removed subtitle mapping for video and its mirrors
-[PLAYBACK][END_FILE]  event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'stop', 'playlist_entry_id': 2}>
-[FAVICON] pixeldrain.com: 7 declared icon(s) — https://pixeldrain.com/res/img/pixeldrain_32.png
-[FAVICON] filester.me: 1 declared icon(s) — https://filester.me/img/favicon.ico
-[FAVICON] cyberdrop.cr: 4 declared icon(s) — https://cyberdrop.cr/favicon.ico
-[FAVICON] pixeldrain.com: got site icon from https://pixeldrain.com/res/img/pixeldrain_32.png
-[FAVICON] turbo.cr: 1 declared icon(s) — https://turbo.cr/static/favicon.svg
-[FAVICON] cyberdrop.cr: got site icon from https://cyberdrop.cr/favicon.ico
-[FAVICON] turbo.cr: got site icon from https://turbo.cr/static/favicon.svg
-[FAVICON] watchporn.to: 1 declared icon(s) — https://watchporn.to/favicon.ico
-[FAVICON] watchporn.to: got site icon from https://watchporn.to/favicon.ico
-[tls @ 0000013FC6B21700] Failed to send initial handshake data
-qt.multimedia.ffmpeg.mediadataholder: Could not open media. FFmpeg error description: I/O error
-[tls @ 0000013FC6B20840] Unable to read from socket
-[tls @ 0000013FC6B20840] Failed to send close message
-qt.multimedia.ffmpeg.mediadataholder: Could not open media. FFmpeg error description: Immediate exit requested
-[FAVICON] filester.me: no icon from any candidate (filester.me)
-QWidgetWindow(0x13fad0cf760, name="QWidgetClassWindow") must be a top level window.
-QWidgetWindow(0x13fad0cf760, name="QWidgetClassWindow") must be a top level window.
-QWidgetWindow(0x13fad0cf760, name="QWidgetClassWindow") must be a top level window.
-QWidgetWindow(0x13fad0cf760, name="QWidgetClassWindow") must be a top level window.
-QWidgetWindow(0x13fad0cf760, name="QWidgetClassWindow") must be a top level window.
-[PLAYLIST][INFO] path='https://store-na-phx-4.gofile.io/download/web/062ea8bc-1ce1-42a0-9f23-ba9c0607e615/Dace%2026.09.08%20One%20Way%20Or%20Another%204k.mp4' rows=[113] duration='Stream' quality='Stream'
-qt.multimedia.ffmpeg.mediadataholder: Could not open media. FFmpeg error description: I/O error
-Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'https://images.psmcdn.net/hhk/tour/pics/izzy_lush/bio_small.mp4':
-  Metadata:
-    major_brand     : mp42
-    minor_version   : 0
-    compatible_brands: mp42mp41
-    creation_time   : 2021-08-11T04:37:35.000000Z
-  Duration: 00:00:09.05, start: 0.000000, bitrate: 717 kb/s
-  Stream #0:0[0x1](eng): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv, smpte170m, progressive), 500x282, 702 kb/s, 23.98 fps, 23.98 tbr, 24k tbn (default)
-      Metadata:
-        creation_time   : 2021-08-11T04:37:35.000000Z
-        handler_name    : ?Mainconcept Video Media Handler
-        vendor_id       : [0][0][0][0]
-        encoder         : AVC Coding
-[tls @ 0000013FC65BB940] Failed to send close message
-[tls @ 0000013FC6447480] Failed to read handshake response
-qt.multimedia.ffmpeg.mediadataholder: Could not open media. FFmpeg error description: Immediate exit requested
-Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'https://images.psmcdn.net/hhk/tour/pics/izzy_lush/bio_small.mp4':
-  Metadata:
-    major_brand     : mp42
-    minor_version   : 0
-    compatible_brands: mp42mp41
-    creation_time   : 2021-08-11T04:37:35.000000Z
-  Duration: 00:00:09.05, start: 0.000000, bitrate: 717 kb/s
-  Stream #0:0[0x1](eng): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv, smpte170m, progressive), 500x282, 702 kb/s, 23.98 fps, 23.98 tbr, 24k tbn (default)
-      Metadata:
-        creation_time   : 2021-08-11T04:37:35.000000Z
-        handler_name    : ?Mainconcept Video Media Handler
-        vendor_id       : [0][0][0][0]
-        encoder         : AVC Coding
-[HOVER] clip swapped in: bio_small.mp4 duration=9050 ms
-[HOVER] clip swapped in: bio_small.mp4 duration=9050 ms
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::VideoRenderer::unnamed
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::StreamDecoder::unnamed
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::Demuxer::unnamed
-[tls @ 0000013FC6447580] Failed to send close message
-qt.multimedia.ffmpeg.mediadataholder: Could not open media. FFmpeg error description: I/O error
-Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'https://images.psmcdn.net/hhk/tour/pics/izzy_lush/bio_small.mp4':
-  Metadata:
-    major_brand     : mp42
-    minor_version   : 0
-    compatible_brands: mp42mp41
-    creation_time   : 2021-08-11T04:37:35.000000Z
-  Duration: 00:00:09.05, start: 0.000000, bitrate: 717 kb/s
-  Stream #0:0[0x1](eng): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv, smpte170m, progressive), 500x282, 702 kb/s, 23.98 fps, 23.98 tbr, 24k tbn (default)
-      Metadata:
-        creation_time   : 2021-08-11T04:37:35.000000Z
-        handler_name    : ?Mainconcept Video Media Handler
-        vendor_id       : [0][0][0][0]
-        encoder         : AVC Coding
-[HOVER] clip swapped in: bio_small.mp4 duration=9050 ms
-[HOVER] clip swapped in: bio_small.mp4 duration=9050 ms
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::VideoRenderer::unnamed
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::StreamDecoder::unnamed
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::Demuxer::unnamed
-[tls @ 0000013FC6B21D80] Failed to send close message
-QWidgetWindow(0x13fad0cf760, name="QWidgetClassWindow") must be a top level window.
-[DUPLICATE] Skipped https://www.youcrazyx.com/video/brianna-beach-breaking-the-rules-07-06-2026-127428.html (already in playlist)
-qt.multimedia.ffmpeg.mediadataholder: Could not open media. FFmpeg error description: I/O error
-Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'https://images.psmcdn.net/hhk/tour/pics/izzy_lush/bio_small.mp4':
-  Metadata:
-    major_brand     : mp42
-    minor_version   : 0
-    compatible_brands: mp42mp41
-    creation_time   : 2021-08-11T04:37:35.000000Z
-  Duration: 00:00:09.05, start: 0.000000, bitrate: 717 kb/s
-  Stream #0:0[0x1](eng): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv, smpte170m, progressive), 500x282, 702 kb/s, 23.98 fps, 23.98 tbr, 24k tbn (default)
-      Metadata:
-        creation_time   : 2021-08-11T04:37:35.000000Z
-        handler_name    : ?Mainconcept Video Media Handler
-        vendor_id       : [0][0][0][0]
-        encoder         : AVC Coding
-[HOVER] clip swapped in: bio_small.mp4 duration=9050 ms
-[HOVER] clip swapped in: bio_small.mp4 duration=9050 ms
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::VideoRenderer::unnamed
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::StreamDecoder::unnamed
-QObject::disconnect: wildcard call disconnects from destroyed signal of QFFmpeg::Demuxer::unnamed
-[tls @ 0000013FC62F3240] Failed to send close message
+[PLAYBACK][LOAD_FAILED] retrying direct (tls_verify=False) current=https://xhamster.com/videos/my-stepson-invites-his-classmate-home-to-study-and-i-catch-them-having-sex-in-my-bed-xhb0btt playback=https://video-nss-h.xhcdn.com/ofpc354oFXG0st8W_oW7Xw==,1789952400/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x216 error=loading failed
+[PLAYBACK][LOADFILE] https://video-nss-h.xhcdn.com/ofpc354oFXG0st8W_oW7Xw==,1789952400/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x2160:2160p/030/627/881/2160p.h264.mp4.m3u8
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://video-nss-h.xhcdn.com/ofpc354oFXG0st8W_oW7Xw==,1789952400/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920
+[PLAYBACK][FILE_LOADED] https://video-nss-h.xhcdn.com/ofpc354oFXG0st8W_oW7Xw==,1789952400/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x2160:2160p/030/627/881/2160p.h264.mp4.m3u8
+[mpv][perf] profile=4k-fast 3840x2160 fps=25.00 bitrate=0kbps hwdec=d3d11va config=['d3d11va'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
+[PLAYBACK][LOADFILE] https://hls-cdn77.xvideos-cdn.com/cBsSGxLRMQx4j4s8QIepaQ==,1789951178/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://hls-cdn77.xvideos-cdn.com/cBsSGxLRMQx4j4s8QIepaQ==,1789951178/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
+[PLAYBACK][END_FILE] https://hls-cdn77.xvideos-cdn.com/cBsSGxLRMQx4j4s8QIepaQ==,1789951178/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'stop', 'playlist_entry_id': 2}>
+[MPV][error][ffmpeg] tls: error:0A000086:lib(20)::reason(134)
+
+[PLAYBACK][END_FILE] https://hls-cdn77.xvideos-cdn.com/cBsSGxLRMQx4j4s8QIepaQ==,1789951178/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'error', 'playlist_entry_id': 3, 'file_error': b'loading failed'}>
+[MPV][error][stream] Failed to open https://hls-cdn77.xvideos-cdn.com/cBsSGxLRMQx4j4s8QIepaQ==,1789951178/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8.
+
+Looking for subtitle mapping for: https://www.xvideos.com/video.upbutthfd81/sharing_a_bed_with_my_hot_stepmom_full
+No saved subtitle for this video or its mirrors: https://www.xvideos.com/video.upbutthfd81/sharing_a_bed_with_my_hot_stepmom_full
+[PLAYBACK][LOAD_FAILED] retrying direct (tls_verify=False) current=https://www.xvideos.com/video.upbutthfd81/sharing_a_bed_with_my_hot_stepmom_full playback=https://hls-cdn77.xvideos-cdn.com/cBsSGxLRMQx4j4s8QIepaQ==,1789951178/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8 error=loading failed
+[PLAYBACK][LOADFILE] https://hls-cdn77.xvideos-cdn.com/cBsSGxLRMQx4j4s8QIepaQ==,1789951178/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://hls-cdn77.xvideos-cdn.com/cBsSGxLRMQx4j4s8QIepaQ==,1789951178/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
+[PLAYBACK][FILE_LOADED] https://hls-cdn77.xvideos-cdn.com/cBsSGxLRMQx4j4s8QIepaQ==,1789951178/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
+[mpv][perf] profile=base 1920x1080 fps=29.97 bitrate=0kbps hwdec=d3d11va-copy config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
