@@ -268,6 +268,30 @@ IMAGE_EXTENSIONS = (
     '.webp', '.avif', '.jxl', '.heic', '.heif',
     '.tiff', '.tif', '.ico', '.svg',
 )
+def _ext_probe_path(p):
+    """The slice of a path or URL that a file-extension test may look at.
+
+    A stream URL's QUERY STRING is not its filename. A doodstream playlist
+    row is 'https://playmogo.com/e/<id>?c_poster=...cover-player.jpg' -- it
+    ends in .jpg, so every bare endswith(IMAGE_EXTENSIONS) test called that
+    VIDEO an image. One wrong boolean, six symptoms: the arrow keys walked
+    the playlist instead of seeking, a side-click jumped rows, the
+    end-of-stream stall watchdog stood down, near-end auto-advance was
+    cancelled, and the title bar said "Now Viewing".
+
+    Local paths keep their literal '?' and '#' -- both are legal filename
+    characters on Windows and appear on FTP shares -- so only real URLs are
+    split. phone:// is deliberately not split for the same reason.
+    """
+    s = str(p or '')
+    if s.lower().startswith(('http://', 'https://', 'ftp://', 'ftps://')):
+        try:
+            return urlsplit(s).path or s
+        except Exception:
+            return s
+    return s
+
+
 VIDEO_EXTENSIONS = (
     '.mp4', '.mkv', '.avi', '.mov', '.wmv',
     '.flv', '.webm', '.m4v', '.mpg', '.mpeg',
@@ -2267,7 +2291,7 @@ class ClickableGraphicsView(QGraphicsView):
             # Side-click navigation: ONLY for single images (not videos, CBZ, or Read Mode)
             p = self.parent_player
             current = getattr(p, 'current_file', '') or ''
-            is_single_image = (current.lower().endswith(IMAGE_EXTENSIONS)
+            is_single_image = (_ext_probe_path(current).lower().endswith(IMAGE_EXTENSIONS)
                               and not getattr(p, 'is_cbz_active', False)
                               and not getattr(p, 'read_mode', False))
             
@@ -3045,7 +3069,7 @@ class MpvMediaPlayerAdapter(QObject):
         low = source.lower()
         if not (low.startswith('http://') or low.startswith('https://')):
             return False, ''
-        if low.endswith(IMAGE_EXTENSIONS):
+        if _ext_probe_path(low).endswith(IMAGE_EXTENSIONS):
             return False, ''
         try:
             width = int(width or 0)
@@ -8862,9 +8886,9 @@ class VideoPlayer(QMainWindow):
             return "Local Chapter"
         if lower.endswith('.pdf'):
             return "PDF"
-        if lower.endswith(AUDIO_EXTENSIONS):
+        if _ext_probe_path(lower).endswith(AUDIO_EXTENSIONS):
             return "Audio"
-        if lower.endswith(IMAGE_EXTENSIONS):
+        if _ext_probe_path(lower).endswith(IMAGE_EXTENSIONS):
             return "Image"
         if lower.endswith(ARCHIVE_EXTENSIONS):
             return "Archive"
@@ -8947,7 +8971,7 @@ class VideoPlayer(QMainWindow):
             kind = "Now Reading"
         elif lower.endswith(AUDIO_EXTENSIONS):
             kind = "Now Listening"
-        elif lower.endswith(IMAGE_EXTENSIONS):
+        elif _ext_probe_path(lower).endswith(IMAGE_EXTENSIONS):
             kind = "Now Viewing"
         else:
             kind = "Now Playing"
@@ -22326,7 +22350,7 @@ try {
         if not file_path:
             return False
         lower_path = file_path.lower()
-        return lower_path.endswith('.cbz') or lower_path.endswith(IMAGE_EXTENSIONS)
+        return lower_path.endswith('.cbz') or _ext_probe_path(lower_path).endswith(IMAGE_EXTENSIONS)
 
     def _remote_folder_prefix(self):
         return "__remote_folder__::"
@@ -51685,7 +51709,7 @@ try {
             if getattr(self, '_suppress_end_of_media_once', False):
                 return
             current = getattr(self, 'current_file', None)
-            if current and str(current).lower().endswith(IMAGE_EXTENSIONS):
+            if current and _ext_probe_path(current).lower().endswith(IMAGE_EXTENSIONS):
                 return
             print(f'[PLAYBACK] end-of-stream stall watchdog fired '
                   f'({position}/{duration} ms, no EOF) - advancing playlist')
@@ -51705,7 +51729,7 @@ try {
         if str(current_file).startswith("__rpa_header__"):
             self._cancel_near_end_auto_advance()
             return
-        if str(current_file).lower().endswith(IMAGE_EXTENSIONS):
+        if _ext_probe_path(current_file).lower().endswith(IMAGE_EXTENSIONS):
             self._cancel_near_end_auto_advance()
             return
         if getattr(self, '_auto_advance_pending', False):
@@ -51811,7 +51835,7 @@ try {
             return True
 
         # Images are intentionally not auto-advanced here.
-        if self.current_file and self.current_file.lower().endswith(IMAGE_EXTENSIONS):
+        if self.current_file and _ext_probe_path(self.current_file).lower().endswith(IMAGE_EXTENSIONS):
             try:
                 self.media_player.stop()
             except Exception:
@@ -53488,7 +53512,7 @@ try {
             # Check if current file is an image
             is_image = False
             if self.current_file:
-                is_image = self.current_file.lower().endswith(IMAGE_EXTENSIONS)
+                is_image = _ext_probe_path(self.current_file).lower().endswith(IMAGE_EXTENSIONS)
             
             if key == Qt.Key.Key_Space:
                 self.play_video()

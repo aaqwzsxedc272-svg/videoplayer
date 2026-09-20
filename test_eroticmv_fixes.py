@@ -21,6 +21,23 @@ from urllib.parse import urlparse, unquote, urljoin, urlunparse, parse_qs
 SRC = open('main.py', encoding='utf-8').read()
 TREE = ast.parse(SRC)
 
+# main.py code is lifted into fresh namespaces throughout this file. Any of it
+# may now call a module-level helper, and a lift that cannot see one dies on
+# NameError at the first call -- which reads like a product bug but is a
+# harness bug. Provide them to every lifted namespace.
+_LIFT_HELPERS = {}
+try:
+    from urllib.parse import urlsplit as _us_lift
+    _LIFT_HELPERS['urlsplit'] = _us_lift
+    _fn_lift = next((n for n in TREE.body
+                     if isinstance(n, ast.FunctionDef)
+                     and n.name == '_ext_probe_path'), None)
+    if _fn_lift is not None:
+        exec(compile(ast.Module(body=[_fn_lift], type_ignores=[]),
+                     '<lift_helpers>', 'exec'), _LIFT_HELPERS)
+except Exception as _e_lift:
+    print('  WARN  lift helpers unavailable:', _e_lift)
+
 
 class _FakeQTimer:
     """Captures singleShot callbacks so the test can fire them."""
@@ -1443,6 +1460,7 @@ _fn17 = next(n for n in _ast17.walk(_ast17.parse(_int17))
              if isinstance(n, _ast17.FunctionDef)
              and n.name == '_familypornhd_capture_links')
 _g17 = {}
+_g17.update(_LIFT_HELPERS)
 exec(compile(_ast17.Module(body=[_fn17], type_ignores=[]), '<int>', 'exec'), _g17)
 _links17 = _g17['_familypornhd_capture_links']
 
@@ -3264,6 +3282,7 @@ report(sorted(_fn44) == ['_capture_candidate_is_source_page', '_capture_line_is_
 _g44 = {'urlparse': urlparse,
         'VIDEO_EXTENSIONS': _lift44['VIDEO_EXTENSIONS'],
         'AUDIO_EXTENSIONS': _lift44['AUDIO_EXTENSIONS']}
+_g44.update(_LIFT_HELPERS)
 
 class _T44Stub:
     VIDEO_EXTENSIONS = _lift44['VIDEO_EXTENSIONS']
@@ -3375,6 +3394,7 @@ for _node45 in _ast44.walk(_tree43):
         _fn45 = _node45
 report(_fn45 is not None, 'found _browser_retry_needs_headed in main.py')
 _g45 = {}
+_g45.update(_LIFT_HELPERS)
 exec(compile(_ast44.Module(body=[_fn45], type_ignores=[]), '<lifted>', 'exec'), _g45)
 _r45 = staticmethod(_g45['_browser_retry_needs_headed'])
 for _n45, _w45 in [
@@ -3428,6 +3448,7 @@ for _node46 in _ast44.walk(_tree43):
 report(sorted(_fns46) == ['_browser_capture_candidate_window', '_is_disguised_hls_manifest'],
        f'found both new helpers (got {sorted(_fns46)})')
 _g46 = {'urlparse': urlparse, 're': re}
+_g46.update(_LIFT_HELPERS)
 exec(compile(_ast44.Module(body=[_fns46['_is_disguised_hls_manifest']],
                            type_ignores=[]), '<lifted>', 'exec'), _g46)
 _dm46 = _g46['_is_disguised_hls_manifest']
@@ -3578,6 +3599,7 @@ _g47 = {'urlparse': urlparse, 'unquote': unquote, 're': re, 'os': os,
         'urljoin': urljoin,
         'VIDEO_EXTENSIONS': _lift47['VIDEO_EXTENSIONS'],
         'AUDIO_EXTENSIONS': _lift47['AUDIO_EXTENSIONS']}
+_g47.update(_LIFT_HELPERS)
 exec(compile(_ast44.Module(body=[_fn47['_is_disguised_hls_manifest'],
                                  _fn47['_is_hls_stream_url'],
                                  _fn47['_capture_candidate_has_media_shape']],
@@ -3683,6 +3705,7 @@ class _T47FetchStub:
 
 _g47f = {'urlparse': urlparse, 'unquote': unquote, 're': re, 'os': os,
          'urljoin': urljoin}
+_g47f.update(_LIFT_HELPERS)
 for _n47 in ('_hls_playlist_looks_like_decoy', '_hls_best_variant_url'):
     _node47b = next(n for n in _ast44.walk(_main44)
                     if isinstance(n, _ast44.FunctionDef) and n.name == _n47)
@@ -3796,6 +3819,18 @@ report(sorted(_fn48) == ['_report_still_image_stream',
                          '_still_image_video_signature'],
        f'found both new helpers on MpvMediaPlayerAdapter (got {sorted(_fn48)})')
 _g48 = {'IMAGE_EXTENSIONS': G['IMAGE_EXTENSIONS'], 'print': print, 're': re}
+_g48.update(_LIFT_HELPERS)
+# _still_image_video_signature now calls _ext_probe_path, which lives at
+# module level in main.py. A lifted copy raises NameError the moment it
+# reaches that line unless the helper is lifted with it.
+_fn48e = next((n for n in _main44.body
+               if isinstance(n, _ast44.FunctionDef)
+               and n.name == '_ext_probe_path'), None)
+if _fn48e is not None:
+    from urllib.parse import urlsplit as _us48
+    _g48['urlsplit'] = _us48
+    exec(compile(_ast44.Module(body=[_fn48e], type_ignores=[]),
+                 '<lifted48e>', 'exec'), _g48)
 exec(compile(_ast44.Module(body=[_fn48['_still_image_video_signature'],
                                  _fn48['_report_still_image_stream']],
                            type_ignores=[]), '<lifted48>', 'exec'), _g48)
@@ -3915,6 +3950,7 @@ report(not _positional49,
        're.split passes maxsplit as a KEYWORD, so Python 3.13+ stays quiet')
 
 _g49 = {'IMAGE_EXTENSIONS': G['IMAGE_EXTENSIONS'], 'print': print, 're': re}
+_g49.update(_LIFT_HELPERS)
 exec(compile(_ast44.Module(body=[_np49], type_ignores=[]), '<lifted49>', 'exec'), _g49)
 
 
@@ -3937,6 +3973,7 @@ _fn49 = next(n for n in _ast44.walk(_main44)
              if isinstance(n, _ast44.FunctionDef)
              and n.name == '_media_url_is_site_promo')
 _g49b = {'os': os, 're': re, 'urlparse': urlparse}
+_g49b.update(_LIFT_HELPERS)
 exec(compile(_ast44.Module(body=[_fn49], type_ignores=[]), '<lifted49b>', 'exec'), _g49b)
 
 
@@ -4044,6 +4081,7 @@ _fn51 = next(n for n in _ast44.walk(_main44)
              if isinstance(n, _ast44.FunctionDef)
              and n.name == '_capture_candidate_has_media_shape')
 _g51 = {'urlparse': urlparse, 're': re}
+_g51.update(_LIFT_HELPERS)
 _g51['VIDEO_EXTENSIONS'] = G['VIDEO_EXTENSIONS']
 _g51['AUDIO_EXTENSIONS'] = G['AUDIO_EXTENSIONS']
 exec(compile(_ast44.Module(body=[_fn51], type_ignores=[]), '<lifted51>', 'exec'), _g51)
@@ -4158,6 +4196,7 @@ _fn52 = next(n for n in _ast44.walk(_main44)
 _g52 = {'urlparse': urlparse, 're': re,
         'VIDEO_EXTENSIONS': G['VIDEO_EXTENSIONS'],
         'AUDIO_EXTENSIONS': G['AUDIO_EXTENSIONS']}
+_g52.update(_LIFT_HELPERS)
 exec(compile(_ast44.Module(body=[_fn52], type_ignores=[]), '<l52>', 'exec'), _g52)
 _disc52 = next(n for n in _ast44.walk(_main44)
                if isinstance(n, _ast44.FunctionDef)
@@ -7801,6 +7840,7 @@ print()
 print('--- 84: seen keys do not collide across unrelated rows ---')
 
 _g84 = {'re': re, 'unquote': unquote}
+_g84.update(_LIFT_HELPERS)
 _fn84 = next((n for n in TREE.body
               if isinstance(n, ast.ClassDef) and n.name == 'VideoPlayer'), None)
 _code84 = _bl84 = None
@@ -7877,6 +7917,7 @@ print('--- 85: a linker rename can combine fileditch variants ---')
 
 _g85 = {'re': re, 'os': os, 'unquote': unquote, 'html_unescape': html_unescape,
         'urlparse': urlparse, 'parse_qs': parse_qs, 'urlunparse': urlunparse}
+_g85.update(_LIFT_HELPERS)
 _cls85 = next((n for n in TREE.body if isinstance(n, ast.ClassDef)
                and n.name == 'VideoPlayer'), None)
 _want85 = ('_mirror_display_group_key', '_fileditch_filename_from_url',
@@ -8112,6 +8153,7 @@ report(len(_fn87) == 4,
 if len(_fn87) == 4:
     _g87 = {'os': os, 're': re, 'urlparse': urlparse, 'unquote': unquote,
             '_meta_norm_path': _msrc55._meta_norm_path}
+    _g87.update(_LIFT_HELPERS)
     for _n87 in _fn87.values():
         _m87 = ast.Module(body=[_n87], type_ignores=[])
         ast.fix_missing_locations(_m87)
@@ -8222,6 +8264,7 @@ report(len(_fn88) == 4, 'the caption check and the track extractor are here',
 if len(_fn88) == 4:
     _g88 = {'re': re, 'os': os, 'urlparse': urlparse, 'urljoin': urljoin,
             'html_unescape': html_unescape}
+    _g88.update(_LIFT_HELPERS)
     for _n88 in _fn88.values():
         _m88 = ast.Module(body=[_n88], type_ignores=[])
         ast.fix_missing_locations(_m88)
@@ -8463,6 +8506,7 @@ if len(_fn90) == 2:
                               quote as _q90)
     _g90 = {'urlparse': _up90, 'urlunparse': _uu90, 'urlsplit': _us90,
             'unquote': _uq90}
+    _g90.update(_LIFT_HELPERS)
     for _n90 in _fn90.values():
         _m90 = ast.Module(body=[_n90], type_ignores=[])
         ast.fix_missing_locations(_m90)
@@ -8581,6 +8625,7 @@ if len(_fn91) == len(_want91):
     # one function this section does not compile out (it does the fetching).
     _g91 = {'re': re, 'unescape': _uq91, 'urlparse': _up91,
             'urlunparse': _uu91, 'parse_qsl': _pq91, 'urlencode': _ue91}
+    _g91.update(_LIFT_HELPERS)
     for _n91 in _tree91.body:
         if (isinstance(_n91, ast.Assign) and _n91.targets
                 and getattr(_n91.targets[0], 'id', '').startswith('_SUPJAV')):
@@ -8954,6 +8999,87 @@ elif len(_fn91) == len(_want91):
        'the player host is read off the page rather than hard-coded -- the '
        'lk1 prefix is exactly the sort of thing that rotates',
        (_links91[0][1] if _links91 else '')[:60])
+
+# ── 92. A URL's query string is not its filename ──────────────────────────────
+# The doodstream row 'https://playmogo.com/e/<id>?c_poster=...cover-player.jpg'
+# ends in .jpg, so every bare endswith(IMAGE_EXTENSIONS) test called that VIDEO
+# an image. One wrong boolean, six symptoms -- the reported one being that the
+# arrow keys walked the playlist instead of seeking.
+from urllib.parse import urlsplit as _us92
+
+_fn92 = next((n for n in TREE.body
+              if isinstance(n, ast.FunctionDef) and n.name == '_ext_probe_path'),
+             None)
+report(_fn92 is not None,
+   'a file-extension test has somewhere to go that is not the whole URL',
+   'defined' if _fn92 else 'MISSING')
+if _fn92 is not None:
+    _g92 = {'urlsplit': _us92}
+    _g92.update(_LIFT_HELPERS)
+    exec(compile(ast.Module([_fn92], []), '<m92>', 'exec'), _g92)
+    _e92 = _g92['_ext_probe_path']
+    _img92 = ast.literal_eval(next(
+        n.value for n in TREE.body
+        if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)
+        and n.targets[0].id == 'IMAGE_EXTENSIONS'))
+
+    def _isimg92(p):
+        return _e92(p).lower().endswith(_img92)
+
+    _DOOD92 = ('https://playmogo.com/e/5al8s55quahf?c_poster='
+               'https://cdn001.imggle.net/cover-player.jpg')
+    report(_isimg92(_DOOD92) is False and _DOOD92.lower().endswith(_img92),
+       'the doodstream row from the field log is a VIDEO. It ends in .jpg only '
+       'because of a c_poster query parameter, and the old bare endswith made '
+       'is_image true -- which is why Left/Right called previous_video() and '
+       'showed "No previous valid files in playlist" instead of seeking 3 s')
+    for _p92, _w92, _lbl92 in [
+            ('https://861113552.tapecontent.net/radosgw/a4A6/dvdes-886.mp4'
+             '?stream=1', False, 'streamtape direct mp4 with a query'),
+            ('https://il266m.cloudatacdn.com/u5kj/xwcv?token=a&expiry=1',
+             False, 'the real dood playback URL'),
+            ('https://cdn3.turboviplay.com/data/X/X.m3u8', False, 'an HLS stream'),
+            ('https://img.supjav.com/images/2022-02-1dvdes886pl.jpg',
+             True, 'a genuinely remote image'),
+            (r'C:\Users\Mouad\Pics\photo.png', True, 'a local image'),
+    ]:
+        report(_isimg92(_p92) is _w92, f'classified correctly: {_lbl92}')
+    # The regressions that matter: '?' and '#' are legal filename characters
+    # locally and appear on FTP shares, so those must NOT be split.
+    for _p92 in [r'C:\Users\Mouad\Pics\what?big.jpg',
+                 r'C:\Users\Mouad\Pics\#12 cover.jpg']:
+        report(_isimg92(_p92) is True,
+           'a local filename keeps its literal ?/# rather than being split '
+           'like a URL', _p92[-24:])
+    report(_e92('phone:///Anime/Prologue/#11-(16)Prologue 1 (LUCIA).mp4')
+           .endswith('(LUCIA).mp4'),
+       'and a phone:// path is left whole, the same rule the FTP fragment fix '
+       'depends on')
+
+_SITES92 = {
+    '53491 arrow keys':
+        'is_image = _ext_probe_path(self.current_file).lower()'
+        '.endswith(IMAGE_EXTENSIONS)',
+    '2270 side-click':
+        'is_single_image = (_ext_probe_path(current).lower()'
+        '.endswith(IMAGE_EXTENSIONS)',
+    '22329 playlist classifier':
+        "_ext_probe_path(lower_path).endswith(IMAGE_EXTENSIONS)",
+    '51688 stall watchdog':
+        '_ext_probe_path(current).lower().endswith(IMAGE_EXTENSIONS)',
+    '51708 near-end auto-advance':
+        '_ext_probe_path(current_file).lower().endswith(IMAGE_EXTENSIONS)',
+    '51814 auto-advance':
+        '_ext_probe_path(self.current_file).lower()'
+        '.endswith(IMAGE_EXTENSIONS)',
+}
+for _lbl92, _snip92 in _SITES92.items():
+    report(_snip92 in SRC,
+       f'the same wrong boolean is fixed at {_lbl92} too -- one cause, six '
+       'symptoms; fixing only the key handler would leave the watchdog '
+       'standing down and auto-advance cancelled on a playing video')
+report(SRC.count('_ext_probe_path(') >= 1 + len(_SITES92),
+   'and the call sites really call it', str(SRC.count('_ext_probe_path(')))
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
