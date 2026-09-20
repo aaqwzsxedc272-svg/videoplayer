@@ -10760,6 +10760,12 @@ class _FetchStub104(object):
     def _refusal_snippet(self, response):
         return ''
 
+    def _session_cookie_count(self, session):
+        return 0
+
+    def _warm_caption_session(self, session, page_url, headers):
+        return 0
+
 
 class _FakeRequests104(object):
     def __init__(self, resp):
@@ -10775,6 +10781,8 @@ def _fetch104(resp):
     fake = _FakeRequests104(resp)
     mod = _types104.ModuleType('requests')
     mod.get = fake.get
+    fake.cookies = []
+    mod.Session = lambda: fake
     saved_req = _sys104.modules.get('requests')
     saved_cc = _sys104.modules.get('curl_cffi')
     _sys104.modules['requests'] = mod
@@ -10819,7 +10827,7 @@ report(_body104 == (b'', 403),
 # video from the same CDN family plays, and the one request in this app that
 # carries cookies.txt is mpv's. So the caption request now carries it too, and
 # a refusal now prints the CDN's own reason instead of discarding it.
-report('caption detection build 4' in SRC,
+report('caption detection build' in SRC,
    'the running copy is identifiable from the log')
 report('def _cookie_header_for(' in SRC and 'def _refusal_snippet(' in SRC,
    'the caption request can carry cookies, and a refusal has a reason')
@@ -10851,6 +10859,9 @@ class _CkStub105(object):
 _CkStub105._cookie_header_for = _g105['_cookie_header_for']
 _CkStub105._refusal_snippet = _g105['_refusal_snippet']
 _CkStub105._fetch_caption_body = _g105['_fetch_caption_body']
+_CkStub105._session_cookie_count = lambda self, session: 0
+_CkStub105._warm_caption_session = (
+    lambda self, session, page_url, headers: 0)
 
 _hdr105 = _CkStub105()._cookie_header_for(
     'https://thumb-v1.xhcdn.com/a/hvm1kQu2FMDvlNaaCaiWMA/030/627/881/sw_en_1.vtt')
@@ -10888,6 +10899,8 @@ def _ck_fetch105(resp):
     fake = _Fake105(resp)
     mod = _types105.ModuleType('requests')
     mod.get = fake.get
+    fake.cookies = []
+    mod.Session = lambda: fake
     saved = _sys105.modules.get('requests')
     saved_cc = _sys105.modules.get('curl_cffi')
     _sys105.modules['requests'] = mod
@@ -10932,6 +10945,156 @@ report(_out105[1] == 200 and _out105[0].startswith(b'WEBVTT'),
 report('refused' not in _log105, 'and a success logs no refusal',
    repr(_log105))
 shutil.rmtree(_ck_dir, ignore_errors=True)
+
+# ── 106. The wheel over the candidates combo, and the session that fetches it ──
+# Two things. Scrolling the linker's list with the pointer over the candidates
+# combo changed the picked match, which renames a file to the wrong movie. And
+# the caption CDN answered a bare nginx 403 to a request carrying no cookies,
+# so the watch page is now asked for first, in the same session.
+_MS_SRC = open('metadata_scraper.py', encoding='utf-8').read()
+_MS_TREE = ast.parse(_MS_SRC)
+_nwc106 = [n for n in _MS_TREE.body if isinstance(n, ast.ClassDef)
+           and n.name == '_NoWheelComboBox']
+report(len(_nwc106) == 1, 'the linker has a combo box the wheel cannot change')
+report('combo = _NoWheelComboBox()' in _MS_SRC,
+   'and the candidates combo is that one, not a plain QComboBox')
+report('Qt.FocusPolicy.StrongFocus' in _MS_SRC,
+   'kept clickable, so the wheel still works once it is chosen on purpose')
+_nwc_body = (_MS_SRC.split('class _NoWheelComboBox')[1]
+             .split('class _MovieResultCard')[0])
+report('event.ignore()' in _nwc_body and 'installEventFilter' not in _nwc_body,
+   'done by ignoring the event, not by swallowing it -- a filter that returns '
+   'True would stop the list scrolling at all')
+
+
+class _FakeComboBase106(object):
+    def __init__(self, parent=None):
+        self._focused = False
+        self.base_wheel_calls = 0
+
+    def hasFocus(self):
+        return self._focused
+
+    def wheelEvent(self, event):
+        self.base_wheel_calls += 1
+
+
+class _FakeWheel106(object):
+    def __init__(self):
+        self.ignored = False
+
+    def ignore(self):
+        self.ignored = True
+
+
+_g106 = {'QComboBox': _FakeComboBase106}
+exec(compile(ast.Module(body=_nwc106, type_ignores=[]), 'nwc106', 'exec'),
+     _g106)
+_c106 = _g106['_NoWheelComboBox']()
+_e106 = _FakeWheel106()
+_c106.wheelEvent(_e106)
+report(_c106.base_wheel_calls == 0 and _e106.ignored is True,
+   'scrolling over it without focus changes nothing and passes the wheel on',
+   'base calls=%d ignored=%s' % (_c106.base_wheel_calls, _e106.ignored))
+_c106._focused = True
+_e106b = _FakeWheel106()
+_c106.wheelEvent(_e106b)
+report(_c106.base_wheel_calls == 1 and _e106b.ignored is False,
+   'and with focus the wheel changes the value as it should')
+
+# ── the caption session is warmed from the watch page first ──
+_warm106 = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+            and n.name in ('_warm_caption_session', '_session_cookie_count',
+                           '_fetch_caption_body')]
+report(len(_warm106) == 3, 'the caption fetch warms its session first',
+   'found %d' % len(_warm106))
+_g106b = {'print': print, 're': re, 'os': os, 'urlparse': urlparse}
+exec(compile(ast.Module(body=_warm106, type_ignores=[]), 'warm106', 'exec'),
+     _g106b)
+
+
+class _R106(object):
+    def __init__(self, content, status):
+        self.content = content
+        self.status_code = status
+        self.ok = 200 <= status < 400
+        self.text = content.decode('utf-8', 'replace')
+
+
+class _Rec106(object):
+    """One session, recording the order it was asked for things."""
+
+    def __init__(self, resp):
+        self.resp = resp
+        self.order = []
+        self.cookies = ['ck1', 'ck2']
+
+    def get(self, url, headers=None, timeout=None, allow_redirects=True):
+        self.order.append(url)
+        return self.resp
+
+
+class _WarmStub106(object):
+    _session_cookie_count = _g106b['_session_cookie_count']
+    _warm_caption_session = _g106b['_warm_caption_session']
+
+    def _media_playback_headers(self, page_url=None, media_url=None,
+                                extra=None):
+        return {'Referer': str(page_url or '')}
+
+    def _cookie_header_for(self, url):
+        return ''
+
+    def _refusal_snippet(self, response):
+        return ''
+
+
+_PAGE106 = 'https://xhamster.com/videos/my-stepson-xhb0btt'
+_rec106 = _Rec106(_R106(b'', 403))
+_cnt106 = _WarmStub106()._warm_caption_session(_rec106, _PAGE106, {})
+report(_cnt106 == 2 and _rec106.order == [_PAGE106],
+   'warming asks for the watch page and reports the cookies it set',
+   repr(_rec106.order))
+report(_WarmStub106()._warm_caption_session(_Rec106(_R106(b'', 403)), '', {})
+       == 0,
+   'and with no page to warm from it does nothing')
+
+import sys as _sys106
+import types as _types106
+
+
+def _warm_fetch106(resp):
+    rec = _Rec106(resp)
+    mod = _types106.ModuleType('requests')
+    mod.Session = lambda: rec
+    saved = _sys106.modules.get('requests')
+    saved_cc = _sys106.modules.get('curl_cffi')
+    _sys106.modules['requests'] = mod
+    _sys106.modules['curl_cffi'] = None
+    buf = _io105.StringIO()
+    try:
+        with _ctx105.redirect_stdout(buf):
+            out = _g106b['_fetch_caption_body'](
+                _WarmStub106(), _XH_EN, _PAGE106)
+    finally:
+        if saved is None:
+            _sys106.modules.pop('requests', None)
+        else:
+            _sys106.modules['requests'] = saved
+        if saved_cc is None:
+            _sys106.modules.pop('curl_cffi', None)
+        else:
+            _sys106.modules['curl_cffi'] = saved_cc
+    return out, rec.order, buf.getvalue()
+
+
+_out106, _order106, _log106 = _warm_fetch106(_R106(b'<html>403</html>', 403))
+report(_order106 == [_PAGE106, _XH_EN],
+   'the watch page is fetched in the same session, before the caption',
+   repr([u[:34] for u in _order106]))
+report(_out106 == (b'', 403), 'a refusal still comes back as a status')
+report('2 from the page' in _log106,
+   'and the log says how many cookies the page yielded', repr(_log106))
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

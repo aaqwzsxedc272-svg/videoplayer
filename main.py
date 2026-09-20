@@ -8325,8 +8325,8 @@ class VideoPlayer(QMainWindow):
         self._deferred_playlist_analysis_active = False
         self._stream_resolution_cache = {}
         self._stream_resolution_failures = {}
-        print('[SUBS] caption detection build 4 (page scan, subtitle '
-              'endpoint, cookies, refusal reason)', flush=True)
+        print('[SUBS] caption detection build 5 (page scan, subtitle '
+              'endpoint, cookies, session warm-up)', flush=True)
         self._dood_resolve_lock = threading.Lock()
         self._playlist_url_mirrors = {}
         self._gofile_guest_token = None
@@ -30787,6 +30787,7 @@ try {
         status = 0
         via = 'requests'
         detail = ''
+        warmed = 0
         try:
             import curl_cffi.requests as cfreq
         except Exception:
@@ -30794,7 +30795,9 @@ try {
         if cfreq is not None:
             via = 'curl_cffi'
             try:
-                response = cfreq.Session(impersonate='chrome131').get(
+                session = cfreq.Session(impersonate='chrome131')
+                warmed = self._warm_caption_session(session, page_url, headers)
+                response = session.get(
                     url, headers=headers, timeout=20, allow_redirects=True)
                 if response is not None and response.ok and response.content:
                     return response.content, response.status_code
@@ -30806,7 +30809,10 @@ try {
         if not status or status >= 400:
             try:
                 import requests
-                response = requests.get(
+                session = requests.Session()
+                warmed = max(warmed, self._warm_caption_session(
+                    session, page_url, headers))
+                response = session.get(
                     url, headers=headers, timeout=20, allow_redirects=True)
                 if response is not None and response.ok and response.content:
                     return response.content, response.status_code
@@ -30816,8 +30822,39 @@ try {
                 detail = detail or (type(exc).__name__ + ': ' + str(exc))[:160]
         print(f'[SUBS]   {str(url)[:110]} -> refused, HTTP {status} via '
               f'{via}, cookies='
-              f'{"yes" if cookie_header else "none"}: {detail}', flush=True)
+              f'{"yes" if cookie_header else "none"}, '
+              f'{warmed} from the page: {detail}', flush=True)
         return b'', status
+
+    def _session_cookie_count(self, session):
+        try:
+            return len(session.cookies)
+        except Exception:
+            return 0
+
+    def _warm_caption_session(self, session, page_url, headers):
+        """Load the watch page into *session* before asking it for the caption.
+
+        The signed caption URL is minted for the visit that produced it, and a
+        bare nginx 403 is what comes back when the request arrives without the
+        cookies that visit set. Nothing here needs to know which cookies
+        matter: asking for the page first puts them in the session, the way a
+        browser already has them by the time it fetches the track.
+        """
+        page_url = str(page_url or '').strip()
+        if not page_url.lower().startswith('http'):
+            return 0
+        try:
+            session.get(page_url, headers=headers, timeout=20,
+                        allow_redirects=True)
+            count = self._session_cookie_count(session)
+            print(f'[SUBS]   warmed the caption session from '
+                  f'{page_url[:90]}: {count} cookie(s)', flush=True)
+            return count
+        except Exception as exc:
+            print(f'[SUBS]   could not warm the caption session from '
+                  f'{page_url[:90]}: {type(exc).__name__}: {exc}', flush=True)
+            return 0
 
     def _subtitle_endpoint_body(self, url, referer=''):
         """Fetch a subtitle-list endpoint. curl_cffi first: these sit behind

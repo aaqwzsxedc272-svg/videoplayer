@@ -4079,6 +4079,24 @@ class _StretchedContainer(QWidget):
                 item.widget().setMaximumWidth(w)
 
 
+class _NoWheelComboBox(QComboBox):
+    """A combo box the mouse wheel cannot change unless it has focus.
+
+    The linker's rows live inside a scroll area, so scrolling the list with
+    the pointer over the candidates combo used to change the picked match --
+    a wrong rename the user then had to notice and undo. Ignoring the event
+    rather than swallowing it lets it carry on up to the scroll area, so the
+    list still scrolls under the pointer; an event filter that returns True
+    here would stop it scrolling at all.
+    """
+
+    def wheelEvent(self, event):
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
 class _MovieResultCard(QFrame):
     apply_clicked = pyqtSignal(str, dict, str)  # file_path, movie, site_id
 
@@ -4146,7 +4164,10 @@ class _MovieResultCard(QFrame):
             # AdjustToMinimumContentsLengthWithIcon stops Qt measuring item
             # text to derive a minimum width, which was the main width driver.
             if self.candidates:
-                combo = QComboBox()
+                combo = _NoWheelComboBox()
+                # StrongFocus so a click still lets the wheel be used on
+                # purpose; without focus the wheel belongs to the list.
+                combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
                 combo.setStyleSheet(
                     f"background:{_DARK}; color:{_TEXT}; border:1px solid {_PANEL};"
                     f" border-radius:4px; padding:5px 8px; font-size:12px;"
