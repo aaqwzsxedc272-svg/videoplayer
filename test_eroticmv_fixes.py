@@ -9435,9 +9435,9 @@ if '_fullscreen_widget_action_rows' in _fn97:
     _U97 = 'https://kamehaus.net/e/37n3u6rwt2hf'
     for _lbl97, _act97, _want97 in [
             ('a mirror row: load button plus Split',
-             _A97(_W97([_Btn97(_U97), _Btn97('Split')])), 2),
+             _A97(_W97([_Btn97(_U97), _Btn97('Split')])), 1),
             ('the same row with Split discovered first',
-             _A97(_W97([_Btn97('Split'), _Btn97(_U97)])), 2),
+             _A97(_W97([_Btn97('Split'), _Btn97(_U97)])), 1),
             ('an action with no default widget', _NoW97(), 0),
             ('an action with no defaultWidget() at all', object(), 0),
             ('a widget holding no buttons', _A97(_W97([])), 0),
@@ -9449,20 +9449,42 @@ if '_fullscreen_widget_action_rows' in _fn97:
            + ('y' if _want97 == 1 else 'ies'))
 
     _rows97 = _F97(None, _A97(_W97([_Btn97('Split'), _Btn97(_U97)])))
-    report(bool(_rows97) and _rows97[0]['label'] == _U97,
+    _r97 = _rows97[0] if _rows97 else {}
+    # .get() throughout: reading a key that a reverted main.py does not
+    # produce would abort the run and hide every failure after this point.
+    _b97l = [b.get('label', '') for b in (_r97.get('buttons') or [])]
+    report(_r97.get('label') == _U97,
        'the row is labelled with the mirror URL, not with the five-letter '
        'Split button, whatever order findChildren returned them in')
-    report(len(_rows97) > 1 and _U97 in _rows97[1]['label']
-           and 'Split' in _rows97[1]['label'],
-       'and Split keeps the URL beside it -- lifted out of the row it was '
-       'drawn in, "Split" on its own says nothing')
-    _b97 = _Btn97(_U97)
-    _F97(None, _A97(_W97([_b97])))[0]['callback']()
-    report(_b97.clicks97 == 1,
-       'the entry actually drives the button in the hidden source menu')
-    report(all('primary' not in r for r in _rows97),
-       'the sort key used to order them is not left in the entry, where the '
-       'panel builder would read it as part of the spec')
+    report(len(_b97l) == 2,
+       'and it carries BOTH of its buttons inside itself -- one menu item, '
+       'two buttons, the way the native row is drawn', str(_b97l))
+    report(_b97l.count(_U97) == 1 and _b97l.count('Split') == 1,
+       'each button keeps its own text: the URL is not repeated as a second '
+       'item, and Split is not renamed to "<url> - Split"', str(_b97l))
+    report(bool(_b97l) and not any(' - ' in b for b in _b97l),
+       'nothing was suffixed onto anything -- that is exactly what made '
+       'every mirror show up twice', str(_b97l))
+    report(sum(1 for b in (_r97.get('buttons') or []) if b.get('primary')) == 1,
+       'exactly one button is marked as the row label, whichever one it is')
+    _ld97, _sp97 = _Btn97(_U97), _Btn97('Split')
+    _e97 = (_F97(None, _A97(_W97([_ld97, _sp97]))) or [{}])[0]
+    for _b97s in (_e97.get('buttons') or []):
+        if _b97s['primary']:
+            _b97s['callback']()
+        else:
+            _b97s['callback']()
+    report(_ld97.clicks97 == 1 and _sp97.clicks97 == 1,
+       'and each button drives its own click on the hidden source menu, not '
+       'the other one\'s')
+    report('primary' not in _r97,
+       'the sort key stays inside the button list, not on the entry where '
+       'the panel builder would read it as part of the spec')
+    _d97 = (_F97(None, _A97(_W97([_Btn97(_U97, enabled=False),
+                                  _Btn97('Split')]))) or [{}])[0]
+    report([b.get('primary') for b in (_d97.get('buttons') or [])] == [True],
+       'when the label button is the disabled one, the survivor is promoted '
+       'rather than leaving the row with no label at all')
 
     _ssrc97 = ast.get_source_segment(
         SRC, _fn97['_build_fullscreen_qmenu_snapshot']) or ''
@@ -9480,6 +9502,264 @@ report('if title and int(level or 0) == 0:' in _smsrc97,
    'only the top-level panel gets a header. A submenu is passed the label of '
    'the button that opened it, so it repeated that name on top of the list it '
    'came from -- and out of fullscreen no submenu has a header at all')
+
+# ── 98. A mirror in fullscreen is one row with a Split button on it ───────────
+# The overlay drew every mirror twice: the URL, then "<url> - Split". Out of
+# fullscreen a mirror is a QWidgetAction -- the URL on the left, a Split
+# button on the right -- so the overlay rebuilds that row instead of
+# flattening it. This runs the real builder against fake Qt widgets.
+_fn98 = {n.name: n for n in (_vp97.body if _vp97 else [])
+         if isinstance(n, ast.FunctionDef)
+         and n.name in ('_fullscreen_overlay_widget_row',
+                        '_fullscreen_overlay_click_handler')}
+report(set(_fn98) == {'_fullscreen_overlay_widget_row',
+                      '_fullscreen_overlay_click_handler'},
+   'the overlay can build a row that holds more than one button',
+   str(sorted(_fn98)))
+report("row_specs = action.get('buttons')" in _smsrc97
+       and '_fullscreen_overlay_widget_row(' in _smsrc97,
+   'and the panel builder routes a button-bearing entry to it instead of '
+   'making a button per entry')
+report('QPushButton#fullscreenOverlayMenuRowAction {' in _smsrc97
+       and 'QFrame#fullscreenOverlayMenuRow {' in _smsrc97,
+   'the row and its Split button are styled, so the button reads as a button '
+   'rather than as another line of text')
+if set(_fn98) == {'_fullscreen_overlay_widget_row',
+                  '_fullscreen_overlay_click_handler'}:
+    _g98 = {'QPushButton': object}
+
+    class _Sig98:
+        def __init__(self):
+            self.slots = []
+
+        def connect(self, slot):
+            self.slots.append(slot)
+
+        def fire(self):
+            for s in list(self.slots):
+                s()
+
+    class _Btn98:
+        def __init__(self, text='', parent=None):
+            self._t = text
+            self.name98 = ''
+            self.flat98 = False
+            self.on98 = True
+            self.pol98 = None
+            self.cur98 = None
+            self.clicked = _Sig98()
+
+        def setObjectName(self, n):
+            self.name98 = n
+
+        def setFlat(self, v):
+            self.flat98 = bool(v)
+
+        def setEnabled(self, v):
+            self.on98 = bool(v)
+
+        def setSizePolicy(self, h, v):
+            self.pol98 = (h, v)
+
+        def setCursor(self, c):
+            self.cur98 = c
+
+        def text(self):
+            return self._t
+
+    class _Lay98:
+        def __init__(self, parent=None):
+            self.items = []
+            self.margins98 = None
+            self.spacing98 = None
+
+        def setContentsMargins(self, *a):
+            self.margins98 = a
+
+        def setSpacing(self, v):
+            self.spacing98 = v
+
+        def addWidget(self, w, stretch=0):
+            self.items.append((w, stretch))
+
+    class _Row98:
+        def __init__(self, parent=None):
+            self.name98 = ''
+            self.shape98 = None
+
+        def setObjectName(self, n):
+            self.name98 = n
+
+        def setFrameShape(self, s):
+            self.shape98 = s
+
+    class _Pol98:
+        class Policy:
+            Expanding = 'expanding'
+            Fixed = 'fixed'
+
+    class _Shape98(_Row98):
+        class Shape:
+            NoFrame = 'noframe'
+
+        def __init__(self, parent=None):
+            _Row98.__init__(self, parent)
+            self.parent98 = parent
+
+    class _Cur98:
+        class CursorShape:
+            PointingHandCursor = 'hand'
+
+    class _Self98:
+        def __init__(self):
+            self.closed98 = []
+            self._fullscreen_overlay_source_menu = 'SOURCE'
+            self._fullscreen_overlay_qmenu_clone = None
+            self._fullscreen_overlay_menu_widget = None
+
+        def _close_fullscreen_overlay_menu(self, clear_menus=True,
+                                           keep_levels=0):
+            self.closed98.append(clear_menus)
+
+    # _Lay98 records itself on the row it is handed, so the test can see the
+    # widgets the row added and the stretch each of them got.
+    class _Lay98b(_Lay98):
+        def __init__(self, parent=None):
+            _Lay98.__init__(self, parent)
+            parent._lay98 = self
+
+    _g98.update({
+        'QFrame': _Shape98, 'QPushButton': _Btn98, 'QHBoxLayout': _Lay98b,
+        'QSizePolicy': _Pol98, 'Qt': _Cur98,
+    })
+    exec(compile(ast.Module(list(_fn98.values()), []), '<row98>', 'exec'), _g98)
+    _Self98._fullscreen_overlay_click_handler = \
+        _g98['_fullscreen_overlay_click_handler']
+    _R98 = _g98['_fullscreen_overlay_widget_row']
+
+    _U98 = 'https://kamehaus.net/e/37n3u6rwt2hf'
+    _P98 = object()
+    hits98 = []
+
+    def _spec98(order):
+        # Exactly what _fullscreen_widget_action_rows hands over, in the order
+        # findChildren happened to return the buttons.
+        return [{'label': t, 'enabled': True, 'primary': t == _U98,
+                 'callback': (lambda _c=False, n=t: hits98.append(n))}
+                for t in order]
+
+    _row98 = _R98(_Self98(), _P98, _spec98([_U98, 'Split']))
+    report(_row98 is not None and _row98.name98 == 'fullscreenOverlayMenuRow',
+       'the row is a container of its own, not two loose buttons dropped into '
+       'the panel')
+
+    for _lbl98, _order98 in [('the URL first', [_U98, 'Split']),
+                             ('Split discovered first', ['Split', _U98])]:
+        _slf98 = _Self98()
+        _row98 = _R98(_slf98, _P98, _spec98(_order98))
+        _b98 = [w for w, _s in _row98._lay98.items]
+        _st98 = [s for _w, s in _row98._lay98.items]
+        report(len(_b98) == 2, f'{_lbl98}: the row holds both buttons',
+           str([b.text() for b in _b98]))
+        report([b.text() for b in _b98] == [_U98, 'Split'],
+           f'{_lbl98}: the URL is on the left and Split on the right, '
+           'whatever order the source row yielded them in')
+        report([b.name98 for b in _b98]
+               == ['fullscreenOverlayMenuButton',
+                   'fullscreenOverlayMenuRowAction'],
+           f'{_lbl98}: the URL button is styled as a menu item and Split as a '
+           'button')
+        report(_st98 == [1, 0]
+               and _b98[0].pol98 == ('expanding', 'fixed')
+               and _b98[1].pol98 == ('fixed', 'fixed'),
+           f'{_lbl98}: the URL takes the space and Split keeps its own width, '
+           'the same stretch the native row uses')
+        report(_row98._lay98.margins98 == (0, 0, 0, 0),
+           f'{_lbl98}: the row adds no padding of its own, so it lines up '
+           'with the plain items above and below it')
+
+    # Clicking: both buttons close the menu and drive their own action.
+    _slf98 = _Self98()
+    hits98 = []
+    _row98 = _R98(_slf98, _P98, _spec98([_U98, 'Split']))
+    _b98 = [w for w, _s in _row98._lay98.items]
+    _b98[0].clicked.fire()
+    report(hits98 == [_U98] and _slf98.closed98 == [False],
+       'clicking the URL loads that mirror and takes the menu down -- once, '
+       'with no second item doing the same thing')
+    _slf98 = _Self98()
+    hits98 = []
+    _row98 = _R98(_slf98, _P98, _spec98([_U98, 'Split']))
+    _b98 = [w for w, _s in _row98._lay98.items]
+    _b98[1].clicked.fire()
+    report(hits98 == ['Split'] and _slf98.closed98 == [False],
+       'and clicking Split splits that mirror out of the group, which is the '
+       'button the fullscreen menu was missing')
+    report(_b98[1].cur98 == 'hand',
+       'Split shows a pointing hand, so it reads as something to press and '
+       'not as a second label')
+
+    _slf98 = _Self98()
+    _row98 = _R98(_slf98, _P98, [{'label': 'Quiet', 'enabled': True,
+                            'primary': True, 'callback': None}])
+    _b98 = [w for w, _s in _row98._lay98.items]
+    _b98[0].clicked.fire()
+    report(_slf98.closed98 == [True],
+       'a button with nothing to do just closes the menu rather than '
+       'swallowing the click')
+    for _lbl98, _specs98 in [('no specs at all', []),
+                             ('only blanks', [{'label': '  '}]),
+                             ('not dicts', ['x', 3])]:
+        report(_R98(_Self98(), _P98, _specs98) is None,
+           f'{_lbl98} builds no row')
+
+    # End to end: the reader from 97 feeding the builder here.
+    _f97e = _fn97.get('_fullscreen_widget_action_rows')
+    if _f97e:
+        _g98e = {'QPushButton': object}
+        exec(compile(ast.Module([_f97e], []), '<rows98e>', 'exec'), _g98e)
+
+        class _B98e:
+            def __init__(self, t):
+                self._t = t
+                self.clicks = 0
+
+            def text(self):
+                return self._t
+
+            def isEnabled(self):
+                return True
+
+            def click(self):
+                self.clicks += 1
+
+        class _W98e:
+            def __init__(self, b):
+                self._b = b
+
+            def findChildren(self, _t):
+                return list(self._b)
+
+        class _A98e:
+            def __init__(self, w):
+                self._w = w
+
+            def defaultWidget(self):
+                return self._w
+
+        _l98e, _s98e = _B98e(_U98), _B98e('Split')
+        _entry98 = _g98e['_fullscreen_widget_action_rows'](
+            None, _A98e(_W98e([_s98e, _l98e])))
+        _slf98 = _Self98()
+        _row98 = _R98(_slf98, _P98, _entry98[0]['buttons'])
+        _b98 = [w for w, _s in _row98._lay98.items]
+        report([b.text() for b in _b98] == [_U98, 'Split'],
+           'read from a real QWidgetAction and built into a real row: one '
+           'mirror, one line, two buttons')
+        _b98[1].clicked.fire()
+        report(_s98e.clicks == 1 and _l98e.clicks == 0,
+           'and the Split button on that row is the source menu\'s own Split '
+           'button')
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

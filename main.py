@@ -20349,6 +20349,25 @@ try {
             QPushButton#fullscreenOverlayMenuButton:disabled {
                 color: #777777;
             }
+            QFrame#fullscreenOverlayMenuRow {
+                background-color: transparent;
+                border: none;
+            }
+            QFrame#fullscreenOverlayMenuRow:hover {
+                background-color: #444444;
+            }
+            QPushButton#fullscreenOverlayMenuRowAction {
+                background-color: #4a4a4a;
+                color: #dddddd;
+                border: 1px solid #666666;
+                border-radius: 3px;
+                padding: 2px 10px;
+                margin: 4px 10px 4px 0px;
+                min-width: 0px;
+            }
+            QPushButton#fullscreenOverlayMenuRowAction:hover {
+                background-color: #5c5c5c;
+            }
             QFrame#fullscreenOverlayMenuSeparator {
                 background-color: #555555;
                 min-height: 1px;
@@ -20376,6 +20395,14 @@ try {
                 sep.setObjectName("fullscreenOverlayMenuSeparator")
                 sep.setFrameShape(QFrame.Shape.HLine)
                 layout.addWidget(sep)
+                continue
+
+            # A mirror is one row holding two buttons, not two menu items.
+            row_specs = action.get('buttons')
+            if row_specs:
+                row = self._fullscreen_overlay_widget_row(panel, row_specs)
+                if row is not None:
+                    layout.addWidget(row)
                 continue
 
             label = str(action.get('label', '')).strip()
@@ -20412,37 +20439,7 @@ try {
                 btn._fullscreen_overlay_open_submenu = callback
                 submenu_buttons.append(btn)
             if callback is not None:
-                def _run_callback(_checked=False, cb=callback):
-                    old_source_menu = getattr(self, '_fullscreen_overlay_source_menu', None)
-                    old_clone_menu = getattr(self, '_fullscreen_overlay_qmenu_clone', None)
-                    self._close_fullscreen_overlay_menu(clear_menus=False)
-
-                    def _finalize_old_menus():
-                        if getattr(self, '_fullscreen_overlay_menu_widget', None) is not None:
-                            return
-                        for attr_name, menu_obj in (
-                            ('_fullscreen_overlay_source_menu', old_source_menu),
-                            ('_fullscreen_overlay_qmenu_clone', old_clone_menu),
-                        ):
-                            if menu_obj is not None and getattr(self, attr_name, None) is menu_obj:
-                                setattr(self, attr_name, None)
-                        for menu_obj in (old_clone_menu, old_source_menu):
-                            if menu_obj is None:
-                                continue
-                            try:
-                                menu_obj.hide()
-                            except Exception:
-                                pass
-                            try:
-                                menu_obj.deleteLater()
-                            except Exception:
-                                pass
-
-                    try:
-                        cb()
-                    finally:
-                        _finalize_old_menus()
-                btn.clicked.connect(_run_callback)
+                btn.clicked.connect(self._fullscreen_overlay_click_handler(callback))
             else:
                 btn.clicked.connect(self._close_fullscreen_overlay_menu)
             layout.addWidget(btn)
@@ -20547,14 +20544,103 @@ try {
         except Exception:
             return False
 
-    def _fullscreen_widget_action_rows(self, menu_action, keeper=None):
-        """Turn a QWidgetAction's custom row into overlay entries.
+    def _fullscreen_overlay_click_handler(self, callback):
+        """Wrap an item's callback so picking it also takes the menu down.
 
-        Returns [] for anything that is not a widget row. The button whose
-        text is longest is treated as the row's label -- in the Mirrors row
-        that is the mirror URL, not the five-letter Split button -- and the
-        others are suffixed onto it, because "Split" on its own says nothing
-        once it is lifted out of the row it was drawn in.
+        The two menus the overlay was built from have to outlive the panel --
+        every callback reaches back into them -- but not the click. They are
+        captured here, while the button is being built, and released once the
+        callback has run. Rows built from a QWidgetAction use the same
+        wrapper, so a mirror's Split button closes the menu exactly the way a
+        plain item does.
+        """
+        old_source_menu = getattr(self, '_fullscreen_overlay_source_menu', None)
+        old_clone_menu = getattr(self, '_fullscreen_overlay_qmenu_clone', None)
+
+        def _run_callback(_checked=False, cb=callback):
+            self._close_fullscreen_overlay_menu(clear_menus=False)
+
+            def _finalize_old_menus():
+                if getattr(self, '_fullscreen_overlay_menu_widget', None) is not None:
+                    return
+                for attr_name, menu_obj in (
+                    ('_fullscreen_overlay_source_menu', old_source_menu),
+                    ('_fullscreen_overlay_qmenu_clone', old_clone_menu),
+                ):
+                    if menu_obj is not None and getattr(self, attr_name, None) is menu_obj:
+                        setattr(self, attr_name, None)
+                for menu_obj in (old_clone_menu, old_source_menu):
+                    if menu_obj is None:
+                        continue
+                    try:
+                        menu_obj.hide()
+                    except Exception:
+                        pass
+                    try:
+                        menu_obj.deleteLater()
+                    except Exception:
+                        pass
+
+            try:
+                cb()
+            finally:
+                _finalize_old_menus()
+        return _run_callback
+
+    def _fullscreen_overlay_widget_row(self, parent, button_specs):
+        """Build one overlay row that carries more than one button.
+
+        Out of fullscreen a mirror is a QWidgetAction: the URL on the left, a
+        Split button on the right. Flattening that into two menu items showed
+        every mirror twice -- once as the URL and once as "<url> - Split" --
+        so the row is rebuilt here instead, with the same buttons in the same
+        order, each one doing what it does natively.
+        """
+        specs = [s for s in (button_specs or [])
+                 if isinstance(s, dict) and str(s.get('label') or '').strip()]
+        if not specs:
+            return None
+        # Stable sort: the label button is the expanding one on the left,
+        # whatever order the source row's findChildren returned them in.
+        specs.sort(key=lambda s: not s.get('primary'))
+        row = QFrame(parent)
+        row.setObjectName("fullscreenOverlayMenuRow")
+        row.setFrameShape(QFrame.Shape.NoFrame)
+        rlay = QHBoxLayout(row)
+        rlay.setContentsMargins(0, 0, 0, 0)
+        rlay.setSpacing(0)
+        for spec in specs:
+            b = QPushButton(str(spec.get('label')), row)
+            b.setFlat(True)
+            b.setEnabled(bool(spec.get('enabled', True)))
+            callback = spec.get('callback')
+            if spec.get('primary'):
+                b.setObjectName("fullscreenOverlayMenuButton")
+                b.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                QSizePolicy.Policy.Fixed)
+                rlay.addWidget(b, 1)
+            else:
+                b.setObjectName("fullscreenOverlayMenuRowAction")
+                b.setCursor(Qt.CursorShape.PointingHandCursor)
+                b.setSizePolicy(QSizePolicy.Policy.Fixed,
+                                QSizePolicy.Policy.Fixed)
+                rlay.addWidget(b, 0)
+            if callable(callback):
+                b.clicked.connect(
+                    self._fullscreen_overlay_click_handler(callback))
+            else:
+                b.clicked.connect(self._close_fullscreen_overlay_menu)
+        return row
+
+    def _fullscreen_widget_action_rows(self, menu_action, keeper=None):
+        """Turn a QWidgetAction's custom row into ONE overlay entry.
+
+        Returns [] for anything that is not a widget row. The row keeps its
+        shape: the button whose text is longest is the row's label -- in the
+        Mirrors row that is the mirror URL, not the five-letter Split button
+        -- and every other button rides beside it as a button of its own, the
+        way it is drawn out of fullscreen. Splitting them into separate menu
+        items is what made each mirror appear twice.
         """
         try:
             widget = menu_action.defaultWidget()
@@ -20567,22 +20653,21 @@ try {
         except Exception:
             return []
         buttons = [b for b in buttons if (b.text() or '').strip()]
-        if not buttons:
-            return []
-        primary = max(buttons, key=lambda b: len((b.text() or '').strip()))
-        primary_text = (primary.text() or '').replace('&', '').strip()
-        rows = []
+        live = []
         for button in buttons:
             try:
                 if not button.isEnabled():
                     continue
             except Exception:
                 pass
-            text = (button.text() or '').replace('&', '').strip()
-            if button is not primary and len(buttons) > 1:
-                text = f'{primary_text} - {text}'
-            rows.append({
-                'label': text,
+            live.append(button)
+        if not live:
+            return []
+        primary = max(live, key=lambda b: len((b.text() or '').strip()))
+        specs = []
+        for button in live:
+            specs.append({
+                'label': (button.text() or '').replace('&', '').strip(),
                 'enabled': True,
                 'primary': button is primary,
                 # keeper keeps the source menu alive: the button lives in it,
@@ -20590,10 +20675,11 @@ try {
                 # would hold a reference.
                 'callback': lambda _checked=False, b=button, k=keeper: b.click(),
             })
-        # Stable sort so the label row is always first, whatever order
-        # findChildren happened to return the buttons in.
-        rows.sort(key=lambda r: not r.pop('primary'))
-        return rows
+        return [{
+            'label': (primary.text() or '').replace('&', '').strip(),
+            'enabled': True,
+            'buttons': specs,
+        }]
 
     def _build_fullscreen_qmenu_snapshot(self, menu, root_menu=None):
         if menu is None:
