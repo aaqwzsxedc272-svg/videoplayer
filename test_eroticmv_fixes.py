@@ -10551,5 +10551,89 @@ report(os.path.exists(os.path.join(_stub102.data_dir, 'subtitles_debug.txt')),
    'the file is really there')
 shutil.rmtree(_stub102.data_dir, ignore_errors=True)
 
+# ── 103. The subtitle path says what it did ───────────────────────────────────
+# Three runs of logs answered nothing because the path was silent on success
+# and silent on a skipped 404 alike: "found the wrong file", "found nothing"
+# and "never looked" all printed the same thing. Every step now speaks, and
+# this runs the consumer that used to be mute.
+report('caption detection build 3' in SRC,
+   'the running main.py announces itself, so a log says which copy it is')
+_resolve103 = SRC[SRC.index('def _resolve_stream_from_html('):]
+_resolve103 = _resolve103[:_resolve103.index('\n    def ')]
+report('page scan named' in _resolve103,
+   'a caption file the page scan finds is named, not just counted')
+_first103 = _resolve103.index('page scan named')
+_host103 = _resolve103.index("page_host = (urlparse(page_url).netloc or '')")
+report(_host103 < _first103,
+   'and the host it is named under is worked out before the line that uses it')
+report('_is_fileditch_host(page_host)' in _resolve103[_first103:],
+   'moving that line up left the rest of the resolver intact')
+report(_resolve103.count("page_host = (urlparse(page_url).netloc or '')") == 1,
+   'and it is assigned exactly once, not twice')
+
+_consumer103 = SRC[SRC.index('def _load_remote_subtitles_async('):]
+_consumer103 = _consumer103[:_consumer103.index('\n    def ')]
+for _needle103 in ('no usable caption track', 'fetching', 'skipped',
+                   '-> saved ', 'could be fetched'):
+    report(_needle103 in _consumer103,
+           'the caption fetcher reports: ' + _needle103)
+
+import io as _io103
+import contextlib as _ctx103
+_load_fn = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+            and n.name == '_load_remote_subtitles_async']
+report(len(_load_fn) == 1, 'the consumer is one method on VideoPlayer')
+_g103 = {'print': print, 're': re, 'os': os, 'tempfile': tempfile}
+exec(compile(ast.Module(body=_load_fn, type_ignores=[]), 'cons103', 'exec'),
+     _g103)
+
+
+class _ConsStub103(object):
+    def __init__(self, subtitles=None):
+        self.subtitles = subtitles
+        self.submitted = []
+        self.thread_pool = self
+        self._remote_subtitle_pending = set()
+
+    def submit(self, fn):
+        self.submitted.append(fn)
+
+    def _preferred_remote_subtitle_tracks(self, tracks, limit=4):
+        return [t for t in (tracks or [])][:max(1, int(limit or 1))]
+
+
+def _cons103(stream_info, subtitles=None):
+    stub = _ConsStub103(subtitles)
+    buf = _io103.StringIO()
+    with _ctx103.redirect_stdout(buf):
+        out = _g103['_load_remote_subtitles_async'](
+            stub, 'https://xhamster.com/videos/xhb0btt', stream_info)
+    return stub, out, buf.getvalue()
+
+
+_stub103, _out103, _log103 = _cons103({})
+report(_out103 is False and 'no usable caption track' in _log103
+       and '(0 offered by the resolver)' in _log103,
+   'a video with no caption at all says so, with how many it was offered',
+   repr(_log103))
+_stub103, _out103, _log103 = _cons103(
+    {'subtitle_tracks': [{'url': 'https://cdn/a/x.txt', 'ext': 'txt'}]})
+report(_out103 is False and '(1 offered by the resolver)' in _log103,
+   'and a track in a format the player cannot read is reported as unusable, '
+   'not dropped quietly', repr(_log103))
+_stub103, _out103, _log103 = _cons103(
+    {'subtitle_tracks': [{'url': 'https://cdn/a/en.vtt', 'ext': 'vtt',
+                          'lang': 'en'}]})
+report(_out103 is True and 'fetching 1 caption track(s)' in _log103,
+   'a real track is announced before it is fetched', repr(_log103))
+report(len(_stub103.submitted) == 1, 'and the fetch is queued exactly once')
+_stub103, _out103, _log103 = _cons103(
+    {'subtitle_tracks': [{'url': 'https://cdn/a/en.vtt', 'ext': 'vtt'}]},
+    subtitles=[{'start': 0, 'end': 1, 'text': 'already here'}])
+report(_out103 is False and 'no usable caption track' not in _log103
+       and 'fetching' not in _log103,
+   'a video whose captions are already loaded is left alone, silently -- '
+   'that is not a failure and must not read like one', repr(_log103))
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

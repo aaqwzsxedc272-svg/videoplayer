@@ -8318,6 +8318,8 @@ class VideoPlayer(QMainWindow):
         self._deferred_playlist_analysis_active = False
         self._stream_resolution_cache = {}
         self._stream_resolution_failures = {}
+        print('[SUBS] caption detection build 3 (page scan, subtitle '
+              'endpoint, subtitles_debug.txt)', flush=True)
         self._dood_resolve_lock = threading.Lock()
         self._playlist_url_mirrors = {}
         self._gofile_guest_token = None
@@ -42345,13 +42347,21 @@ try {
         html = response.text or ''
         page_url = response.url or source_url
         page_title = self._clean_remote_title(self._html_page_title(html))
+        page_host = (urlparse(page_url).netloc or '').lower()
         subtitle_tracks = self._extract_subtitle_tracks_from_html(html, page_url)
-        if not subtitle_tracks:
+        if subtitle_tracks:
+            # Named out loud: a track found here is never followed up on, so
+            # if it is the wrong file nothing else gets a chance to look.
+            print(f'[SUBS] {page_host}: page scan named '
+                  f'{len(subtitle_tracks)} caption file(s) -- '
+                  + '; '.join(
+                      f"{t.get('lang') or '?'} {str(t.get('url') or '')[:80]}"
+                      for t in subtitle_tracks[:3]), flush=True)
+        else:
             # Sites with auto-generated captions have no caption file in the
             # page to find; the tracks live behind an endpoint of their own.
             subtitle_tracks = self._extract_subtitle_tracks_from_endpoints(
                 html, page_url)
-        page_host = (urlparse(page_url).netloc or '').lower()
         if self._is_fileditch_host(page_host):
             file_title = self._clean_remote_title(
                 self._fileditch_filename_from_url(page_url)
@@ -43824,10 +43834,20 @@ try {
         return usable[:max(1, int(limit or 1))]
 
     def _load_remote_subtitles_async(self, file_path, stream_info):
-        tracks = self._preferred_remote_subtitle_tracks((stream_info or {}).get('subtitle_tracks'), limit=2)
+        offered = (stream_info or {}).get('subtitle_tracks') or []
+        tracks = self._preferred_remote_subtitle_tracks(offered, limit=2)
         tracks = [track for track in tracks if str(track.get('ext') or '').lower() in {'srt', 'vtt'}]
-        if not tracks or getattr(self, 'subtitles', None):
+        if not tracks:
+            # The line that says a video simply has no caption the app could
+            # read. Silent here is indistinguishable from never being called.
+            print(f'[SUBS] no usable caption track for '
+                  f'{str(file_path)[:90]} '
+                  f'({len(offered)} offered by the resolver)', flush=True)
             return False
+        if getattr(self, 'subtitles', None):
+            return False
+        print(f'[SUBS] fetching {len(tracks)} caption track(s) for '
+              f'{str(file_path)[:90]}', flush=True)
         pending_key = str(file_path or '')
         pending = getattr(self, '_remote_subtitle_pending', set())
         if pending_key in pending:
@@ -43854,12 +43874,19 @@ try {
                         allow_redirects=True,
                     )
                     if response.status_code >= 400 or not response.content:
+                        print(f'[SUBS]   {sub_url[:110]} -> HTTP '
+                              f'{response.status_code}, '
+                              f'{len(response.content or b"")} byte(s), '
+                              f'skipped', flush=True)
                         continue
                     candidate = os.path.join(subtitle_dir, f"{safe_title}.{lang}.{ext}")
                     with open(candidate, 'wb') as fh:
                         fh.write(response.content)
                     if os.path.exists(candidate) and os.path.getsize(candidate) > 0:
                         saved_path = candidate
+                        print(f'[SUBS]   {sub_url[:110]} -> saved '
+                              f'{os.path.getsize(candidate)} byte(s) to '
+                              f'{candidate}', flush=True)
                         break
             except Exception as exc:
                 print(f"[SUBTITLE][REMOTE_ERROR] {file_path}: {exc}")
@@ -43868,6 +43895,9 @@ try {
                     self._remote_subtitle_pending.discard(pending_key)
                 except Exception:
                     pass
+            if not saved_path:
+                print(f'[SUBS]   none of the {len(tracks)} caption track(s) '
+                      f'could be fetched', flush=True)
             if saved_path:
                 try:
                     from PyQt6.QtCore import Q_ARG
