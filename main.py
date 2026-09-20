@@ -262,6 +262,61 @@ def _ftp_remote_path_from_url(url_text):
     return path
 
 
+# A QMenu is exactly as wide as its longest item, and the fullscreen overlay
+# panel is too, so a single long recent-file name stretched the Recent Files
+# list from edge to edge of the screen. Neither will wrap on its own, so the
+# break is made here.
+_MENU_LABEL_WRAP_WIDTH = 44
+_MENU_LABEL_WRAP_MAX_LINES = 3
+
+
+def _wrap_menu_label(text, width=None, max_lines=None):
+    """Break a long menu label over lines instead of over the screen.
+
+    QMenu draws an item on one line and measures itself against the longest
+    of them, so a long name widens the whole submenu; nothing in QAction
+    makes it wrap. Returns *text* untouched when it already fits, and
+    otherwise the same words split at spaces -- inside a word only when a
+    single token is longer than a line -- with an ellipsis on the last line
+    if the name does not fit in *max_lines* of them.
+    """
+    text = str(text or '')
+    # Not `or`: a caller passing 0 would silently get the default back.
+    w = _MENU_LABEL_WRAP_WIDTH if width is None else int(width)
+    limit = _MENU_LABEL_WRAP_MAX_LINES if max_lines is None else int(max_lines)
+    limit = max(1, limit)
+    if w < 1 or len(text) <= w:
+        return text
+    lines = []
+    for para in text.split('\n'):
+        cur = ''
+        for word in para.split():
+            while len(word) > w:
+                if cur:
+                    lines.append(cur)
+                    cur = ''
+                lines.append(word[:w])
+                word = word[w:]
+            if not word:
+                continue
+            if not cur:
+                cur = word
+            elif len(cur) + 1 + len(word) <= w:
+                cur = cur + ' ' + word
+            else:
+                lines.append(cur)
+                cur = word
+        if cur:
+            lines.append(cur)
+    if not lines:
+        return text
+    if len(lines) <= limit:
+        return '\n'.join(lines)
+    kept = lines[:limit]
+    kept[-1] = kept[-1][:w - 1] + '\u2026'
+    return '\n'.join(kept)
+
+
 # ─── Supported format constants (add new formats here) ───────────────────────
 IMAGE_EXTENSIONS = (
     '.jpg', '.jpeg', '.png', '.gif', '.bmp',
@@ -1941,7 +1996,11 @@ class DraggableTableWidget(QTableWidget):
         recent_files_menu = menu.addMenu("Recent Files")
         if hasattr(self.parent_player, 'recent_files') and self.parent_player.recent_files:
             for file_path in self.parent_player.recent_files[:10]:
-                action = recent_files_menu.addAction(self.parent_player._get_playlist_name_for_path(file_path))
+                _rf_name = self.parent_player._get_playlist_name_for_path(file_path)
+                if hasattr(pp, '_add_wrapped_menu_action'):
+                    action = pp._add_wrapped_menu_action(recent_files_menu, _rf_name)
+                else:
+                    action = recent_files_menu.addAction(_rf_name)
                 action.setData(file_path)
                 action.triggered.connect(lambda checked, path=file_path: self.parent_player.load_recent_file(path))
         else:
@@ -1952,7 +2011,11 @@ class DraggableTableWidget(QTableWidget):
         recent_playlists_menu = menu.addMenu("Recent Playlists")
         if hasattr(self.parent_player, 'recent_playlists') and self.parent_player.recent_playlists:
             for file_path in self.parent_player.recent_playlists[:10]:
-                action = recent_playlists_menu.addAction(os.path.basename(file_path))
+                _rp_name = os.path.basename(file_path)
+                if hasattr(pp, '_add_wrapped_menu_action'):
+                    action = pp._add_wrapped_menu_action(recent_playlists_menu, _rp_name)
+                else:
+                    action = recent_playlists_menu.addAction(_rp_name)
                 action.setData(file_path)
                 action.triggered.connect(lambda checked, path=file_path: self.parent_player.load_recent_playlist(path))
         else:
@@ -18567,10 +18630,10 @@ try {
             return
         self.recent_menu.clear()
         for file_path in self.recent_files:
-            action = QAction(self._get_playlist_name_for_path(file_path), self)
+            action = self._add_wrapped_menu_action(
+                self.recent_menu, self._get_playlist_name_for_path(file_path))
             action.setData(file_path)
             action.triggered.connect(lambda checked, path=file_path: self.load_recent_file(path))
-            self.recent_menu.addAction(action)
             
     def update_recent_playlists_menu(self):
         """Update recent playlists menu"""
@@ -18578,10 +18641,10 @@ try {
             return
         self.recent_playlists_menu.clear()
         for file_path in self.recent_playlists:
-            action = QAction(os.path.basename(file_path), self)
+            action = self._add_wrapped_menu_action(
+                self.recent_playlists_menu, os.path.basename(file_path))
             action.setData(file_path)
             action.triggered.connect(lambda checked, path=file_path: self.load_recent_playlist(path))
-            self.recent_playlists_menu.addAction(action)
 
     def load_recent_file(self, file_path):
         """Load a file from recent files menu"""
@@ -20032,7 +20095,8 @@ try {
         recent_files_menu = menu.addMenu("Recent Files")
         if getattr(self, 'recent_files', None):
             for file_path in self.recent_files[:10]:
-                action = recent_files_menu.addAction(self._get_playlist_name_for_path(file_path))
+                action = self._add_wrapped_menu_action(
+                    recent_files_menu, self._get_playlist_name_for_path(file_path))
                 action.setData(file_path)
                 action.triggered.connect(
                     lambda checked=False, path=file_path: self.load_recent_file(path)
@@ -20044,7 +20108,8 @@ try {
         recent_playlists_menu = menu.addMenu("Recent Playlists")
         if getattr(self, 'recent_playlists', None):
             for file_path in self.recent_playlists[:10]:
-                action = recent_playlists_menu.addAction(os.path.basename(file_path))
+                action = self._add_wrapped_menu_action(
+                    recent_playlists_menu, os.path.basename(file_path))
                 action.setData(file_path)
                 action.triggered.connect(
                     lambda checked=False, path=file_path: self.load_recent_playlist(path)
@@ -20544,6 +20609,45 @@ try {
         except Exception:
             return False
 
+    def _add_wrapped_menu_action(self, menu, text):
+        """Add *text* to *menu*, on several lines when one is not enough.
+
+        Short labels stay ordinary actions. A long one goes into a QLabel
+        inside a QWidgetAction, which is the only menu item that can be two
+        lines tall. The text is already broken by _wrap_menu_label rather
+        than left to setWordWrap, because a word-wrapping QLabel reports the
+        UNWRAPPED text as its size hint and the menu would widen to it
+        anyway -- which is the thing being fixed. The action carries no text
+        of its own, or the menu would draw it next to the widget; the same
+        is already true of the mirror rows.
+        WA_TransparentForMouseEvents hands the click and the hover back to
+        the menu, so the action still triggers the way a plain item does.
+        """
+        label_text = _wrap_menu_label(text)
+        if '\n' not in label_text:
+            return menu.addAction(label_text)
+        action = QWidgetAction(menu)
+        row = QWidget(menu)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(24, 4, 22, 4)
+        layout.setSpacing(0)
+        label = QLabel(label_text, row)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        try:
+            label.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        except Exception:
+            pass
+        label.setStyleSheet("background: transparent; color: #dddddd;")
+        layout.addWidget(label, 1)
+        action.setDefaultWidget(row)
+        try:
+            action.setToolTip(str(text or ''))
+        except Exception:
+            pass
+        menu.addAction(action)
+        return action
+
     def _fullscreen_overlay_click_handler(self, callback):
         """Wrap an item's callback so picking it also takes the menu down.
 
@@ -20653,6 +20757,27 @@ try {
         except Exception:
             return []
         buttons = [b for b in buttons if (b.text() or '').strip()]
+        if not buttons:
+            # Not every custom row is a mirror. A long recent-file name is a
+            # QLabel broken over lines: one entry, the label's own text, and
+            # the click belongs to the action rather than to a button.
+            try:
+                labels = [l for l in widget.findChildren(QLabel)
+                          if (l.text() or '').strip()]
+            except Exception:
+                return []
+            if not labels:
+                return []
+            longest = max(labels, key=lambda l: len(l.text() or ''))
+            text = (longest.text() or '').replace('&', '').strip()
+            if not text:
+                return []
+            return [{
+                'label': text,
+                'enabled': True,
+                'callback': lambda _checked=False, a=menu_action,
+                             k=keeper: a.trigger(),
+            }]
         live = []
         for button in buttons:
             try:
@@ -21092,7 +21217,8 @@ try {
         recent_file_actions = []
         for file_path in getattr(self, 'recent_files', [])[:10]:
             recent_file_actions.append({
-                'label': self._get_playlist_name_for_path(file_path),
+                'label': _wrap_menu_label(
+                    self._get_playlist_name_for_path(file_path)),
                 'callback': lambda path=file_path: self.load_recent_file(path),
             })
         if not recent_file_actions:
@@ -21101,7 +21227,7 @@ try {
         recent_playlist_actions = []
         for file_path in getattr(self, 'recent_playlists', [])[:10]:
             recent_playlist_actions.append({
-                'label': os.path.basename(file_path),
+                'label': _wrap_menu_label(os.path.basename(file_path)),
                 'callback': lambda path=file_path: self.load_recent_playlist(path),
             })
         if not recent_playlist_actions:

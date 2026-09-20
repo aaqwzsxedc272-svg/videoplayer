@@ -32,11 +32,18 @@ _LIFT_HELPERS = {}
 try:
     from urllib.parse import urlsplit as _us_lift
     _LIFT_HELPERS['urlsplit'] = _us_lift
-    _fn_lift = next((n for n in TREE.body
-                     if isinstance(n, ast.FunctionDef)
-                     and n.name == '_ext_probe_path'), None)
-    if _fn_lift is not None:
-        exec(compile(ast.Module(body=[_fn_lift], type_ignores=[]),
+    for _lift_name in ('_ext_probe_path', '_wrap_menu_label'):
+        _fn_lift = next((n for n in TREE.body
+                         if isinstance(n, ast.FunctionDef)
+                         and n.name == _lift_name), None)
+        if _fn_lift is None:
+            continue
+        _lift_consts = [n for n in TREE.body
+                        if isinstance(n, ast.Assign)
+                        and getattr(n.targets[0], 'id', '').startswith(
+                            '_MENU_LABEL_WRAP')]
+        exec(compile(ast.Module(body=_lift_consts + [_fn_lift],
+                                type_ignores=[]),
                      '<lift_helpers>', 'exec'), _LIFT_HELPERS)
 except Exception as _e_lift:
     print('  WARN  lift helpers unavailable:', _e_lift)
@@ -9760,6 +9767,298 @@ if set(_fn98) == {'_fullscreen_overlay_widget_row',
         report(_s98e.clicks == 1 and _l98e.clicks == 0,
            'and the Split button on that row is the source menu\'s own Split '
            'button')
+
+# ── 99. A long recent-file name wraps instead of widening the menu ────────────
+# A QMenu is as wide as its longest item and the fullscreen overlay panel is
+# too, so one long name in Recent Files / Recent Playlists stretched the list
+# across the screen. Neither will wrap on its own, so the break is made in
+# _wrap_menu_label; this executes that function against the reported cases.
+_LONG99 = ('S01E01 - The One With The Extremely Long Episode Title That '
+           'Nobody Can Read (1080p) [x264] [AAC] - Group.m3u8')
+_g99 = {}
+
+
+class _Lab99:
+    """Stands in for QLabel: records what the menu row asked of it."""
+
+    def __init__(self, text='', parent=None):
+        self._t = text
+        self.attrs99 = []
+        self.style99 = ''
+        self.fmt99 = None
+
+    def setTextFormat(self, f):
+        self.fmt99 = f
+
+    def setAttribute(self, a, v):
+        self.attrs99.append((a, v))
+
+    def setStyleSheet(self, s):
+        self.style99 = s
+
+    def text(self):
+        return self._t
+
+
+class _Lay99:
+    def __init__(self, parent=None):
+        self.items = []
+        self.margins99 = None
+
+    def setContentsMargins(self, *a):
+        self.margins99 = a
+
+    def setSpacing(self, v):
+        pass
+
+    def addWidget(self, w, stretch=0):
+        self.items.append((w, stretch))
+
+
+class _Row99:
+    def __init__(self, parent=None):
+        self._lay99 = None
+
+
+class _Lay99b(_Lay99):
+    def __init__(self, parent=None):
+        _Lay99.__init__(self, parent)
+        parent._lay99 = self
+
+
+class _Act99:
+    """Stands in for QWidgetAction."""
+
+    def __init__(self, parent=None):
+        self._text99 = None
+        self._widget99 = None
+        self.tip99 = None
+
+    def setDefaultWidget(self, w):
+        self._widget99 = w
+
+    def defaultWidget(self):
+        return self._widget99
+
+    def setText(self, t):
+        self._text99 = t
+
+    def text(self):
+        return self._text99
+
+    def setToolTip(self, t):
+        self.tip99 = t
+
+
+class _Menu99:
+    def __init__(self):
+        self.added99 = []
+
+    def addAction(self, a):
+        self.added99.append(a)
+        return a
+
+
+class _Qt99:
+    class TextFormat:
+        PlainText = 'plain'
+
+    class WidgetAttribute:
+        WA_TransparentForMouseEvents = 'transparent'
+
+
+_wl99 = next((n for n in TREE.body if isinstance(n, ast.FunctionDef)
+              and n.name == '_wrap_menu_label'), None)
+_wc99 = [n for n in TREE.body if isinstance(n, ast.Assign)
+         and getattr(n.targets[0], 'id', '').startswith('_MENU_LABEL_WRAP')]
+report(bool(_wl99) and len(_wc99) == 2,
+   'there is a place where a long menu label is broken over lines',
+   f'function={bool(_wl99)} constants={len(_wc99)}')
+if _wl99 is not None:
+    exec(compile(ast.Module(body=_wc99 + [_wl99], type_ignores=[]),
+                 '<wrap99>', 'exec'), _g99)
+_W99 = _g99.get('_wrap_menu_label')
+_WID99 = _g99.get('_MENU_LABEL_WRAP_WIDTH', 44)
+_MAX99 = _g99.get('_MENU_LABEL_WRAP_MAX_LINES', 3)
+if _W99 is not None:
+    _HUGE99 = 'word ' * 90
+
+    for _lbl99, _in99 in [('nothing at all', ''), ('None', None),
+                          ('a short name', 'Dressage (1986)'),
+                          ('exactly one line wide', 'x' * _WID99),
+                          ('a long file name', _LONG99),
+                          ('an absurd name', _HUGE99),
+                          ('one word longer than a line',
+                           'x' * (_WID99 * 4))]:
+        _lines99 = _W99(_in99).split('\n')
+        report(all(len(_l) <= _WID99 for _l in _lines99),
+           f'{_lbl99}: no line is wider than {_WID99} characters',
+           str([len(_l) for _l in _lines99]))
+        report(all(_l == _l.strip() for _l in _lines99),
+           f'{_lbl99}: no line starts or ends on a space, so nothing hangs '
+           'off the edge of the menu')
+        report(len(_lines99) <= _MAX99,
+           f'{_lbl99}: at most {_MAX99} lines, so the submenu cannot grow '
+           'tall either', str(len(_lines99)))
+
+    report(_W99('') == '' and _W99(None) == '',
+       'an empty label is still empty')
+    report(_W99('Dressage (1986)') == 'Dressage (1986)'
+           and _W99('x' * _WID99) == 'x' * _WID99,
+       'a name that already fits is returned byte for byte, so nothing that '
+       'looks right today changes')
+    report('\n' in _W99('x' * (_WID99 + 1)),
+       'and one character past the limit is what starts the wrapping')
+    report(' '.join(_W99(_LONG99).split()) == _LONG99,
+       'a name that fits in the line budget keeps every word, in order -- '
+       'it is broken, not shortened')
+    _h99 = _W99(_HUGE99).split('\n')
+    report(len(_h99) == _MAX99 and _h99[-1].endswith('\u2026')
+           and len(_h99[-1]) <= _WID99,
+       'a name that does not fit is cut on the last line with an ellipsis '
+       'instead of running on', str([len(_l) for _l in _h99]))
+    report(_W99('x' * (_WID99 * 4)).split('\n')[0] == 'x' * _WID99,
+       'a single word longer than a line is cut inside the word -- there is '
+       'no space to break on, and one unbroken token is exactly what was '
+       'widening the menu')
+    report(_W99('abcdef', width=0) == 'abcdef',
+       'width=0 means "do not wrap", not "use the default" -- `width or '
+       'DEFAULT` would have read it the other way')
+    report(len(_W99('aa bb cc dd', width=2, max_lines=0).split('\n')) == 1,
+       'max_lines is never below one, so a label cannot wrap to nothing')
+    for _w99 in (8, 12, 44, 80):
+        report(all(len(_l) <= _w99
+                   for _l in _W99(_HUGE99, width=_w99).split('\n')),
+           f'the budget is honoured at width={_w99}')
+
+# ── 99b. The menu item that can be two lines tall ─────────────────────────────
+_vp99 = next((n for n in ast.walk(TREE) if isinstance(n, ast.ClassDef)
+              and n.name == 'VideoPlayer'), None)
+_am99 = next((n for n in (_vp99.body if _vp99 else [])
+              if isinstance(n, ast.FunctionDef)
+              and n.name == '_add_wrapped_menu_action'), None)
+report(_am99 is not None, 'and a menu can be given such a label',
+   'defined' if _am99 is not None else 'MISSING')
+if _am99 is not None:
+    _asrc99 = ast.get_source_segment(SRC, _am99) or ''
+    report('action.setText(' not in _asrc99,
+       'the action carries no text of its own -- the menu would draw it next '
+       'to the widget and the name would appear twice, which is the same '
+       'mistake the mirror rows already avoid')
+    report('.setWordWrap(' not in _asrc99,
+       'and the label is not left to setWordWrap: a word-wrapping QLabel '
+       'reports the UNWRAPPED text as its size hint, so the menu would '
+       'measure itself against the full name and widen anyway')
+    report('WA_TransparentForMouseEvents' in _asrc99,
+       'the label lets the click and the hover through to the menu, which is '
+       'what triggers the action -- a widget that swallowed them would leave '
+       'the item looking there but doing nothing')
+
+    _g99b = dict(_g99)
+    _g99b.update({'QWidgetAction': _Act99, 'QWidget': _Row99,
+                  'QHBoxLayout': _Lay99b, 'QLabel': _Lab99, 'Qt': _Qt99})
+    exec(compile(ast.Module([_am99], []), '<addwrap99>', 'exec'), _g99b)
+    _A99 = _g99b['_add_wrapped_menu_action']
+
+    _m99 = _Menu99()
+    _a99 = _A99(None, _m99, 'Dressage (1986)')
+    report(_m99.added99 == [_a99] and not isinstance(_a99, _Act99),
+       'a name that fits goes in as an ordinary action -- no widget, no '
+       'extra painting, nothing about it changes')
+    _m99 = _Menu99()
+    _a99 = _A99(None, _m99, _LONG99)
+    report(isinstance(_a99, _Act99) and _m99.added99 == [_a99],
+       'and a name that does not fit becomes a widget action that is still '
+       'added to the menu')
+    _lab99 = _a99.defaultWidget()._lay99.items[0][0]
+    report(_lab99.text() == _W99(_LONG99) and '\n' in _lab99.text(),
+       'the widget holds the broken text, so the item is two or three lines '
+       'tall instead of one very long one', repr(_lab99.text()))
+    report(all(len(_l) <= _WID99 for _l in _lab99.text().split('\n')),
+       'which is what stops the submenu taking the width of the screen')
+    report(_a99.text() is None and _a99.tip99 == _LONG99,
+       'the full name is not lost -- it is kept on the action as its tooltip')
+    report(('transparent', True) in _lab99.attrs99,
+       'and the label is transparent to the mouse, so hovering still '
+       'highlights the item and clicking still fires it')
+    report(_lab99.style99.startswith('background: transparent'),
+       'the label paints no background of its own, so the menu\u2019s own '
+       'selection highlight shows through behind it')
+    report(_A99(None, _Menu99(), None) is not None,
+       'an empty label does not blow up on the way in')
+
+# ── 99c. The fullscreen snapshot has to read a label row back ─────────────────
+# The playlist context menu is snapshotted to build the fullscreen overlay, so
+# a QWidgetAction the snapshot cannot read would make those entries vanish --
+# exactly what happened to the mirrors.
+_fn99c = next((n for n in (_vp99.body if _vp99 else [])
+               if isinstance(n, ast.FunctionDef)
+               and n.name == '_fullscreen_widget_action_rows'), None)
+report(_fn99c is not None,
+   'the snapshot reader that recovered the mirror rows is still there')
+if _fn99c is not None and _W99 is not None:
+    _g99c = {'QPushButton': object, 'QLabel': _Lab99}
+    exec(compile(ast.Module([_fn99c], []), '<rows99c>', 'exec'), _g99c)
+    _F99c = _g99c['_fullscreen_widget_action_rows']
+
+    class _Wid99c:
+        def __init__(self, labels=(), buttons=()):
+            self._l = list(labels)
+            self._b = list(buttons)
+
+        def findChildren(self, t):
+            return list(self._l) if t is _Lab99 else list(self._b)
+
+    class _Act99c:
+        def __init__(self, w):
+            self._w = w
+            self.triggers99 = 0
+
+        def defaultWidget(self):
+            return self._w
+
+        def trigger(self):
+            self.triggers99 += 1
+
+    _wrapped99 = _W99(_LONG99)
+    _act99c = _Act99c(_Wid99c(labels=[_Lab99(_wrapped99)]))
+    _rows99c = _F99c(None, _act99c)
+    report(len(_rows99c) == 1, 'a wrapping label row is ONE overlay entry',
+       str(len(_rows99c)))
+    report(bool(_rows99c) and _rows99c[0].get('label') == _wrapped99,
+       'and it keeps the broken text, so the fullscreen menu wraps it too '
+       'instead of dropping the entry or stretching the panel')
+    report('buttons' not in (_rows99c[0] if _rows99c else {}),
+       'with no buttons to lay out, it is a plain item rather than a row')
+    if _rows99c:
+        _rows99c[0]['callback']()
+    report(_act99c.triggers99 == 1,
+       'and picking it triggers the action itself -- a label row has no '
+       'button to click')
+    report(_F99c(None, _Act99c(_Wid99c())) == [],
+       'a custom row with nothing readable in it still yields nothing')
+    _r99c = _F99c(None, _Act99c(
+        _Wid99c(labels=[_Lab99('short'), _Lab99(_wrapped99)])))
+    report(bool(_r99c) and _r99c[0].get('label') == _wrapped99,
+       'with more than one label in the row, the one that is actually the '
+       'name wins')
+
+# ── 99d. Every recent-file list goes through it ───────────────────────────────
+report(SRC.count('_add_wrapped_menu_action(') >= 6,
+   'all four places that build a Recent Files or Recent Playlists menu use '
+   'it, not just the one that was reported',
+   str(SRC.count('_add_wrapped_menu_action(')))
+for _pat99 in ('addAction(self._get_playlist_name_for_path(file_path))',
+               'addAction(os.path.basename(file_path))',
+               'addAction(self.parent_player._get_playlist_name_for_path('
+               'file_path))'):
+    report(_pat99 not in SRC,
+       'no recent-list site still adds the raw name straight to the menu',
+       _pat99)
+report(SRC.count("'label': _wrap_menu_label(") == 2,
+   'and the overlay fallback used when the snapshot comes up empty wraps its '
+   'labels too, so fullscreen behaves the same either way',
+   str(SRC.count("'label': _wrap_menu_label(")))
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
