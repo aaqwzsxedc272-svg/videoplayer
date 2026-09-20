@@ -20620,8 +20620,15 @@ try {
         anyway -- which is the thing being fixed. The action carries no text
         of its own, or the menu would draw it next to the widget; the same
         is already true of the mirror rows.
-        WA_TransparentForMouseEvents hands the click and the hover back to
-        the menu, so the action still triggers the way a plain item does.
+
+        The label paints its OWN hover background. A menu does not: QMenu
+        only reserves space for a QWidgetAction's widget and never paints
+        the item highlight over it, which is why the single-line entries
+        highlighted on hover and the wrapped ones did not. It has to see
+        the mouse to do that, so it asks for hover events and mouse
+        tracking and is deliberately NOT made transparent to them -- and a
+        QLabel ignores a mouse press, so the press still travels up to the
+        menu, which is what triggers the action.
         """
         label_text = _wrap_menu_label(text)
         if '\n' not in label_text:
@@ -20629,16 +20636,21 @@ try {
         action = QWidgetAction(menu)
         row = QWidget(menu)
         layout = QHBoxLayout(row)
-        layout.setContentsMargins(24, 4, 22, 4)
+        # No margins: the label covers the whole item so its hover highlight
+        # spans the row exactly as a plain item's does.
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         label = QLabel(label_text, row)
         label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setMouseTracking(True)
         try:
-            label.setAttribute(
-                Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            label.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         except Exception:
             pass
-        label.setStyleSheet("background: transparent; color: #dddddd;")
+        label.setStyleSheet(
+            "QLabel { background: transparent; color: #dddddd;"
+            " padding: 6px 22px 6px 24px; }"
+            "QLabel:hover { background: #444444; color: #dddddd; }")
         layout.addWidget(label, 1)
         action.setDefaultWidget(row)
         try:

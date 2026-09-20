@@ -9786,9 +9786,13 @@ class _Lab99:
         self.attrs99 = []
         self.style99 = ''
         self.fmt99 = None
+        self.tracking99 = None
 
     def setTextFormat(self, f):
         self.fmt99 = f
+
+    def setMouseTracking(self, v):
+        self.tracking99 = bool(v)
 
     def setAttribute(self, a, v):
         self.attrs99.append((a, v))
@@ -9865,6 +9869,7 @@ class _Qt99:
 
     class WidgetAttribute:
         WA_TransparentForMouseEvents = 'transparent'
+        WA_Hover = 'hover'
 
 
 _wl99 = next((n for n in TREE.body if isinstance(n, ast.FunctionDef)
@@ -9949,10 +9954,17 @@ if _am99 is not None:
        'and the label is not left to setWordWrap: a word-wrapping QLabel '
        'reports the UNWRAPPED text as its size hint, so the menu would '
        'measure itself against the full name and widen anyway')
-    report('WA_TransparentForMouseEvents' in _asrc99,
-       'the label lets the click and the hover through to the menu, which is '
-       'what triggers the action -- a widget that swallowed them would leave '
-       'the item looking there but doing nothing')
+    report('WA_TransparentForMouseEvents' not in _asrc99,
+       'the label is NOT made transparent to the mouse: it has to see the '
+       'pointer in order to paint the highlight a menu will not paint for it')
+    report('QLabel:hover' in _asrc99,
+       'it carries a hover rule of its own. QMenu reserves space for a '
+       'QWidgetAction\u2019s widget and never paints the item highlight over '
+       'it, which is exactly why the single-line entries highlighted on '
+       'hover and the wrapped ones did not')
+    report('WA_Hover' in _asrc99 and 'label.setMouseTracking(True)' in _asrc99,
+       'and it asks for hover events and mouse tracking, without which a '
+       ':hover rule never changes state')
 
     _g99b = dict(_g99)
     _g99b.update({'QWidgetAction': _Act99, 'QWidget': _Row99,
@@ -9978,12 +9990,21 @@ if _am99 is not None:
        'which is what stops the submenu taking the width of the screen')
     report(_a99.text() is None and _a99.tip99 == _LONG99,
        'the full name is not lost -- it is kept on the action as its tooltip')
-    report(('transparent', True) in _lab99.attrs99,
-       'and the label is transparent to the mouse, so hovering still '
-       'highlights the item and clicking still fires it')
-    report(_lab99.style99.startswith('background: transparent'),
-       'the label paints no background of its own, so the menu\u2019s own '
-       'selection highlight shows through behind it')
+    report(('hover', True) in _lab99.attrs99
+           and _lab99.tracking99 is True,
+       'the label really is given both at build time, not merely named in '
+       'the source', str(_lab99.attrs99))
+    report(':hover' in _lab99.style99
+           and 'background: transparent' in _lab99.style99,
+       'it paints nothing until it is hovered, so the menu\u2019s own '
+       'background shows through otherwise')
+    report('padding: 6px 22px 6px 24px' in _lab99.style99,
+       'and its padding is the menu\u2019s own item padding, so the text '
+       'starts where a single-line item\u2019s text starts')
+    report(_a99.defaultWidget()._lay99.margins99 == (0, 0, 0, 0),
+       'the row adds no margins of its own, so the highlight spans the whole '
+       'item the way a plain one does',
+       str(_a99.defaultWidget()._lay99.margins99))
     report(_A99(None, _Menu99(), None) is not None,
        'an empty label does not blow up on the way in')
 
