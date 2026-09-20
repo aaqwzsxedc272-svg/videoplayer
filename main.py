@@ -25756,6 +25756,149 @@ try {
             print(f"[VOE_CAPTURE] Failed to read voe.js: {e}")
         return self._VOE_CAPTURE_JS
 
+    def _voe_browser_capture(self, source_url, timeout_ms=90000):
+        """Last resort for a VOE link: open the embed page in a real browser
+        with voe.js injected and take the .m3u8 it reports.
+
+        R45 removed the browser for VOE on the grounds that it was never
+        needed. The field log is the counter-evidence: one file id decoded
+        fine on a white-label mirror and failed on voe.sx itself --
+        '[VOE] static decode failed for https://voe.sx/e/b4z1hwaphvtf'.
+        voe.js was already on disk and already read by _get_voe_capture_js,
+        but nothing ever ran it in a browser.
+
+        voe.js logs 'VOE_M3U8::<url>' to the console, so the URL is read off
+        the console instead of being scraped out of its on-screen panel.
+        Returns the m3u8 URL, or '' when nothing was captured. Blocks the
+        calling thread; both call sites are already worker threads.
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as exc:
+            print(f'[VOE_BROWSER] playwright unavailable: {exc}')
+            return ''
+        js = self._get_voe_capture_js() or ''
+        if not js.strip():
+            print('[VOE_BROWSER] no capture script to inject')
+            return ''
+
+        parsed = urlparse(source_url)
+        slug_m = re.match(r'^/(?:e|v|f|embed)/([^/?#]+)', parsed.path or '',
+                          re.IGNORECASE)
+        if slug_m:
+            embed_url = urlunparse((parsed.scheme or 'https', parsed.netloc,
+                                    '/e/' + slug_m.group(1), '', '', ''))
+        else:
+            embed_url = source_url
+
+        # voe.js builds its DOM panel BEFORE it installs the fetch/XHR hooks,
+        # so injected at document-start -- when document.head does not exist
+        # yet -- it throws and never hooks anything, which is the whole point
+        # of it. So install the hooks first (the console marker is all this
+        # needs) and let voe.js add its panel and autoplay kick once the
+        # document exists. Its own hook install is guarded by the same window
+        # flags, so this cannot double-hook.
+        shim = (
+            "(() => {\n"
+            "  const emit = (u) => { try { console.log('VOE_M3U8::' + u); }"
+            " catch (e) {} };\n"
+            "  const ok = (u) => typeof u === 'string' &&"
+            " /^https?:\\/\\/.+\\.m3u8/.test(u);\n"
+            "  if (!window._m3u8CatcherFetchHooked) {\n"
+            "    window._m3u8CatcherFetchHooked = true;\n"
+            "    const of = window.fetch;\n"
+            "    window.fetch = function (...a) {"
+            " if (ok(a[0])) emit(a[0]); return of.apply(this, a); };\n"
+            "  }\n"
+            "  if (!window._m3u8CatcherXHRHooked) {\n"
+            "    window._m3u8CatcherXHRHooked = true;\n"
+            "    const oo = XMLHttpRequest.prototype.open;\n"
+            "    XMLHttpRequest.prototype.open = function (m, u, ...r) {"
+            " if (ok(u)) emit(u); return oo.call(this, m, u, ...r); };\n"
+            "  }\n"
+            "})();\n"
+        )
+        wrapped = (
+            shim
+            + "(function(){\n  var _voePanel = function () {\n"
+            + js
+            + "\n};\n"
+            + "  if (document.head) { try { _voePanel(); } catch (e) {} }\n"
+            + "  else { document.addEventListener('DOMContentLoaded',"
+              " function () { try { _voePanel(); } catch (e) {} },"
+              " {once: true}); }\n"
+            + "})();\n"
+        )
+
+        found = {'url': ''}
+
+        def _on_console(msg):
+            try:
+                text = msg.text or ''
+            except Exception:
+                return
+            for line in text.splitlines():
+                if line.startswith('VOE_M3U8::'):
+                    u = line[len('VOE_M3U8::'):].strip()
+                    if u and not found['url']:
+                        found['url'] = u
+                        print(f'[VOE_BROWSER] captured {u[:110]}')
+
+        try:
+            exe = _find_installed_chromium_like_executable() or ''
+        except Exception:
+            exe = ''
+        # A visible window, matching the missav capture: a page Chromium
+        # treats as hidden never starts its player, and there is nothing to
+        # capture from a player that never fetches its manifest.
+        args = ['--window-position=60,60', '--window-size=1280,800',
+                '--mute-audio', '--autoplay-policy=no-user-gesture-required',
+                '--disable-blink-features=AutomationControlled']
+        profile = os.path.join(tempfile.gettempdir(), 'voe_capture_profile')
+        try:
+            with sync_playwright() as p:
+                ctx = None
+                try:
+                    ctx = p.chromium.launch_persistent_context(
+                        user_data_dir=profile, headless=False,
+                        executable_path=exe or None, args=args,
+                        ignore_default_args=['--enable-automation'])
+                except Exception as exc:
+                    print(f'[VOE_BROWSER] persistent profile failed ({exc}); '
+                          'trying an ephemeral browser')
+                    ctx = p.chromium.launch(
+                        headless=False, executable_path=exe or None, args=args,
+                        ignore_default_args=['--enable-automation'])
+                try:
+                    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+                    page.on('console', _on_console)
+                    # VOE players sometimes pop the video into a new tab.
+                    try:
+                        ctx.on('page', lambda np: np.on('console', _on_console))
+                    except Exception:
+                        pass
+                    ctx.add_init_script(wrapped)
+                    try:
+                        page.goto(embed_url, wait_until='domcontentloaded',
+                                  timeout=45000)
+                    except Exception as exc:
+                        print(f'[VOE_BROWSER] goto: {exc}')
+                    deadline = time.time() + (timeout_ms / 1000.0)
+                    while time.time() < deadline and not found['url']:
+                        time.sleep(1)
+                finally:
+                    try:
+                        ctx.close()
+                    except Exception:
+                        pass
+        except Exception as exc:
+            print(f'[VOE_BROWSER] failed for {source_url}: {exc}')
+            return found['url']
+        if not found['url']:
+            print(f'[VOE_BROWSER] no m3u8 seen for {source_url} within '
+                  f'{timeout_ms // 1000}s')
+        return found['url']
+
     def _launch_voe_playwright(self, source_url, play_first=False):
         """
         Open the VOE embed page in installed Brave through Playwright,
@@ -25810,7 +25953,13 @@ try {
                         print(f"[VOE_CAPTURE] static decode failed for {target_url}: {exc}")
 
                 if not m3u8_url:
-                    raise RuntimeError("VOE static decode found no stream (VOE never opens a browser)")
+                    # Not a dead end any more: voe.js in a real browser is
+                    # the fallback R45 removed.
+                    m3u8_url = self._voe_browser_capture(target_url) or ''
+                if not m3u8_url:
+                    raise RuntimeError(
+                        "VOE static decode found no stream and the voe.js "
+                        "browser capture saw no .m3u8")
 
                 self.voe_capture_ready.emit(target_url, m3u8_url, title, bool(play_first))
 
@@ -35915,9 +36064,25 @@ try {
         except Exception as e:
             print(f"[VOE] static decode failed for {source_url}: {e}")
 
-        # R45: no browser fallback for VOE — static decode only (field
-        # guidance: opening a browser is not necessary for VOE links).
-        print(f'[VOE] static decode failed for {source_url} — returning None (no browser, BBB-safe)')
+        # R45 said VOE never needs a browser. The field log says otherwise:
+        # the same file id decoded on a white-label mirror and failed on
+        # voe.sx itself. voe.js exists for exactly this, so run it.
+        print(f'[VOE] static decode failed for {source_url} — trying the '
+              'voe.js browser capture')
+        try:
+            browser_url = self._voe_browser_capture(source_url)
+        except Exception as exc:
+            print(f'[VOE] browser capture failed for {source_url}: {exc}')
+            browser_url = ''
+        if browser_url:
+            return {
+                'playback_url': browser_url,
+                'title': page_title,
+                'headers': self._hls_request_headers(source_url),
+                'content_type': 'application/vnd.apple.mpegurl',
+            }
+        print(f'[VOE] no stream for {source_url} from static decode or the '
+              'browser capture')
         return None
 
     def _voe_decode_source_candidates(self, html):
@@ -36241,9 +36406,24 @@ try {
                 }
                 if _cookie_hdr:
                     _cf_headers['Cookie'] = _cookie_hdr
-                _cf_resp = _cfreq.get(
-                    embed_url, impersonate='chrome131',
-                    headers=_cf_headers, timeout=20, allow_redirects=True)
+                try:
+                    _cf_resp = _cfreq.get(
+                        embed_url, impersonate='chrome131',
+                        headers=_cf_headers, timeout=20, allow_redirects=True)
+                except Exception as _ssl_exc:
+                    # Field: lulu.st died here with 'curl: (60) SSL
+                    # certificate problem: unable to get local issuer
+                    # certificate' and the whole decode was lost. Playback
+                    # already runs tls_verify=False for these hosts; the
+                    # page fetch has to survive the same broken chain.
+                    if 'certificate' not in str(_ssl_exc).lower():
+                        raise
+                    print(f'[VOE-mirror] retrying {host} without cert '
+                          'verification (broken chain)')
+                    _cf_resp = _cfreq.get(
+                        embed_url, impersonate='chrome131',
+                        headers=_cf_headers, timeout=20, allow_redirects=True,
+                        verify=False)
                 if _cf_resp.ok and (_cf_resp.text or '').strip():
                     html = _cf_resp.text
                     page_url = _cf_resp.url or embed_url

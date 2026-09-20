@@ -9,6 +9,9 @@ Covers: eroticmv playlist titles, exact 3s arrow seeks, the VOD-proxy routing
 that makes backward seeking work, and the Google search query cleanup.
 """
 import ast
+import tempfile
+import subprocess
+import shutil
 import base64
 import json
 import os
@@ -9080,6 +9083,130 @@ for _lbl92, _snip92 in _SITES92.items():
        'standing down and auto-advance cancelled on a playing video')
 report(SRC.count('_ext_probe_path(') >= 1 + len(_SITES92),
    'and the call sites really call it', str(SRC.count('_ext_probe_path(')))
+
+# ── 93. VOE: the browser fallback R45 removed, driven by voe.js ───────────────
+# The field log had the same file id decode on a white-label mirror and fail on
+# voe.sx itself: '[VOE] static decode failed for https://voe.sx/e/b4z1hwaphvtf
+# - returning None (no browser, BBB-safe)'. voe.js was already on disk and
+# already read by _get_voe_capture_js, but nothing ever ran it in a browser.
+_vp93 = next((n for n in ast.walk(TREE) if isinstance(n, ast.ClassDef)
+              and n.name == 'VideoPlayer'), None)
+_fn93 = {n.name: n for n in (_vp93.body if _vp93 else [])
+         if isinstance(n, ast.FunctionDef)
+         and n.name in ('_voe_browser_capture', '_resolve_voe_source',
+                        '_launch_voe_playwright')}
+report('_voe_browser_capture' in _fn93,
+   'VOE has a browser capture again. R45 removed it on the grounds that a '
+   'browser was never needed for VOE; the field log is the counter-evidence')
+for _n93 in ('_resolve_voe_source', '_launch_voe_playwright'):
+    _b93 = (ast.get_source_segment(SRC, _fn93[_n93])
+            if _n93 in _fn93 else '')
+    report('_voe_browser_capture' in _b93,
+       f'{_n93} falls back to it when the static decode finds nothing -- '
+       'both paths, not just the one that happened to log')
+report('VOE never opens a browser' not in SRC
+       and 'no browser, BBB-safe' not in SRC,
+   'and the claim that VOE never needs a browser is gone rather than left '
+   'standing next to the code that now contradicts it')
+report("if 'certificate' not in str(_ssl_exc).lower()" in SRC
+       and 'verify=False' in SRC,
+   'a VOE mirror whose cert chain does not resolve is retried unverified '
+   'instead of losing the page: lulu.st failed with curl (60) "unable to get '
+   'local issuer certificate" and the whole decode went with it')
+
+# Build the exact script the method injects, out of the real voe.js.
+if '_voe_browser_capture' in _fn93 and os.path.isfile(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'voe.js')):
+    _stmts93 = [s for s in _fn93['_voe_browser_capture'].body
+                if isinstance(s, ast.Assign)
+                and getattr(s.targets[0], 'id', '') in ('shim', 'wrapped')]
+    _g93 = {'js': open(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), 'voe.js'),
+        encoding='utf-8').read()}
+    for _s93 in _stmts93:
+        exec(compile(ast.Module([_s93], []), '<voebuild93>', 'exec'), _g93)
+    _w93 = _g93.get('wrapped') or ''
+    report(bool(_w93) and 'VOE_M3U8::' in _w93,
+       'the injected script emits the console marker the Python side reads, '
+       'so the URL comes off the console instead of being scraped out of '
+       'voe.js\u2019s on-screen panel')
+    report(bool(_w93) and "_m3u8CatcherFetchHooked = true" in _w93
+           and 'DOMContentLoaded' in _w93,
+       'the fetch/XHR hooks install at document-start while voe.js itself '
+       'waits for the DOM: voe.js builds its panel BEFORE it hooks anything, '
+       'so injected raw at document-start it throws on document.head and '
+       'never hooks -- the one thing it is for')
+    _node93 = shutil.which('node')
+    if not _node93:
+        report(True, 'node is not installed here, so the injected script is '
+               'not executed (syntax and hook behaviour unchecked)')
+    else:
+        _tmp93 = os.path.join(tempfile.gettempdir(), 'voe_wrapped93.js')
+        with open(_tmp93, 'w', encoding='utf-8') as _f93:
+            _f93.write(_w93)
+        _chk93 = subprocess.run([_node93, '--check', _tmp93],
+                                capture_output=True, text=True)
+        report(_chk93.returncode == 0,
+           'the injected script is valid JavaScript',
+           (_chk93.stderr or '')[:120])
+        _h93 = os.path.join(tempfile.gettempdir(), 'voe_hook93.js')
+        with open(_h93, 'w', encoding='utf-8') as _f93:
+            _f93.write("""
+const fs = require('fs');
+const wrapped = fs.readFileSync(process.argv[2], 'utf8');
+const seen = [];
+const realLog = console.log;
+console.log = (...a) => { seen.push(a.join(' ')); };
+global.window = global;
+global.document = { head: null, body: null, readyState: 'loading',
+  title: 'VOE test', createElement: () => ({ style: {}, classList: {add(){}},
+  appendChild(){}, querySelector: () => null, setAttribute(){} }),
+  addEventListener: () => {}, querySelector: () => null,
+  querySelectorAll: () => [], getElementById: () => null };
+global.navigator = { clipboard: { writeText: async () => {} } };
+global.location = { href: 'https://voe.sx/e/b4z1hwaphvtf' };
+class XHR {}
+XHR.prototype.open = function (m, u) { this._u = u; };
+global.XMLHttpRequest = XHR;
+global.fetch = async () => ({ ok: true, text: async () => '' });
+global.setInterval = () => 0; global.setTimeout = () => 0; global.alert = () => {};
+eval(wrapped);
+const M3 = 'https://cdn.example.com/engine/hls2-c/01/14443/x_,n,.urlset/master.m3u8?t=a';
+window.fetch(M3);
+new XMLHttpRequest().open('GET', 'https://cdn.example.com/v/720/index.m3u8');
+window.fetch('https://cdn.example.com/segment00001.ts');
+window.fetch('https://cdn.example.com/poster.jpg');
+const got = seen.filter(l => l.startsWith('VOE_M3U8::')).map(l => l.slice(10));
+const out = {
+  hooked_at_document_start: window._m3u8CatcherFetchHooked === true
+    && window._m3u8CatcherXHRHooked === true,
+  fetch_marker: got.includes(M3),
+  xhr_marker: got.includes('https://cdn.example.com/v/720/index.m3u8'),
+  no_ts: !got.some(u => u.endsWith('.ts')),
+  no_jpg: !got.some(u => u.endsWith('.jpg')),
+  count: got.length,
+};
+console.log = realLog;
+console.log(JSON.stringify(out));
+""")
+        _r93 = subprocess.run([_node93, _h93, _tmp93],
+                              capture_output=True, text=True, timeout=60)
+        try:
+            _o93 = json.loads((_r93.stdout or '').strip().splitlines()[-1])
+        except Exception:
+            _o93 = {}
+        report(_o93.get('hooked_at_document_start') is True,
+           'run in node with document.head null, both hooks install before '
+           'any page script -- the panel is what waits, not the capture')
+        report(_o93.get('fetch_marker') is True
+               and _o93.get('xhr_marker') is True,
+           'and an m3u8 reaching the page by fetch or by XHR both produce '
+           'the marker, which is how the VOE player asks for its manifest')
+        report(_o93.get('no_ts') is True and _o93.get('no_jpg') is True
+               and _o93.get('count') == 2,
+           'while HLS segments and poster images do not: a capture that '
+           'returned segment URLs would hand mpv a single fragment',
+           str(_o93.get('count')))
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
