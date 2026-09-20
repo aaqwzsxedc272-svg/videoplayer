@@ -20360,7 +20360,11 @@ try {
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(0)
 
-        if title:
+        # A submenu opened by hovering an item is passed that item's own
+        # label as its title, which reads as the button's name repeated on top
+        # of the list it came from. Out of fullscreen no submenu has a header,
+        # so only the top-level panel gets one.
+        if title and int(level or 0) == 0:
             title_label = QLabel(str(title), panel)
             title_label.setObjectName("fullscreenOverlayMenuTitle")
             layout.addWidget(title_label)
@@ -20543,6 +20547,54 @@ try {
         except Exception:
             return False
 
+    def _fullscreen_widget_action_rows(self, menu_action, keeper=None):
+        """Turn a QWidgetAction's custom row into overlay entries.
+
+        Returns [] for anything that is not a widget row. The button whose
+        text is longest is treated as the row's label -- in the Mirrors row
+        that is the mirror URL, not the five-letter Split button -- and the
+        others are suffixed onto it, because "Split" on its own says nothing
+        once it is lifted out of the row it was drawn in.
+        """
+        try:
+            widget = menu_action.defaultWidget()
+        except Exception:
+            return []
+        if widget is None:
+            return []
+        try:
+            buttons = list(widget.findChildren(QPushButton))
+        except Exception:
+            return []
+        buttons = [b for b in buttons if (b.text() or '').strip()]
+        if not buttons:
+            return []
+        primary = max(buttons, key=lambda b: len((b.text() or '').strip()))
+        primary_text = (primary.text() or '').replace('&', '').strip()
+        rows = []
+        for button in buttons:
+            try:
+                if not button.isEnabled():
+                    continue
+            except Exception:
+                pass
+            text = (button.text() or '').replace('&', '').strip()
+            if button is not primary and len(buttons) > 1:
+                text = f'{primary_text} - {text}'
+            rows.append({
+                'label': text,
+                'enabled': True,
+                'primary': button is primary,
+                # keeper keeps the source menu alive: the button lives in it,
+                # and the menu is not shown in fullscreen, so nothing else
+                # would hold a reference.
+                'callback': lambda _checked=False, b=button, k=keeper: b.click(),
+            })
+        # Stable sort so the label row is always first, whatever order
+        # findChildren happened to return the buttons in.
+        rows.sort(key=lambda r: not r.pop('primary'))
+        return rows
+
     def _build_fullscreen_qmenu_snapshot(self, menu, root_menu=None):
         if menu is None:
             return []
@@ -20587,6 +20639,15 @@ try {
                     raw_label = ""
             label = str(raw_label or "").replace("&", "").strip()
             if not label and submenu is None:
+                # The Mirrors list is not built from plain actions: every
+                # mirror is a QWidgetAction holding a load button and a Split
+                # button in one custom row. Such an action has no text and no
+                # submenu, so this skip dropped all of them and the fullscreen
+                # menu showed only the current file. Recover the buttons.
+                _wrows = self._fullscreen_widget_action_rows(
+                    menu_action, keeper=root_menu)
+                if _wrows:
+                    snapshot.extend(_wrows)
                 continue
 
             try:

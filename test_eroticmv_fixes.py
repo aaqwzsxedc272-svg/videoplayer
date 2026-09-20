@@ -9350,32 +9350,25 @@ report(SRC.count('anchor_button=b,') + SRC.count('anchor_button=button,') >= 2,
    'whether the button was built from a spec or from a QMenu snapshot',
    str(SRC.count('anchor_button=b,') + SRC.count('anchor_button=button,')))
 
-# ── 96. In fullscreen, show the native menu; the overlay is only a fallback ──
-# The overlay existed because of a note that "Native QMenu objects are
-# unreliable in borderless-maximized mode". Everything needed to show one
-# anyway was already written and unreachable behind an early return, so the
-# hand-drawn panel was the default -- and rebuilding it on a stream of
-# MouseMove events is what made the app lag.
+# ── 96. Fullscreen uses the hand-drawn overlay -- a deliberate choice ─────────
+# Showing the native QMenu instead was tried and reverted: the user tested it
+# and kept the overlay. So the overlay is the default again, and what has to
+# hold is that it behaves -- the level guard in 94 and the rebuild guard in 95
+# are what make that tolerable. The native path stays written and reachable
+# for any caller that passes no fallback.
 _ep96 = next((n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
               and n.name == '_exec_popup_menu'), None)
 _esrc96 = ast.get_source_segment(SRC, _ep96) if _ep96 else ''
 report(_ep96 is not None, 'the fullscreen popup path is here')
-report('QTimer.singleShot(0, fullscreen_fallback)' not in _esrc96,
-   'the overlay is no longer shown INSTEAD of the native menu. That early '
-   'return is why fullscreen menus were hand-drawn at all, and a hand-drawn '
-   'panel rebuilds its QFrame and buttons on every hover event')
+report('QTimer.singleShot(0, fullscreen_fallback)' in _esrc96,
+   'a caller that supplies an overlay gets the overlay in fullscreen -- the '
+   'behaviour that was tested and kept over the native menu')
 report('menu.popup(target_pos)' in _esrc96,
-   'the native QMenu is popped up in fullscreen, so submenus open on hover '
-   'the way Qt does it out of fullscreen -- no custom hover handling, and '
-   'nothing rebuilt per mouse move')
-_i96 = _esrc96.find('QTimer.singleShot(0, _show_menu)')
-_j96 = _esrc96.find('QTimer.singleShot(140, _fallback_to_overlay)')
-report(0 < _i96 < _j96,
-   'and the popup is attempted first, with the overlay scheduled after it',
-   f'popup at {_i96}, fallback at {_j96}')
+   'and the native popup is still written for callers that pass no fallback, '
+   'so the overlay is a choice at the call site rather than the only path')
 report('_menu.isVisible()' in _esrc96,
-   'the overlay only takes over if the native popup never became visible -- '
-   'the safety net stays, it just is not the default any more')
+   'the switch to the overlay is still gated on the native menu never having '
+   'become visible')
 _pp96 = next((n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
               and n.name == '_prepare_popup_menu'), None)
 _ppsrc96 = ast.get_source_segment(SRC, _pp96) if _pp96 else ''
@@ -9383,9 +9376,110 @@ report(bool(_pp96)
        and 'menu.setParent(None)' in _ppsrc96
        and 'Qt.WindowType.Popup' in _ppsrc96
        and 'WindowStaysOnTopHint' in _ppsrc96,
-   'the menu is reparented and flagged Popup/Frameless/StaysOnTop first, '
-   'which is what lets a native popup appear over a borderless-maximized '
-   'window -- the preparation this path was skipping')
+   'the menu is still reparented and flagged Popup/Frameless/StaysOnTop, '
+   'which is what would let a native popup appear over a borderless-maximized '
+   'window if that path is ever wanted again')
+
+# ── 97. Fullscreen: mirrors survive the snapshot, and submenus have no header ─
+# Two things the fullscreen overlay got wrong that a native menu gets right.
+_vp97 = next((n for n in ast.walk(TREE) if isinstance(n, ast.ClassDef)
+              and n.name == 'VideoPlayer'), None)
+_fn97 = {n.name: n for n in (_vp97.body if _vp97 else [])
+         if isinstance(n, ast.FunctionDef)
+         and n.name in ('_fullscreen_widget_action_rows',
+                        '_build_fullscreen_qmenu_snapshot',
+                        '_show_fullscreen_overlay_menu')}
+report('_fullscreen_widget_action_rows' in _fn97,
+   'there is a way to read a QWidgetAction row',
+   'defined' if '_fullscreen_widget_action_rows' in _fn97 else 'MISSING')
+if '_fullscreen_widget_action_rows' in _fn97:
+    _g97 = {'QPushButton': object}
+    exec(compile(ast.Module(
+        [_fn97['_fullscreen_widget_action_rows']], []), '<rows97>', 'exec'),
+        _g97)
+    _F97 = _g97['_fullscreen_widget_action_rows']
+
+    class _Btn97:
+        def __init__(self, text, enabled=True):
+            self._t = text
+            self._e = enabled
+            self.clicks97 = 0
+
+        def text(self):
+            return self._t
+
+        def isEnabled(self):
+            return self._e
+
+        def click(self):
+            self.clicks97 += 1
+
+    class _W97:
+        def __init__(self, buttons):
+            self._b = buttons
+
+        def findChildren(self, _t):
+            return list(self._b)
+
+    class _A97:
+        def __init__(self, widget):
+            self._w = widget
+
+        def defaultWidget(self):
+            return self._w
+
+    class _NoW97:
+        def defaultWidget(self):
+            return None
+
+    _U97 = 'https://kamehaus.net/e/37n3u6rwt2hf'
+    for _lbl97, _act97, _want97 in [
+            ('a mirror row: load button plus Split',
+             _A97(_W97([_Btn97(_U97), _Btn97('Split')])), 2),
+            ('the same row with Split discovered first',
+             _A97(_W97([_Btn97('Split'), _Btn97(_U97)])), 2),
+            ('an action with no default widget', _NoW97(), 0),
+            ('an action with no defaultWidget() at all', object(), 0),
+            ('a widget holding no buttons', _A97(_W97([])), 0),
+            ('a row whose only button is disabled',
+             _A97(_W97([_Btn97(_U97, enabled=False)])), 0),
+    ]:
+        report(len(_F97(None, _act97)) == _want97,
+           f'{_lbl97} yields {_want97} entr'
+           + ('y' if _want97 == 1 else 'ies'))
+
+    _rows97 = _F97(None, _A97(_W97([_Btn97('Split'), _Btn97(_U97)])))
+    report(bool(_rows97) and _rows97[0]['label'] == _U97,
+       'the row is labelled with the mirror URL, not with the five-letter '
+       'Split button, whatever order findChildren returned them in')
+    report(len(_rows97) > 1 and _U97 in _rows97[1]['label']
+           and 'Split' in _rows97[1]['label'],
+       'and Split keeps the URL beside it -- lifted out of the row it was '
+       'drawn in, "Split" on its own says nothing')
+    _b97 = _Btn97(_U97)
+    _F97(None, _A97(_W97([_b97])))[0]['callback']()
+    report(_b97.clicks97 == 1,
+       'the entry actually drives the button in the hidden source menu')
+    report(all('primary' not in r for r in _rows97),
+       'the sort key used to order them is not left in the entry, where the '
+       'panel builder would read it as part of the spec')
+
+    _ssrc97 = ast.get_source_segment(
+        SRC, _fn97['_build_fullscreen_qmenu_snapshot']) or ''
+    _k97 = _ssrc97.find('_fullscreen_widget_action_rows(')
+    _c97 = _ssrc97.find('if not label and submenu is None:')
+    report(0 < _c97 < _k97,
+       'and the snapshot reads those rows instead of skipping them. A '
+       'QWidgetAction has no text and no submenu, which is exactly the shape '
+       'the skip was written for -- so every mirror vanished from the '
+       'fullscreen menu and only the plain current-file row survived')
+
+_sm97 = _fn97.get('_show_fullscreen_overlay_menu')
+_smsrc97 = ast.get_source_segment(SRC, _sm97) if _sm97 else ''
+report('if title and int(level or 0) == 0:' in _smsrc97,
+   'only the top-level panel gets a header. A submenu is passed the label of '
+   'the button that opened it, so it repeated that name on top of the list it '
+   'came from -- and out of fullscreen no submenu has a header at all')
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
