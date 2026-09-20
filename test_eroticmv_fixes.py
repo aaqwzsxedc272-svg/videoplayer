@@ -45,6 +45,26 @@ try:
         exec(compile(ast.Module(body=_lift_consts + [_fn_lift],
                                 type_ignores=[]),
                      '<lift_helpers>', 'exec'), _LIFT_HELPERS)
+    # The caption helpers are module-level too, and main.py code that scans a
+    # page for captions now calls them.
+    from urllib.parse import urlparse as _up_lift, urljoin as _uj_lift
+    from html import unescape as _hu_lift
+    _LIFT_HELPERS.setdefault('os', os)
+    _LIFT_HELPERS.setdefault('re', re)
+    _LIFT_HELPERS.setdefault('urlparse', _up_lift)
+    _LIFT_HELPERS.setdefault('urljoin', _uj_lift)
+    _LIFT_HELPERS.setdefault('html_unescape', _hu_lift)
+    _lift_sub_fns = [n for n in TREE.body if isinstance(n, ast.FunctionDef)
+                     and n.name in ('_caption_ext_of', '_lang_from_url',
+                                    '_subtitle_endpoint_candidates',
+                                    '_subtitle_tracks_from_payload',
+                                    '_subtitle_page_fragments')]
+    _lift_sub_consts = [n for n in TREE.body if isinstance(n, ast.Assign)
+                        and getattr(n.targets[0], 'id', '').startswith(
+                            ('_CAPTION_FILE_EXTS', '_SUB_'))]
+    exec(compile(ast.Module(body=_lift_sub_consts + _lift_sub_fns,
+                            type_ignores=[]),
+                 '<lift_sub_helpers>', 'exec'), _LIFT_HELPERS)
 except Exception as _e_lift:
     print('  WARN  lift helpers unavailable:', _e_lift)
 
@@ -10634,6 +10654,159 @@ report(_out103 is False and 'no usable caption track' not in _log103
        and 'fetching' not in _log103,
    'a video whose captions are already loaded is left alone, silently -- '
    'that is not a failure and must not read like one', repr(_log103))
+
+# ── 104. The captions were found all along; fetching them was refused ──────────
+# A field log settled it: xhamster's page named six caption files, and every
+# fetch came back HTTP 403 with 564 bytes of error page, because the request
+# carried a bare user agent and no Referer. The same log showed the labels one
+# entry off -- sw_es_1.vtt offered as "en" -- so even a successful fetch would
+# have shown Spanish. Both are fixed here, against the URLs from that log.
+_XH_VTT = ('https://thumb-v1.xhcdn.com/a/ALOB4UyeKwnvO9pkrOW4Mg/030/627/881/'
+           'sw_es_1.vtt')
+_XH_EN = ('https://thumb-v1.xhcdn.com/a/hvm1kQu2FMDvlNaaCaiWMA/030/627/881/'
+          'sw_en_1.vtt')
+_XH_TR = ('https://thumb-v1.xhcdn.com/a/ypkJ653vWC5tAX_3qpUWCQ/030/627/881/'
+          'sw_tr_1.vtt')
+report(_g101['_lang_from_url'](_XH_VTT) == 'es'
+       and _g101['_lang_from_url'](_XH_EN) == 'en'
+       and _g101['_lang_from_url'](_XH_TR) == 'tr',
+   'a filename that carries a prefix and a language gives up the language, '
+   'not the prefix',
+   repr([_g101['_lang_from_url'](u) for u in (_XH_VTT, _XH_EN, _XH_TR)]))
+report(_g101['_lang_from_url']('https://cdn/a/en.vtt') == 'en'
+       and _g101['_lang_from_url']('https://cdn/a/s.vtt?lang=ja') == 'ja'
+       and _g101['_lang_from_url']('https://cdn/embed/xyz/a.vtt') == '',
+   'and the plainer shapes still read the same')
+
+_pref_fn = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+            and n.name == '_preferred_remote_subtitle_tracks']
+report(len(_pref_fn) == 1, 'the track chooser is one method')
+_g104 = {'print': print, 're': re, 'os': os, 'max': max, 'int': int,
+         'str': str, 'list': list}
+exec(compile(ast.Module(body=_pref_fn, type_ignores=[]), 'pref104', 'exec'),
+     _g104)
+
+
+class _Pref104(object):
+    _preferred_remote_subtitle_tracks = _g104[
+        '_preferred_remote_subtitle_tracks']
+
+
+_mislabelled = [
+    {'url': _XH_VTT, 'lang': 'en', 'ext': 'vtt', 'name': '',
+     'automatic': False},
+    {'url': _XH_EN, 'lang': 'English (auto-generated)', 'ext': 'vtt',
+     'name': '', 'automatic': True},
+    {'url': _XH_TR, 'lang': 'ar', 'ext': 'vtt', 'name': '',
+     'automatic': False},
+]
+_picked_bad = _Pref104()._preferred_remote_subtitle_tracks(_mislabelled,
+                                                           limit=1)
+report(bool(_picked_bad) and _picked_bad[0]['url'] == _XH_VTT,
+   'with the labels as the page scraped them, Spanish is the track offered '
+   'as English -- which is the bug, reproduced',
+   repr([t['url'][-12:] for t in _picked_bad]))
+_correct = [
+    {'url': _XH_VTT, 'lang': 'es', 'ext': 'vtt',
+     'name': 'Espanol', 'automatic': False},
+    {'url': _XH_EN, 'lang': 'en', 'ext': 'vtt',
+     'name': 'English (auto-generated)', 'automatic': True},
+    {'url': _XH_TR, 'lang': 'tr', 'ext': 'vtt', 'name': 'Turkce',
+     'automatic': False},
+]
+_picked = _Pref104()._preferred_remote_subtitle_tracks(_correct, limit=2)
+report([t['lang'] for t in _picked] == ['en', 'es'],
+   'with the language read off the filename, English is offered first',
+   repr([t['lang'] for t in _picked]))
+
+# ── the fetch itself, run for real against a stubbed transport ──
+_fetch_fn = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+             and n.name == '_fetch_caption_body']
+report(len(_fetch_fn) == 1, 'caption files are fetched through one helper')
+report('def _fetch_caption_body(' in SRC
+       and "headers['Sec-Fetch-Dest'] = 'empty'" in SRC,
+   'and that helper sends a browser-shaped request, not a bare user agent')
+_worker104 = SRC[SRC.index('def _load_remote_subtitles_async('):]
+_worker104 = _worker104[:_worker104.index('\n    def ')]
+report('self._fetch_caption_body(sub_url, file_path)' in _worker104,
+   'the worker fetches each caption with the watch page as its referer')
+report('_stream_request_headers(file_path)' not in _worker104,
+   'and no longer with the bare headers the CDN answered 403')
+
+import sys as _sys104
+import types as _types104
+exec(compile(ast.Module(body=_fetch_fn, type_ignores=[]), 'fetch104', 'exec'),
+     _g104)
+
+
+class _Resp104(object):
+    def __init__(self, content, status):
+        self.content = content
+        self.status_code = status
+        self.ok = 200 <= status < 400
+        self.text = content.decode('utf-8', 'replace')
+
+
+class _FetchStub104(object):
+    def _media_playback_headers(self, page_url=None, media_url=None,
+                                extra=None):
+        return {'User-Agent': 'stub-agent',
+                'Referer': str(page_url or ''),
+                'Origin': 'https://xhamster.com'}
+
+
+class _FakeRequests104(object):
+    def __init__(self, resp):
+        self.resp = resp
+        self.calls = []
+
+    def get(self, url, headers=None, timeout=None, allow_redirects=True):
+        self.calls.append((url, dict(headers or {})))
+        return self.resp
+
+
+def _fetch104(resp):
+    fake = _FakeRequests104(resp)
+    mod = _types104.ModuleType('requests')
+    mod.get = fake.get
+    saved_req = _sys104.modules.get('requests')
+    saved_cc = _sys104.modules.get('curl_cffi')
+    _sys104.modules['requests'] = mod
+    _sys104.modules['curl_cffi'] = None   # force the plain-requests branch
+    try:
+        out = _g104['_fetch_caption_body'](
+            _FetchStub104(), _XH_EN, 'https://xhamster.com/videos/xhb0btt')
+    finally:
+        if saved_req is None:
+            _sys104.modules.pop('requests', None)
+        else:
+            _sys104.modules['requests'] = saved_req
+        if saved_cc is None:
+            _sys104.modules.pop('curl_cffi', None)
+        else:
+            _sys104.modules['curl_cffi'] = saved_cc
+    return out, fake.calls
+
+
+_body104, _calls104 = _fetch104(_Resp104(b'WEBVTT\n\n00:00:01.000 --> x\nhi\n',
+                                          200))
+report(_body104 == (b'WEBVTT\n\n00:00:01.000 --> x\nhi\n', 200),
+   'a caption the CDN accepts comes back as bytes the player can read',
+   repr(_body104)[:60])
+_h104 = _calls104[0][1] if _calls104 else {}
+report(_h104.get('Referer') == 'https://xhamster.com/videos/xhb0btt',
+   'carrying the watch page as Referer', repr(_h104.get('Referer')))
+report(_h104.get('Origin') == 'https://xhamster.com',
+   'and the site as Origin, which is what a bare user agent was missing')
+report('text/vtt' in str(_h104.get('Accept', ''))
+       and _h104.get('Sec-Fetch-Dest') == 'empty',
+   'asking for a caption rather than a video',
+   repr(_h104.get('Accept')))
+_body104, _calls104 = _fetch104(_Resp104(b'<html>403 Forbidden</html>' * 20,
+                                          403))
+report(_body104 == (b'', 403),
+   'and a refusal comes back as a status the caller can report, not silence',
+   repr(_body104))
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

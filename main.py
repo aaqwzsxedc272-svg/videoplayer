@@ -394,7 +394,9 @@ def _lang_from_url(url):
     """The language a caption URL states about itself, or ''.
 
     Reads ?lang=fr, a .../fr/... segment and x.fr.vtt alike, and only ever
-    returns a code that is actually a language.
+    returns a code that is actually a language. A filename can carry more
+    than one code -- xhamster calls them sw_en_1.vtt, where "sw" is a prefix
+    and "en" is the language -- so the token nearest the extension wins.
     """
     text = str(url or '').lower()
     match = re.search(
@@ -405,9 +407,14 @@ def _lang_from_url(url):
         path = urlsplit(text).path or text
     except Exception:
         path = text
-    for match in re.finditer(r'(?:^|[/._-])([a-z]{2,3})(?=[/._-]|$)', path):
-        if match.group(1) in _SUB_LANG_CODES:
-            return match.group(1)
+    stem = os.path.splitext(os.path.basename(path))[0]
+    tokens = [t for t in re.split(r'[^a-z]+', stem) if t]
+    for token in reversed(tokens):
+        if token in _SUB_LANG_CODES:
+            return token
+    for segment in reversed([s for s in path.split('/') if s]):
+        if segment in _SUB_LANG_CODES:
+            return segment
     return ''
 
 
@@ -30706,6 +30713,44 @@ try {
         r'(?:thumbnails?|preview|sprite|storyboard|chapters?|scrubber)'
         r'["\']?\s*[:=]', re.IGNORECASE)
 
+    def _fetch_caption_body(self, url, page_url=''):
+        """Fetch one caption file, as the bytes to hand the player.
+
+        curl_cffi first, with the page's own Referer and Origin: caption files
+        sit behind the same CDN edge as the video, and a bare `requests` GET
+        with only a user agent is answered 403. A field log showed exactly
+        that for xhamster's thumb-v1.xhcdn.com .vtt files -- the page named
+        six captions and every fetch came back HTTP 403, 564 bytes of error
+        page, so the app reported tracks it could never load.
+        """
+        headers = self._media_playback_headers(page_url, url)
+        headers['Accept'] = 'text/vtt, application/octet-stream, text/plain, */*'
+        headers['Sec-Fetch-Dest'] = 'empty'
+        status = 0
+        try:
+            import curl_cffi.requests as cfreq
+        except Exception:
+            cfreq = None
+        if cfreq is not None:
+            try:
+                response = cfreq.Session(impersonate='chrome131').get(
+                    url, headers=headers, timeout=20, allow_redirects=True)
+                if response is not None and response.ok and response.content:
+                    return response.content, response.status_code
+                status = int(getattr(response, 'status_code', 0) or 0)
+            except Exception:
+                status = 0
+        try:
+            import requests
+            response = requests.get(
+                url, headers=headers, timeout=20, allow_redirects=True)
+            if response is not None and response.ok and response.content:
+                return response.content, response.status_code
+            status = int(getattr(response, 'status_code', 0) or 0) or status
+        except Exception:
+            pass
+        return b'', status
+
     def _subtitle_endpoint_body(self, url, referer=''):
         """Fetch a subtitle-list endpoint. curl_cffi first: these sit behind
         the same CDN edge as the video and a bare `requests` GET tends to get
@@ -30911,7 +30956,12 @@ try {
                     continue
                 lang_match = re.search(r'["\'](?:lang|language|srclang|label)["\']\s*:\s*["\']([^"\']+)["\']', prefix, re.IGNORECASE)
                 auto = bool(re.search(r'auto(?:matic)?', prefix, re.IGNORECASE))
-                _add_track(sub_url, lang_match.group(1) if lang_match else '', automatic=auto)
+                # The filename states its own language and the text around the
+                # URL only describes a neighbour, so trust the URL first and
+                # keep the page's wording as the label.
+                label = str(lang_match.group(1) or '').strip() if lang_match else ''
+                _add_track(sub_url, _lang_from_url(sub_url) or label,
+                           name=label, automatic=auto)
 
         return self._preferred_remote_subtitle_tracks(tracks, limit=6) if tracks else []
 
@@ -43867,21 +43917,14 @@ try {
                     sub_url = str(track.get('url') or '').strip()
                     ext = str(track.get('ext') or 'vtt').lower().lstrip('.') or 'vtt'
                     lang = re.sub(r'[^A-Za-z0-9_-]+', '', str(track.get('lang') or 'sub')) or 'sub'
-                    response = requests.get(
-                        sub_url,
-                        headers=self._stream_request_headers(file_path),
-                        timeout=20,
-                        allow_redirects=True,
-                    )
-                    if response.status_code >= 400 or not response.content:
-                        print(f'[SUBS]   {sub_url[:110]} -> HTTP '
-                              f'{response.status_code}, '
-                              f'{len(response.content or b"")} byte(s), '
-                              f'skipped', flush=True)
+                    body, status = self._fetch_caption_body(sub_url, file_path)
+                    if not body:
+                        print(f'[SUBS]   {sub_url[:110]} -> HTTP {status}, '
+                              f'no caption body, skipped', flush=True)
                         continue
                     candidate = os.path.join(subtitle_dir, f"{safe_title}.{lang}.{ext}")
                     with open(candidate, 'wb') as fh:
-                        fh.write(response.content)
+                        fh.write(body)
                     if os.path.exists(candidate) and os.path.getsize(candidate) > 0:
                         saved_path = candidate
                         print(f'[SUBS]   {sub_url[:110]} -> saved '
