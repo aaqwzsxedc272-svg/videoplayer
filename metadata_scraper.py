@@ -731,6 +731,7 @@ class _BrowserGallerySession:
             self._page.goto(url, wait_until="domcontentloaded", timeout=timeout)
             html = self._page.content()
             if _is_challenge_page(html):
+                self._click_through_challenge(url)
                 deadline = time.time() + _CHALLENGE_GRACE
                 while time.time() < deadline:
                     try:
@@ -758,6 +759,29 @@ class _BrowserGallerySession:
         except Exception as e:
             print(f"[Scraper] browser fetch error {url}: {e}")
             return None
+
+    def _click_through_challenge(self, url: str) -> None:
+        """Click the interstitial, because that is what starts it.
+
+        The gate these sites serve binds its start to a click on its own
+        wrapper -- the captured interstitial had the proof-of-work running
+        from a click handler, not on load. A headless page never clicks
+        anything, so waiting for it to clear on its own could never work no
+        matter how long the wait was.
+        """
+        for selector in ("body", "html"):
+            try:
+                self._page.click(selector, timeout=1500, force=True)
+                print(f"[Scraper] clicked the challenge page to start it: "
+                      f"{url}")
+                return
+            except Exception:
+                continue
+        try:
+            self._page.mouse.click(640, 450)
+            print(f"[Scraper] clicked the challenge page to start it: {url}")
+        except Exception as exc:
+            print(f"[Scraper] could not click the challenge page: {exc}")
 
     def close(self):
         _save_storage_state(self._context, self._cookie_path)
@@ -828,7 +852,7 @@ def _browser_state_path(db, site: dict, url) -> str:
 
 _PROBE_TIMEOUT = 8          # plain HTTP gets this long before we give up
 _BROWSER_TIMEOUT = 12000    # ms; 25000 measured 27 s of dead air per row
-_CHALLENGE_GRACE = 5.0      # s to let an auto-solving interstitial clear
+_CHALLENGE_GRACE = 8.0      # s to let a clicked interstitial finish
 # Short on purpose. This exists to stop eleven rows re-proving the same dead
 # host eleven times in a row, not to remember a verdict for the session -- the
 # nubiles block is an IP ban that a VPN lifts, and the user switches one on

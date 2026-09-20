@@ -7145,8 +7145,9 @@ if hasattr(_msrc55, '_storage_state_cookie_count'):
        'spending the whole timeout waiting for a selector that will never '
        'appear on it -- that wait is what turned a page into 16919 ms',
        f'grace {_msrc55._CHALLENGE_GRACE:.0f}s')
-    report(0 < _msrc55._CHALLENGE_GRACE <= 5.0,
-       'and the grace given to an auto-solving challenge is bounded',
+    report(0 < _msrc55._CHALLENGE_GRACE <= 8.0,
+       'and the grace given to a challenge is still bounded -- it moved off '
+       '5s only because a clicked interstitial now has something to finish',
        f'{_msrc55._CHALLENGE_GRACE:.0f} s')
 else:
     report(False, 'the browser-state diagnostic is present',
@@ -10766,6 +10767,9 @@ class _FetchStub104(object):
     def _warm_caption_session(self, session, page_url, headers):
         return 0
 
+    def _fetch_caption_body_bare(self, url):
+        return b'', 0
+
 
 class _FakeRequests104(object):
     def __init__(self, resp):
@@ -10862,6 +10866,7 @@ _CkStub105._fetch_caption_body = _g105['_fetch_caption_body']
 _CkStub105._session_cookie_count = lambda self, session: 0
 _CkStub105._warm_caption_session = (
     lambda self, session, page_url, headers: 0)
+_CkStub105._fetch_caption_body_bare = lambda self, url: (b'', 0)
 
 _hdr105 = _CkStub105()._cookie_header_for(
     'https://thumb-v1.xhcdn.com/a/hvm1kQu2FMDvlNaaCaiWMA/030/627/881/sw_en_1.vtt')
@@ -11048,6 +11053,9 @@ class _WarmStub106(object):
     def _refusal_snippet(self, response):
         return ''
 
+    def _fetch_caption_body_bare(self, url):
+        return b'', 0
+
 
 _PAGE106 = 'https://xhamster.com/videos/my-stepson-xhb0btt'
 _rec106 = _Rec106(_R106(b'', 403))
@@ -11095,6 +11103,166 @@ report(_order106 == [_PAGE106, _XH_EN],
 report(_out106 == (b'', 403), 'a refusal still comes back as a status')
 report('2 from the page' in _log106,
    'and the log says how many cookies the page yielded', repr(_log106))
+
+# ── 107. A click-gated interstitial, and the one header set not yet tried ─────
+# The nubiles-family scraper waited for its challenge page to clear on its
+# own. The captured interstitial started its proof-of-work from a click
+# handler, not on load, and a headless page never clicks -- so no length of
+# waiting could ever have cleared it. And the caption CDN's 403 survived five
+# cookies from the page, which closes the cookie theory; the one combination
+# never tried is a request with no Referer at all.
+_ck_fns107 = [n for n in ast.walk(_MS_TREE) if isinstance(n, ast.FunctionDef)
+              and n.name == '_click_through_challenge']
+report(len(_ck_fns107) == 1, 'the scraper can click a challenge page')
+_get107 = [n for n in ast.walk(_MS_TREE) if isinstance(n, ast.FunctionDef)
+           and n.name == 'get'
+           and '_is_challenge_page' in (ast.get_source_segment(_MS_SRC, n)
+                                        or '')]
+report(bool(_get107), 'found the browser fetch that meets the challenge')
+_gsrc107 = ast.get_source_segment(_MS_SRC, _get107[0]) if _get107 else ''
+_c107i = _gsrc107.find('_click_through_challenge(')
+_d107i = _gsrc107.find('deadline = time.time()')
+report(-1 < _c107i < _d107i,
+   'and it clicks before it starts waiting, not after giving up')
+_grace107 = [n for n in _MS_TREE.body if isinstance(n, ast.Assign)
+             and getattr(n.targets[0], 'id', '') == '_CHALLENGE_GRACE']
+report(bool(_grace107) and _grace107[0].value.value >= 6,
+   'with long enough to finish once it has been started',
+   repr(_grace107[0].value.value if _grace107 else None))
+
+_g107 = {'print': print}
+exec(compile(ast.Module(body=_ck_fns107, type_ignores=[]), 'clk107', 'exec'),
+     _g107)
+
+
+class _FakeMouse107(object):
+    def __init__(self, owner):
+        self.owner = owner
+
+    def click(self, x, y):
+        self.owner.mouse_clicks.append((x, y))
+
+
+class _FakePage107(object):
+    def __init__(self, refuse_selectors=False):
+        self.clicks = []
+        self.mouse_clicks = []
+        self.refuse = refuse_selectors
+        self.mouse = _FakeMouse107(self)
+
+    def click(self, selector, timeout=None, force=None):
+        if self.refuse:
+            raise RuntimeError('not clickable')
+        self.clicks.append(selector)
+
+
+class _ClkStub107(object):
+    def __init__(self, page):
+        self._page = page
+
+
+_Click107 = _g107['_click_through_challenge']
+_p107 = _FakePage107()
+_b107 = _io105.StringIO()
+with _ctx105.redirect_stdout(_b107):
+    _Click107(_ClkStub107(_p107), 'https://nubiles-porn.com/video/gallery')
+report(_p107.clicks == ['body'] and _p107.mouse_clicks == [],
+   'a challenge page gets clicked, which is what starts it working',
+   repr(_p107.clicks))
+report('clicked the challenge page' in _b107.getvalue(),
+   'and says so, so a run that never clicks is visible',
+   repr(_b107.getvalue()[:70]))
+_p107b = _FakePage107(refuse_selectors=True)
+with _ctx105.redirect_stdout(_io105.StringIO()):
+    _Click107(_ClkStub107(_p107b), 'https://momlover.com/video/gallery')
+report(_p107b.mouse_clicks == [(640, 450)],
+   'and if no element takes the click it clicks the middle of the page',
+   repr(_p107b.mouse_clicks))
+
+# ── the caption retry with no Referer ──
+_bare107 = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+            and n.name in ('_fetch_caption_body', '_fetch_caption_body_bare',
+                           '_warm_caption_session', '_session_cookie_count')]
+report(len(_bare107) == 4, 'a refusal is retried once with no Referer',
+   'found %d' % len(_bare107))
+_g107b = {'print': print, 're': re, 'os': os, 'urlparse': urlparse}
+exec(compile(ast.Module(body=_bare107, type_ignores=[]), 'bare107', 'exec'),
+     _g107b)
+
+
+class _BareStub107(object):
+    _session_cookie_count = _g107b['_session_cookie_count']
+    _warm_caption_session = _g107b['_warm_caption_session']
+    _fetch_caption_body_bare = _g107b['_fetch_caption_body_bare']
+
+    def _media_playback_headers(self, page_url=None, media_url=None,
+                                extra=None):
+        return {'Referer': str(page_url or ''), 'Origin': 'https://xhamster.com'}
+
+    def _cookie_header_for(self, url):
+        return ''
+
+    def _refusal_snippet(self, response):
+        return 'nginx 403'
+
+    def _stream_user_agent(self):
+        return 'stub-agent'
+
+
+import sys as _sys107
+import types as _types107
+
+
+def _bare_run107(session_resp, bare_resp):
+    rec = _Rec106(session_resp)
+    calls = []
+
+    def _get(url, headers=None, timeout=None, allow_redirects=True):
+        calls.append((url, dict(headers or {})))
+        return bare_resp
+
+    mod = _types107.ModuleType('requests')
+    mod.Session = lambda: rec
+    mod.get = _get
+    saved = _sys107.modules.get('requests')
+    saved_cc = _sys107.modules.get('curl_cffi')
+    _sys107.modules['requests'] = mod
+    _sys107.modules['curl_cffi'] = None
+    buf = _io105.StringIO()
+    try:
+        with _ctx105.redirect_stdout(buf):
+            out = _g107b['_fetch_caption_body'](
+                _BareStub107(), _XH_EN, _PAGE106)
+    finally:
+        if saved is None:
+            _sys107.modules.pop('requests', None)
+        else:
+            _sys107.modules['requests'] = saved
+        if saved_cc is None:
+            _sys107.modules.pop('curl_cffi', None)
+        else:
+            _sys107.modules['curl_cffi'] = saved_cc
+    return out, calls, buf.getvalue()
+
+
+_out107, _calls107, _log107 = _bare_run107(
+    _R106(b'<html>403</html>', 403),
+    _R106(b'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nhi\n', 200))
+report(_out107[1] == 200 and _out107[0].startswith(b'WEBVTT'),
+   'when a Referer is what the CDN objects to, the retry gets the caption',
+   repr(_out107)[:60])
+_h107c = _calls107[0][1] if _calls107 else {}
+report('Referer' not in _h107c and 'Origin' not in _h107c,
+   'sent with neither Referer nor Origin', repr(sorted(_h107c)))
+report('no Referer' in _log107, 'and the log says which attempt worked',
+   repr(_log107))
+_out107, _calls107, _log107 = _bare_run107(
+    _R106(b'<html>403</html>', 403), _R106(b'<html>403</html>', 403))
+report(_out107 == (b'', 403),
+   'and when both are refused the original 403 is what gets reported, '
+   'not a 0 that looks like no answer at all', repr(_out107))
+report('nginx 403' in _log107, 'with the CDN\'s own reason still attached',
+   repr(_log107))
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

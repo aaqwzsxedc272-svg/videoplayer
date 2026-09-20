@@ -8325,8 +8325,8 @@ class VideoPlayer(QMainWindow):
         self._deferred_playlist_analysis_active = False
         self._stream_resolution_cache = {}
         self._stream_resolution_failures = {}
-        print('[SUBS] caption detection build 5 (page scan, subtitle '
-              'endpoint, cookies, session warm-up)', flush=True)
+        print('[SUBS] caption detection build 6 (page scan, subtitle '
+              'endpoint, session warm-up, no-Referer retry)', flush=True)
         self._dood_resolve_lock = threading.Lock()
         self._playlist_url_mirrors = {}
         self._gofile_guest_token = None
@@ -30820,11 +30820,45 @@ try {
                 detail = self._refusal_snippet(response) or detail
             except Exception as exc:
                 detail = detail or (type(exc).__name__ + ': ' + str(exc))[:160]
+        if status == 403:
+            bare_body, bare_status = self._fetch_caption_body_bare(url)
+            if bare_body:
+                return bare_body, bare_status or 200
+            status = bare_status or status
         print(f'[SUBS]   {str(url)[:110]} -> refused, HTTP {status} via '
               f'{via}, cookies='
               f'{"yes" if cookie_header else "none"}, '
               f'{warmed} from the page: {detail}', flush=True)
         return b'', status
+
+    def _fetch_caption_body_bare(self, url):
+        """One retry carrying no Referer and no Origin at all.
+
+        These captions sit on the site's thumbnail CDN, and an nginx
+        `valid_referers none` rule answers 403 to a request that has a
+        Referer -- the opposite of what a video CDN wants. There is no way to
+        tell from a refusal which way round the rule is set, so the one
+        combination that has not been tried gets one attempt.
+        """
+        try:
+            import requests
+        except Exception:
+            return b'', 0
+        try:
+            response = requests.get(
+                url,
+                headers={'User-Agent': self._stream_user_agent(),
+                         'Accept': 'text/vtt, */*'},
+                timeout=20, allow_redirects=True)
+            if response is not None and response.ok and response.content:
+                print(f'[SUBS]   {str(url)[:110]} -> fetched with no Referer '
+                      f'after the first refusal', flush=True)
+                return response.content, response.status_code
+            return b'', int(getattr(response, 'status_code', 0) or 0)
+        except Exception as exc:
+            print(f'[SUBS]   no-Referer retry failed: '
+                  f'{type(exc).__name__}: {exc}', flush=True)
+            return b'', 0
 
     def _session_cookie_count(self, session):
         try:
