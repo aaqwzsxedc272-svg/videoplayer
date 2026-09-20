@@ -12,39 +12,50 @@ qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.3 LGPL version
 [video_backend] Using libmpv renderer
 [COOKIES] mpv will use cookies from: C:\Users\Mouad\Desktop\video_player\cookies.txt
 [video_backend] mpv renderer: native D3D11 window
+[SUBS] caption detection build 3 (page scan, subtitle endpoint, subtitles_debug.txt)
 [PASSWORDS] Loaded 41 cached passwords from disk
 No headphones detected at startup, using default audio output
-[FAVICON] xhamster.com: 15 declared icon(s) — https://static-ah.xhcdn.com/xh-desktop/images/favicon/favicon-v2-512x512.png?v=1
-[FAVICON] xhamster.com: got site icon from https://static-ah.xhcdn.com/xh-desktop/images/favicon/favicon-v2-512x512.png?v=1
+QWidgetWindow(0x24797502870, name="QWidgetClassWindow") must be a top level window.
+QWidgetWindow(0x24797502870, name="QWidgetClassWindow") must be a top level window.
 [FAVICON] www.xvideos.com: 4 declared icon(s) — https://assets-cdn77.xvideos-cdn.com/v3/img/skins/default/logo/xv.white.svg
 [FAVICON] www.xvideos.com: got site icon from https://assets-cdn77.xvideos-cdn.com/v3/img/skins/default/logo/xv.white.svg
+[FAVICON] xhamster.com: 15 declared icon(s) — https://static-ah.xhcdn.com/xh-desktop/images/favicon/favicon-v2-512x512.png?v=1
+[FAVICON] xhamster.com: got site icon from https://static-ah.xhcdn.com/xh-desktop/images/favicon/favicon-v2-512x512.png?v=1
+[SUBS] xhamster.com: page scan named 6 caption file(s) -- en https://thumb-v1.xhcdn.com/a/ALOB4UyeKwnvO9pkrOW4Mg/030/627/881/sw_es_1.vtt; English (auto-generated) https://thumb-v1.xhcdn.com/a/hvm1kQu2FMDvlNaaCaiWMA/030/627/881/sw_en_1.vtt; ar https://thumb-v1.xhcdn.com/a/ypkJ653vWC5tAX_3qpUWCQ/030/627/881/sw_tr_1.vtt
+[PLAYBACK][LOADFILE] https://hls-cdn77.xvideos-cdn.com/bZS1g_fixeV1hjPTA5c6qg==,1789955595/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://hls-cdn77.xvideos-cdn.com/bZS1g_fixeV1hjPTA5c6qg==,1789955595/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
+Looking for subtitle mapping for: https://www.xvideos.com/video.upbutthfd81/sharing_a_bed_with_my_hot_stepmom_full
+No saved subtitle for this video or its mirrors: https://www.xvideos.com/video.upbutthfd81/sharing_a_bed_with_my_hot_stepmom_full
+[MPV][error][ffmpeg] tls: error:0A000086:lib(20)::reason(134)
+[SUBS] no usable caption track for https://www.xvideos.com/video.upbutthfd81/sharing_a_bed_with_my_hot_stepmom_full (0 offered by the resolver)
+
+[PLAYBACK][END_FILE] https://hls-cdn77.xvideos-cdn.com/bZS1g_fixeV1hjPTA5c6qg==,1789955595/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'error', 'playlist_entry_id': 1, 'file_error': b'loading failed'}>
+[MPV][error][stream] Failed to open https://hls-cdn77.xvideos-cdn.com/bZS1g_fixeV1hjPTA5c6qg==,1789955595/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8.
+
+[PLAYBACK][LOAD_FAILED] retrying direct (tls_verify=False) current=https://www.xvideos.com/video.upbutthfd81/sharing_a_bed_with_my_hot_stepmom_full playback=https://hls-cdn77.xvideos-cdn.com/bZS1g_fixeV1hjPTA5c6qg==,1789955595/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8 error=loading failed
+[PLAYBACK][LOADFILE] https://hls-cdn77.xvideos-cdn.com/bZS1g_fixeV1hjPTA5c6qg==,1789955595/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://hls-cdn77.xvideos-cdn.com/bZS1g_fixeV1hjPTA5c6qg==,1789955595/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
+[HTML_RESOLVE] chose https://video5.xhcdn.com/key=s+umMBz1odjnOt7rxyKQ4g,end=1789956000,limit=3/data=105.72.201.76-dvp/referer=force,.xhcdn.com,.xhamst (0s) from 129 candidate(s)
+[PLAYBACK][FILE_LOADED] https://hls-cdn77.xvideos-cdn.com/bZS1g_fixeV1hjPTA5c6qg==,1789955595/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
+[mpv][perf] profile=base 1920x1080 fps=29.97 bitrate=0kbps hwdec=d3d11va-copy config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
+[SUBS] xhamster.com: page scan named 6 caption file(s) -- en https://thumb-v1.xhcdn.com/a/ALOB4UyeKwnvO9pkrOW4Mg/030/627/881/sw_es_1.vtt; English (auto-generated) https://thumb-v1.xhcdn.com/a/hvm1kQu2FMDvlNaaCaiWMA/030/627/881/sw_en_1.vtt; ar https://thumb-v1.xhcdn.com/a/ypkJ653vWC5tAX_3qpUWCQ/030/627/881/sw_tr_1.vtt
 [HTML_RESOLVE] chose https://video5.xhcdn.com/key=s+umMBz1odjnOt7rxyKQ4g,end=1789956000,limit=3/data=105.72.201.76-dvp/referer=force,.xhcdn.com,.xhamst (0s) from 129 candidate(s)
 [PLAYBACK][LOADFILE] https://video-nss-h.xhcdn.com/DoL36bQGwRqYYcXKAU1v3A==,1789956000/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x2160:2160p/030/627/881/2160p.h264.mp4.m3u8
 [MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://video-nss-h.xhcdn.com/DoL36bQGwRqYYcXKAU1v3A==,1789956000/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920
+[PLAYBACK][END_FILE] https://video-nss-h.xhcdn.com/DoL36bQGwRqYYcXKAU1v3A==,1789956000/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x2160:2160p/030/627/881/2160p.h264.mp4.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'stop', 'playlist_entry_id': 2}>
 Looking for subtitle mapping for: https://xhamster.com/videos/my-stepson-invites-his-classmate-home-to-study-and-i-catch-them-having-sex-in-my-bed-xhb0btt
 No saved subtitle for this video or its mirrors: https://xhamster.com/videos/my-stepson-invites-his-classmate-home-to-study-and-i-catch-them-having-sex-in-my-bed-xhb0btt
+[SUBS] fetching 2 caption track(s) for https://xhamster.com/videos/my-stepson-invites-his-classmate-home-to-study-and-i-catch-the
 [MPV][error][ffmpeg] tls: error:0A000086:lib(20)::reason(134)
 
-[PLAYBACK][END_FILE] https://video-nss-h.xhcdn.com/DoL36bQGwRqYYcXKAU1v3A==,1789956000/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x2160:2160p/030/627/881/2160p.h264.mp4.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'error', 'playlist_entry_id': 1, 'file_error': b'loading failed'}>
+[PLAYBACK][END_FILE] https://video-nss-h.xhcdn.com/DoL36bQGwRqYYcXKAU1v3A==,1789956000/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x2160:2160p/030/627/881/2160p.h264.mp4.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'error', 'playlist_entry_id': 3, 'file_error': b'loading failed'}>
 [MPV][error][stream] Failed to open https://video-nss-h.xhcdn.com/DoL36bQGwRqYYcXKAU1v3A==,1789956000/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x2160:2160p/030/627/881/2160p.h264.mp4.m3u8.
 
 [PLAYBACK][LOAD_FAILED] retrying direct (tls_verify=False) current=https://xhamster.com/videos/my-stepson-invites-his-classmate-home-to-study-and-i-catch-them-having-sex-in-my-bed-xhb0btt playback=https://video-nss-h.xhcdn.com/DoL36bQGwRqYYcXKAU1v3A==,1789956000/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x216 error=loading failed
 [PLAYBACK][LOADFILE] https://video-nss-h.xhcdn.com/DoL36bQGwRqYYcXKAU1v3A==,1789956000/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x2160:2160p/030/627/881/2160p.h264.mp4.m3u8
 [MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://video-nss-h.xhcdn.com/DoL36bQGwRqYYcXKAU1v3A==,1789956000/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920
 [PLAYBACK][FILE_LOADED] https://video-nss-h.xhcdn.com/DoL36bQGwRqYYcXKAU1v3A==,1789956000/media=hls4/multi=256x144:144p,426x240:240p,854x480:480p,1280x720:720p,1920x1080:1080p,3840x2160:2160p/030/627/881/2160p.h264.mp4.m3u8
+[SUBS]   https://thumb-v1.xhcdn.com/a/ALOB4UyeKwnvO9pkrOW4Mg/030/627/881/sw_es_1.vtt -> HTTP 403, 564 byte(s), skipped
 [mpv][perf] profile=4k-fast 3840x2160 fps=25.00 bitrate=0kbps hwdec=d3d11va config=['d3d11va'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
-[PLAYBACK][LOADFILE] https://hls-cdn77.xvideos-cdn.com/QjYTIQKHK-BPjKpPhWUadA==,1789954511/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
-[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://hls-cdn77.xvideos-cdn.com/QjYTIQKHK-BPjKpPhWUadA==,1789954511/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
-[PLAYBACK][END_FILE] https://hls-cdn77.xvideos-cdn.com/QjYTIQKHK-BPjKpPhWUadA==,1789954511/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'stop', 'playlist_entry_id': 2}>
-[MPV][error][ffmpeg] tls: error:0A000086:lib(20)::reason(134)
-
-[PLAYBACK][END_FILE] https://hls-cdn77.xvideos-cdn.com/QjYTIQKHK-BPjKpPhWUadA==,1789954511/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'error', 'playlist_entry_id': 3, 'file_error': b'loading failed'}>
-[MPV][error][stream] Failed to open https://hls-cdn77.xvideos-cdn.com/QjYTIQKHK-BPjKpPhWUadA==,1789954511/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8.
-
-Looking for subtitle mapping for: https://www.xvideos.com/video.upbutthfd81/sharing_a_bed_with_my_hot_stepmom_full
-No saved subtitle for this video or its mirrors: https://www.xvideos.com/video.upbutthfd81/sharing_a_bed_with_my_hot_stepmom_full
-[PLAYBACK][LOAD_FAILED] retrying direct (tls_verify=False) current=https://www.xvideos.com/video.upbutthfd81/sharing_a_bed_with_my_hot_stepmom_full playback=https://hls-cdn77.xvideos-cdn.com/QjYTIQKHK-BPjKpPhWUadA==,1789954511/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8 error=loading failed
-[PLAYBACK][LOADFILE] https://hls-cdn77.xvideos-cdn.com/QjYTIQKHK-BPjKpPhWUadA==,1789954511/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
-[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://hls-cdn77.xvideos-cdn.com/QjYTIQKHK-BPjKpPhWUadA==,1789954511/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
-[PLAYBACK][FILE_LOADED] https://hls-cdn77.xvideos-cdn.com/QjYTIQKHK-BPjKpPhWUadA==,1789954511/680319ea-803c-4df0-b68e-d16e0f900215/0/hls-1080p-5a64c.m3u8
-[mpv][perf] profile=base 1920x1080 fps=29.97 bitrate=0kbps hwdec=d3d11va-copy config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
+[SUBS]   https://thumb-v1.xhcdn.com/a/hvm1kQu2FMDvlNaaCaiWMA/030/627/881/sw_en_1.vtt -> HTTP 403, 564 byte(s), skipped
+[SUBS]   none of the 2 caption track(s) could be fetched
