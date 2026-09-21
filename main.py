@@ -25199,6 +25199,75 @@ try {
                 insert_at += 1
         return changed
 
+    def _quality_variant_stem(self, path):
+        """The identity a URL's bitrate variants share, or '' if it has none.
+
+        '.../16974704-1080p.mp4' and '.../16974704-720p.mp4' are one video
+        at two bitrates. The stem is the filename with the resolution suffix
+        taken out, tied to the site rather than the CDN host, because the
+        same scene is served from a different subdomain per quality and the
+        path can differ too -- eporner hands the 1080p out from under
+        /v3/<token>/<expiry>/ and the rest from the root, so only the
+        '16974704.mp4' part is actually common to all of them.
+        """
+        try:
+            parsed = urlparse(str(path or ''))
+        except Exception:
+            return ''
+        name = (parsed.path or '').rsplit('/', 1)[-1]
+        match = re.search(r'[_-]\d{3,4}p(?=\.[A-Za-z0-9]{2,4}$|$)',
+                          name, re.IGNORECASE)
+        if not match:
+            return ''
+        stem_name = name[:match.start()] + name[match.end():]
+        if not stem_name:
+            return ''
+        host = (parsed.netloc or '').lower().split('@')[-1].split(':')[0]
+        parts = [part for part in host.split('.') if part]
+        domain = '.'.join(parts[-2:]) if len(parts) >= 2 else host
+        return f'{stem_name}@{domain}'
+
+    def _drop_quality_variants(self, primary, paths):
+        """Take the bitrates of one video out of a list of mirrors.
+
+        eporner answers with 1080p/720p/480p/360p/240p of a single scene and
+        all of them were offered as mirrors of it. They are not alternates:
+        choosing one changes nothing but the resolution, and a mirror menu
+        that lists them is offering the same video five times. The
+        primary's own variants go entirely -- the video is already reachable
+        at that quality -- and if the primary carries no resolution suffix,
+        the best of each remaining set survives so the video is not lost.
+        """
+        paths = list(paths or [])
+        primary_stem = self._quality_variant_stem(primary)
+        best = {}
+        for path in paths:
+            stem = self._quality_variant_stem(path)
+            if not stem or (primary_stem and stem == primary_stem):
+                continue
+            rank = self._eporner_quality_rank(path)
+            current = best.get(stem)
+            if current is None or rank > current[0]:
+                best[stem] = (rank, path)
+        winners = {
+            self._mirror_path_key(path) for _, path in best.values()
+        }
+        kept = []
+        for path in paths:
+            if not self._quality_variant_stem(path):
+                kept.append(path)
+            elif self._mirror_path_key(path) in winners:
+                kept.append(path)
+        if len(kept) != len(paths):
+            try:
+                print(f'[MIRRORS] {len(paths) - len(kept)} of {len(paths)} '
+                      f'link(s) were other bitrates of the same video rather '
+                      f'than mirrors, so they are not offered as alternates',
+                      flush=True)
+            except Exception:
+                pass
+        return kept
+
     def _set_mirrors_for_primary(self, primary, mirrors):
         if not hasattr(self, '_playlist_url_mirrors') or not isinstance(self._playlist_url_mirrors, dict):
             self._playlist_url_mirrors = {}
@@ -25277,6 +25346,7 @@ try {
                 ]
             except Exception:
                 pass
+        cleaned = self._drop_quality_variants(primary, cleaned)
         if cleaned:
             self._playlist_url_mirrors[primary] = cleaned
 

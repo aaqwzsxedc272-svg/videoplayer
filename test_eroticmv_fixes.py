@@ -11641,11 +11641,16 @@ report('certificate verify failed' in _fsrc110
 #      has been promoted to a playlist row of its own, which is how the
 #      split and promote actions take a mirror away on purpose.
 # -----------------------------------------------------------------------
+_setm111_names = ('_set_mirrors_for_primary', '_unique_paths',
+                  '_quality_variant_stem', '_drop_quality_variants',
+                  '_eporner_quality_rank')
 _setm111 = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
-            and n.name in ('_set_mirrors_for_primary', '_unique_paths')]
-report(len(_setm111) == 2, 'found the mirror group writer and its dedupe')
+            and n.name in _setm111_names]
+report(len(_setm111) == len(_setm111_names),
+   'found the mirror group writer and everything it calls',
+   'found %d of %d' % (len(_setm111), len(_setm111_names)))
 
-_g111 = {'print': print, 'urlparse': urlparse}
+_g111 = {'print': print, 're': re, 'urlparse': urlparse}
 if _setm111:
     exec(compile(ast.Module(body=_setm111, type_ignores=[]), 'setm111',
                  'exec'), _g111)
@@ -11666,9 +11671,24 @@ class _MirStub111(object):
 if _g111.get('_set_mirrors_for_primary'):
     _MirStub111._set_mirrors_for_primary = _g111['_set_mirrors_for_primary']
     _MirStub111._unique_paths = _g111['_unique_paths']
+    # .get() with a pass-through fallback, not a direct index: on a
+    # revision that predates the helpers a KeyError here aborts the whole
+    # file before the behaviour is ever asserted, which is a falsification
+    # that proves nothing.
+    _MirStub111._quality_variant_stem = (
+        _g111.get('_quality_variant_stem') or (lambda self, path: ''))
+    _MirStub111._drop_quality_variants = (
+        _g111.get('_drop_quality_variants')
+        or (lambda self, primary, paths: list(paths or [])))
+    _MirStub111._eporner_quality_rank = staticmethod(
+        _g111.get('_eporner_quality_rank') or (lambda url: -1))
 else:
     _MirStub111._set_mirrors_for_primary = lambda self, p, m: None
     _MirStub111._unique_paths = lambda self, paths: list(paths or [])
+    _MirStub111._quality_variant_stem = lambda self, path: ''
+    _MirStub111._drop_quality_variants = (
+        lambda self, primary, paths: list(paths or []))
+    _MirStub111._eporner_quality_rank = staticmethod(lambda url: -1)
 
 _A111 = 'https://cdn1.example.com/a.mp4'
 _B111 = 'https://cdn2.example.com/b.mp4'
@@ -11733,6 +11753,116 @@ _m111._set_mirrors_for_primary(_A111, [_C111])
 report(_m111._playlist_url_mirrors.get(_P111) == [_Q111],
    'and a group with nothing in common is left alone',
    repr(_m111._playlist_url_mirrors.get(_P111)))
+
+
+# -----------------------------------------------------------------------
+# 112. eporner's bitrates were listed as mirrors. One scene came back as
+#      five alternates -- 1080p, 720p, 480p, 360p, 240p -- which a mirror
+#      menu is not for: choosing one changes nothing but the resolution.
+#      They share the scene's numeric id and differ only by the suffix, so
+#      the primary's own variants are dropped and a mirror list is left
+#      holding genuine alternates only.
+# -----------------------------------------------------------------------
+_names112 = ('_quality_variant_stem', '_drop_quality_variants',
+             '_set_mirrors_for_primary', '_unique_paths',
+             '_eporner_quality_rank')
+_fns112 = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+           and n.name in _names112]
+report(len(_fns112) == len(_names112),
+   'found the quality-variant helpers beside the mirror group writer',
+   'found %d of %d' % (len(_fns112), len(_names112)))
+
+_g112 = {'print': print, 're': re, 'urlparse': urlparse}
+if _fns112:
+    exec(compile(ast.Module(body=_fns112, type_ignores=[]), 'qv112', 'exec'),
+         _g112)
+
+
+class _QvStub112(object):
+    def __init__(self, groups=None, playlist=None):
+        self._playlist_url_mirrors = dict(groups or {})
+        self.playlist = list(playlist or [])
+
+    def _mirror_path_key(self, path):
+        return str(path or '').strip().lower().rstrip('/')
+
+    def _is_jav_site_host(self, host):
+        return 'supjav' in str(host or '')
+
+
+for _n112 in ('_quality_variant_stem', '_drop_quality_variants',
+              '_set_mirrors_for_primary', '_unique_paths'):
+    setattr(_QvStub112, _n112,
+            _g112.get(_n112) or (lambda self, *a: None))
+# It is a @staticmethod in the app; binding it as a plain function here
+# would hand it `self` in place of the url.
+_QvStub112._eporner_quality_rank = staticmethod(
+    _g112.get('_eporner_quality_rank') or (lambda url: -1))
+
+_EP112 = ('https://vid-s9-n50-de-cdn.eporner.com/v3/NdCiNRb04e4EHifK6E9xHw/'
+          '1790026695_197.146.181.231_798/16974704-1080p.mp4')
+_Q112 = ['http://vid-s9-n50-de-cdn.eporner.com/16974704-%dp.mp4' % h
+         for h in (720, 480, 360, 240)]
+_GV112 = 'https://gvideo.eporner.com/zSjKrbmmZ8t.mp4'
+
+_qv112 = _QvStub112()
+report(_qv112._quality_variant_stem(_EP112)
+       == _qv112._quality_variant_stem(_Q112[0])
+       == '16974704.mp4@eporner.com',
+   'the bitrates of one scene share an identity even though the site '
+   'serves the top quality from a token path and the rest from the root',
+   repr(_qv112._quality_variant_stem(_EP112)))
+report(_qv112._quality_variant_stem(_GV112) == '',
+   'and a link with no resolution in it is not claimed as a variant of '
+   'anything', repr(_qv112._quality_variant_stem(_GV112)))
+
+_b112 = _io105.StringIO()
+with _ctx105.redirect_stdout(_b112):
+    _kept112 = _qv112._drop_quality_variants(_EP112, _Q112 + [_GV112])
+report(_kept112 == [_GV112],
+   'so the four lower bitrates of the scene being played are not offered '
+   'as alternates, and the one genuine mirror is', repr(_kept112))
+report('other bitrates of the same video' in _b112.getvalue(),
+   'and the log says links were dropped for that reason, so a missing '
+   'mirror is not a mystery', repr(_b112.getvalue()[:80]))
+
+# When nothing is being played at a known quality, the best variant has to
+# survive or the video would be unreachable.
+_b112 = _io105.StringIO()
+_plain112 = 'https://www.eporner.com/video-16974704/some-title/'
+with _ctx105.redirect_stdout(_b112):
+    _kept112 = _qv112._drop_quality_variants(_plain112, _Q112)
+report(_kept112 == [_Q112[0]],
+   'and with no resolution on the primary the best of the set is kept '
+   'rather than all of them being dropped', repr(_kept112))
+
+_other112 = ['https://cdn.example.com/99999999-720p.mp4',
+             'https://cdn.example.com/99999999-480p.mp4',
+             'https://elsewhere.example.net/totally-different.mp4']
+_b112 = _io105.StringIO()
+with _ctx105.redirect_stdout(_b112):
+    _kept112 = _qv112._drop_quality_variants(_EP112, _other112)
+report(set(_kept112) == {'https://cdn.example.com/99999999-720p.mp4',
+                         'https://elsewhere.example.net/totally-different.mp4'},
+   'a different scene is left alone, and one link of each of its own '
+   'bitrate sets survives', repr(_kept112))
+
+# End to end, through the writer the rest of the app uses.
+_m112 = _QvStub112({}, playlist=[_EP112])
+_b112 = _io105.StringIO()
+with _ctx105.redirect_stdout(_b112):
+    _m112._set_mirrors_for_primary(_EP112, _Q112 + [_GV112])
+report(_m112._playlist_url_mirrors.get(_EP112) == [_GV112],
+   'so an eporner video ends up with its real mirrors, not five copies of '
+   'itself', repr(_m112._playlist_url_mirrors.get(_EP112)))
+
+_m112 = _QvStub112({}, playlist=[_EP112])
+with _ctx105.redirect_stdout(_io105.StringIO()):
+    _m112._set_mirrors_for_primary(_EP112, _Q112)
+report(_EP112 not in _m112._playlist_url_mirrors,
+   'and a video whose every alternate was a bitrate of itself is left with '
+   'no mirror group at all, rather than an empty one',
+   repr(_m112._playlist_url_mirrors))
 
 
 print('FAILURES:', FAILS)
