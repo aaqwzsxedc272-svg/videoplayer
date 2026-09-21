@@ -11631,5 +11631,109 @@ report('certificate verify failed' in _fsrc110
    'on the strength of the real mpv error, not a generic loading failed')
 
 
+# -----------------------------------------------------------------------
+# 111. Renaming links onto a video lost the mirrors that were already
+#      there. _set_mirrors_for_primary deleted every overlapping group and
+#      wrote only the list it was handed, so adding a third link to a video
+#      that had two left it with the one being played and the newest, and
+#      joining two videos that each had two mirrors gave three, not four.
+#      Overlapping groups are folded together now -- except for a URL that
+#      has been promoted to a playlist row of its own, which is how the
+#      split and promote actions take a mirror away on purpose.
+# -----------------------------------------------------------------------
+_setm111 = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+            and n.name in ('_set_mirrors_for_primary', '_unique_paths')]
+report(len(_setm111) == 2, 'found the mirror group writer and its dedupe')
+
+_g111 = {'print': print, 'urlparse': urlparse}
+if _setm111:
+    exec(compile(ast.Module(body=_setm111, type_ignores=[]), 'setm111',
+                 'exec'), _g111)
+
+
+class _MirStub111(object):
+    def __init__(self, groups=None, playlist=None):
+        self._playlist_url_mirrors = dict(groups or {})
+        self.playlist = list(playlist or [])
+
+    def _mirror_path_key(self, path):
+        return str(path or '').strip().lower().rstrip('/')
+
+    def _is_jav_site_host(self, host):
+        return 'supjav' in str(host or '')
+
+
+if _g111.get('_set_mirrors_for_primary'):
+    _MirStub111._set_mirrors_for_primary = _g111['_set_mirrors_for_primary']
+    _MirStub111._unique_paths = _g111['_unique_paths']
+else:
+    _MirStub111._set_mirrors_for_primary = lambda self, p, m: None
+    _MirStub111._unique_paths = lambda self, paths: list(paths or [])
+
+_A111 = 'https://cdn1.example.com/a.mp4'
+_B111 = 'https://cdn2.example.com/b.mp4'
+_C111 = 'https://cdn3.example.com/c.mp4'
+
+# The reported bug: a third link renamed onto a video that already had one.
+_m111 = _MirStub111({_A111: [_B111]}, playlist=[_A111])
+_m111._set_mirrors_for_primary(_A111, [_C111])
+report(set(_m111._playlist_url_mirrors.get(_A111, [])) == {_B111, _C111},
+   'renaming another link onto a video keeps the mirrors it already had '
+   'instead of leaving only the newest one',
+   repr(_m111._playlist_url_mirrors.get(_A111)))
+
+# Two videos with two links each joining up: four, not three.
+_X111 = 'https://cdn1.example.com/x.mp4'
+_Y111 = 'https://cdn2.example.com/y.mp4'
+_Z111 = 'https://cdn3.example.com/z.mp4'
+_W111 = 'https://cdn4.example.com/w.mp4'
+_m111 = _MirStub111({_X111: [_Y111], _Z111: [_W111]}, playlist=[_Z111])
+_m111._set_mirrors_for_primary(_Z111, [_X111])
+_group111 = set(_m111._playlist_url_mirrors.get(_Z111, []))
+report(_group111 == {_X111, _Y111, _W111},
+   'and joining a video that has two links to one that has two links gives '
+   'four, not the three it used to give', repr(sorted(_group111)))
+report(len(_m111._playlist_url_mirrors) == 1,
+   'with the absorbed group retired rather than left behind pointing at '
+   'the same links', repr(sorted(_m111._playlist_url_mirrors)))
+
+# An empty list is still how a group is cleared.
+_m111 = _MirStub111({_A111: [_B111, _C111]}, playlist=[_A111, _B111, _C111])
+_m111._set_mirrors_for_primary(_A111, [])
+report(_A111 not in _m111._playlist_url_mirrors,
+   'and passing nothing still clears the group, which is how mirrors are '
+   'split out into playlist rows of their own',
+   repr(_m111._playlist_url_mirrors))
+
+# A mirror promoted to its own row must not be folded straight back in.
+_m111 = _MirStub111({_A111: [_B111, _C111]}, playlist=[_A111, _B111])
+_m111._set_mirrors_for_primary(_A111, [_C111])
+report(set(_m111._playlist_url_mirrors.get(_A111, [])) == {_C111},
+   'and a mirror that was just promoted to a visible row is not pulled '
+   'back into the group, which would undo the split',
+   repr(_m111._playlist_url_mirrors.get(_A111)))
+
+_m111 = _MirStub111({_A111: [_B111]}, playlist=[_A111])
+_m111._set_mirrors_for_primary(_A111, [_A111, _C111])
+report(_A111 not in _m111._playlist_url_mirrors.get(_A111, []),
+   'with a video never listed as a mirror of itself')
+
+_J111 = 'https://supjav.com/watch/12345'
+_m111 = _MirStub111({_J111: [_B111]}, playlist=[_A111])
+_m111._set_mirrors_for_primary(_A111, [_C111, _J111])
+report(all('supjav' not in p for p in
+           _m111._playlist_url_mirrors.get(_A111, [])),
+   'and a Jav aggregator page is still kept out of the mirrors, absorbed '
+   'or not', repr(_m111._playlist_url_mirrors.get(_A111)))
+
+_P111 = 'https://cdn9.example.com/p.mp4'
+_Q111 = 'https://cdn9.example.com/q.mp4'
+_m111 = _MirStub111({_A111: [_B111], _P111: [_Q111]}, playlist=[_A111])
+_m111._set_mirrors_for_primary(_A111, [_C111])
+report(_m111._playlist_url_mirrors.get(_P111) == [_Q111],
+   'and a group with nothing in common is left alone',
+   repr(_m111._playlist_url_mirrors.get(_P111)))
+
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

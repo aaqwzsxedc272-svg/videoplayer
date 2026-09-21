@@ -25224,12 +25224,59 @@ try {
             pass
         group_keys = {primary_key} | {self._mirror_path_key(path) for path in cleaned}
         group_keys.discard("")
+
+        # Fold in whatever an overlapping group already knew instead of
+        # dropping it. Writing only the new list is what lost mirrors: the
+        # old entry was deleted and replaced wholesale, so renaming a third
+        # link onto a video that already had two left that video with the
+        # one being played and the newest link and nothing else -- and
+        # joining two videos that each had two mirrors produced three, not
+        # four. An empty list still means "clear this group", which is how
+        # mirrors are promoted into playlist rows of their own.
+        absorbed = []
+        if mirrors:
+            for old_primary in list(self._playlist_url_mirrors):
+                old_values = list(self._playlist_url_mirrors.get(old_primary) or [])
+                old_keys = {self._mirror_path_key(old_primary)}
+                old_keys.update(self._mirror_path_key(path) for path in old_values)
+                old_keys.discard("")
+                if not (old_keys & group_keys):
+                    continue
+                absorbed.append(old_primary)
+                absorbed.extend(old_values)
         for old_primary in list(self._playlist_url_mirrors):
             old_keys = {self._mirror_path_key(old_primary)}
             old_keys.update(self._mirror_path_key(path) for path in self._playlist_url_mirrors.get(old_primary, []))
             old_keys.discard("")
             if old_keys & group_keys:
                 self._playlist_url_mirrors.pop(old_primary, None)
+        if absorbed:
+            # A URL that is its own visible playlist row is not a mirror.
+            # That is exactly how "split mirrors into playlist" and "promote
+            # this mirror to a row" take one away, and folding it straight
+            # back in would undo both.
+            visible_keys = {
+                self._mirror_path_key(path)
+                for path in getattr(self, 'playlist', []) or []
+            }
+            visible_keys.discard("")
+            merged = list(cleaned) + [
+                path for path in absorbed
+                if self._mirror_path_key(path) not in visible_keys
+            ]
+            cleaned = [
+                path for path in self._unique_paths(merged)
+                if self._mirror_path_key(path) != primary_key
+            ]
+            try:
+                cleaned = [
+                    path for path in cleaned
+                    if not self._is_jav_site_host(
+                        (urlparse(str(path)).netloc or '').lower()
+                    )
+                ]
+            except Exception:
+                pass
         if cleaned:
             self._playlist_url_mirrors[primary] = cleaned
 
