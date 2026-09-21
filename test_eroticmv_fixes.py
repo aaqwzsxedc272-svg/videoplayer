@@ -11264,5 +11264,148 @@ report(_out107 == (b'', 403),
 report('nginx 403' in _log107, 'with the CDN\'s own reason still attached',
    repr(_log107))
 
+# -----------------------------------------------------------------------
+# 108. The click works. A field log showed the challenge page starting to
+#      navigate the moment it was clicked -- and then the fetch dying with
+#      "Page.content: Unable to retrieve content because the page is
+#      navigating and changing the content." The wait loop called content()
+#      outside any guard, so the first exception escaped the loop and the
+#      whole fetch. The click was the fix; the loop threw it away.
+# -----------------------------------------------------------------------
+_get108 = [n for n in ast.walk(_MS_TREE) if isinstance(n, ast.FunctionDef)
+           and n.name == 'get'
+           and '_is_challenge_page' in (ast.get_source_segment(_MS_SRC, n)
+                                        or '')]
+report(bool(_get108), 'found the browser fetch that meets the challenge')
+
+_g108 = {
+    'print': print,
+    'time': time,
+    '_is_challenge_page': lambda html: 'CHALLENGE-MARKER' in (html or ''),
+    '_CHALLENGE_GRACE': 8.0,
+    '_save_storage_state': lambda *a, **k: None,
+    '_click_through_challenge': _g107['_click_through_challenge'],
+    'Optional': __import__('typing').Optional,
+}
+exec(compile(ast.Module(body=_get108, type_ignores=[]), 'nav108', 'exec'),
+     _g108)
+
+_CH108 = '<html><head><title>CHALLENGE-MARKER</title></head></html>'
+_OK108 = ('<html><body><a href="/video/gallery/1">a scene</a></body></html>')
+_NAV108 = ('Page.content: Unable to retrieve content because the page is '
+           'navigating and changing the content.')
+
+
+class _FakePage108(object):
+    """A page that refuses content() while the click's navigation runs."""
+
+    def __init__(self, raise_times):
+        self.raise_times = raise_times
+        self.content_calls = 0
+        self.clicks = []
+        self.states = []
+
+    def goto(self, url, wait_until=None, timeout=None):
+        pass
+
+    def content(self):
+        self.content_calls += 1
+        if self.content_calls == 1:
+            return _CH108
+        if self.content_calls - 1 <= self.raise_times:
+            raise RuntimeError(_NAV108)
+        return _OK108
+
+    def click(self, selector, timeout=None, force=None):
+        self.clicks.append(selector)
+
+    def wait_for_load_state(self, state, timeout=None):
+        self.states.append(state)
+
+
+class _NavStub108(object):
+    _click_through_challenge = _g107['_click_through_challenge']
+
+    def __init__(self, page):
+        self._page = page
+        self._context = None
+        self._cookie_path = 'state.json'
+
+    def _ensure_started(self):
+        pass
+
+
+def _nav_run108(raise_times):
+    page = _FakePage108(raise_times)
+    buf = _io105.StringIO()
+    with _ctx105.redirect_stdout(buf):
+        out = _g108['get'](_NavStub108(page),
+                           'https://nubiles-porn.com/video/gallery')
+    return out, page, buf.getvalue()
+
+
+_out108, _pg108, _log108 = _nav_run108(2)
+report(_out108 == _OK108,
+   'a challenge that navigates after the click is waited for instead of '
+   'being abandoned -- this is what turned four galleries into fetch errors',
+   repr(_out108)[:70])
+report(_pg108.clicks == ['body'] and _pg108.content_calls == 5,
+   'and the read is retried until the navigation lands, not given up on -- '
+   'one challenge read, two mid-navigation refusals, the page, then the '
+   'settled re-read',
+   'clicks=%r reads=%d' % (_pg108.clicks, _pg108.content_calls))
+report('the challenge cleared after the click' in _log108,
+   'and a run that got through says so, so a run that did not is visible',
+   repr(_log108[:80]))
+report('browser fetch error' not in _log108,
+   'with no fetch error reported for a page that was only mid-navigation',
+   repr(_log108[:80]))
+
+class _StuckPage108(_FakePage108):
+    """A gate that never lets go, whatever is done to it."""
+
+    def content(self):
+        self.content_calls += 1
+        return _CH108
+
+
+def _stuck_run108():
+    page = _StuckPage108(0)
+    buf = _io105.StringIO()
+    with _ctx105.redirect_stdout(buf):
+        out = _g108['get'](_NavStub108(page),
+                           'https://nubiles-porn.com/video/gallery')
+    return out, page, buf.getvalue()
+
+
+_grace_saved108 = _g108['_CHALLENGE_GRACE']
+_g108['_CHALLENGE_GRACE'] = 0.3
+_out108, _pg108, _log108 = _stuck_run108()
+_g108['_CHALLENGE_GRACE'] = _grace_saved108
+report(_out108 == _CH108,
+   'a page that never lands is still handed back rather than lost',
+   repr(_out108)[:60])
+report('browser still on the challenge page' in _log108
+       and 'browser fetch error' not in _log108,
+   'and it is reported as a challenge that did not clear, not as a crash',
+   repr(_log108[:80]))
+
+# The no-Referer retry has to say what happened either way. A retry that
+# only logs on success leaves a field log that cannot distinguish "it was
+# refused too" from "it never ran" -- and that log said neither.
+_out107, _calls107, _log107 = _bare_run107(
+    _R106(b'<html>403</html>', 403), _R106(b'<html>403</html>', 403))
+report('retried with no Referer: HTTP 403' in _log107,
+   'a refused no-Referer retry is logged, so the next field log can say '
+   'the attempt was made instead of leaving it to guesswork',
+   repr(_log107[-160:]))
+_out107, _calls107, _log107 = _bare_run107(
+    _R106(b'<html>403</html>', 403),
+    _R106(b'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nhi\n', 200))
+report('retried with no Referer: HTTP 200 -- caption body arrived'
+       in _log107,
+   'and a retry that worked says that too', repr(_log107[-160:]))
+
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
