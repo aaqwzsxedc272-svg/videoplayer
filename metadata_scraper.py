@@ -4694,6 +4694,75 @@ class MetadataScraperDialog(QDialog):
             b.setEnabled(True)
         self._log_msg(f"✗ Error: {msg}")
 
+    # ── surviving the window ──────────────────────────────────────────────────
+
+    def _detach_running_scraper(self):
+        """Let a scrape outlive the window that started it.
+
+        _open_metadata_dialog holds this dialog in a local, so closing the
+        window dropped the last reference to it and Python went on to
+        destroy a QThread that was still running -- the update stopped the
+        moment the linker was closed, part way through the networks. The
+        run is handed to the player here, the way the background updater
+        already keeps its own scrapers alive in player._bg_scrapers, and
+        the dialog's own slots are let go first so nothing emits into a
+        widget that no longer exists.
+        """
+        scraper = self._scraper
+        if scraper is None:
+            return
+        self._scraper = None
+        try:
+            running = bool(scraper.isRunning())
+        except Exception:
+            running = False
+        for sig, slot in ((scraper.signals.progress, self._log_msg),
+                          (scraper.signals.tick, self._on_tick),
+                          (scraper.signals.finished, self._on_done),
+                          (scraper.signals.error, self._on_err)):
+            try:
+                sig.disconnect(slot)
+            except Exception:
+                pass
+        if not running:
+            return
+
+        name = (self.site or {}).get("name", "metadata")
+        if not hasattr(self.player, "_bg_scrapers"):
+            self.player._bg_scrapers = []
+        self.player._bg_scrapers.append(scraper)
+
+        def _drop(_s=scraper):
+            try:
+                self.player._bg_scrapers.remove(_s)
+            except Exception:
+                pass
+
+        def _done(n, _name=name):
+            print(f"[MetadataScraper] {_name} kept running after the linker "
+                  f"closed: {n} enriched", flush=True)
+            _drop()
+
+        def _err(msg, _name=name):
+            print(f"[MetadataScraper] {_name} failed after the linker "
+                  f"closed: {msg}", flush=True)
+            _drop()
+
+        scraper.signals.finished.connect(_done)
+        scraper.signals.error.connect(_err)
+        print(f"[MetadataScraper] {name} update keeps running after the "
+              f"linker closed", flush=True)
+
+    def done(self, result):
+        # Covers the X button and Escape alike -- QDialog routes both here,
+        # and closeEvent alone misses Escape.
+        self._detach_running_scraper()
+        super().done(result)
+
+    def closeEvent(self, event):
+        self._detach_running_scraper()
+        super().closeEvent(event)
+
     # ── matching ──────────────────────────────────────────────────────────────
 
     def _candidates_for(self, raw: str, fp=None) -> list:

@@ -11407,5 +11407,141 @@ report('retried with no Referer: HTTP 200 -- caption body arrived'
    'and a retry that worked says that too', repr(_log107[-160:]))
 
 
+# -----------------------------------------------------------------------
+# 109. Closing the metadata linker used to stop the update. The dialog is
+#      a local in _open_metadata_dialog, so once exec() returned the last
+#      reference was gone and Python destroyed a QThread that was still
+#      running -- the nubiles networks were abandoned part way through.
+#      The run now belongs to the player, and nothing emits into a widget
+#      that no longer exists.
+# -----------------------------------------------------------------------
+_det109 = [n for n in ast.walk(_MS_TREE) if isinstance(n, ast.FunctionDef)
+           and n.name == '_detach_running_scraper']
+report(len(_det109) == 1, 'the linker can hand a running scrape on')
+_done109 = [n for n in ast.walk(_MS_TREE) if isinstance(n, ast.FunctionDef)
+            and n.name == 'done'
+            and '_detach_running_scraper' in (ast.get_source_segment(
+                _MS_SRC, n) or '')]
+_close109 = [n for n in ast.walk(_MS_TREE) if isinstance(n, ast.FunctionDef)
+             and n.name == 'closeEvent'
+             and '_detach_running_scraper' in (ast.get_source_segment(
+                 _MS_SRC, n) or '')]
+report(bool(_done109) and bool(_close109),
+   'and both ways out of the dialog do it -- the X button and Escape both '
+   'route through done(), which closeEvent alone would miss')
+
+_g109 = {'print': print}
+if _det109:
+    exec(compile(ast.Module(body=_det109, type_ignores=[]), 'det109', 'exec'),
+         _g109)
+# A no-op stand-in when the method is absent, so every assertion below
+# still runs against a revision that has it missing and fails on the
+# behaviour instead of aborting the whole file on a KeyError.
+_detach109 = _g109.get('_detach_running_scraper') or (lambda self: None)
+
+
+class _Sig109(object):
+    def __init__(self):
+        self.slots = []
+
+    def connect(self, slot):
+        self.slots.append(slot)
+
+    def disconnect(self, slot):
+        self.slots.remove(slot)
+
+    def emit(self, *args):
+        for slot in list(self.slots):
+            slot(*args)
+
+
+class _Scraper109(object):
+    def __init__(self, running=True):
+        self._running = running
+        self.signals = _types107.SimpleNamespace(
+            progress=_Sig109(), tick=_Sig109(),
+            finished=_Sig109(), error=_Sig109())
+
+    def isRunning(self):
+        return self._running
+
+
+class _Player109(object):
+    pass
+
+
+class _Dlg109(object):
+    def __init__(self, scraper, player):
+        self._scraper = scraper
+        self.player = player
+        self.site = {'name': 'nubiles'}
+        self.seen = []
+
+    def _log_msg(self, m):
+        self.seen.append(('log', m))
+
+    def _on_tick(self, d, t):
+        self.seen.append(('tick', d, t))
+
+    def _on_done(self, n):
+        self.seen.append(('done', n))
+
+    def _on_err(self, m):
+        self.seen.append(('err', m))
+
+
+_pl109 = _Player109()
+_sc109 = _Scraper109()
+_dg109 = _Dlg109(_sc109, _pl109)
+_sc109.signals.progress.connect(_dg109._log_msg)
+_sc109.signals.tick.connect(_dg109._on_tick)
+_sc109.signals.finished.connect(_dg109._on_done)
+_sc109.signals.error.connect(_dg109._on_err)
+
+_b109 = _io105.StringIO()
+with _ctx105.redirect_stdout(_b109):
+    _detach109(_dg109)
+report(_dg109._scraper is None,
+   'closing the linker lets go of the scrape instead of taking it down')
+report(getattr(_pl109, '_bg_scrapers', None) == [_sc109],
+   'and the player holds the thread, which is the only thing keeping a '
+   'parentless QThread alive once the dialog is gone',
+   repr(getattr(_pl109, '_bg_scrapers', None)))
+report('keeps running after the linker closed' in _b109.getvalue(),
+   'and says so, so a run that was abandoned is not silent about it',
+   repr(_b109.getvalue()[:70]))
+
+with _ctx105.redirect_stdout(_io105.StringIO()):
+    _sc109.signals.progress.emit('halfway through brattysis')
+    _sc109.signals.tick.emit(4, 10)
+report(_dg109.seen == [],
+   'with the dialog\'s own slots let go first, so nothing emits into a '
+   'widget that no longer exists', repr(_dg109.seen))
+
+_b109 = _io105.StringIO()
+with _ctx105.redirect_stdout(_b109):
+    _sc109.signals.finished.emit(37)
+report('kept running after the linker closed: 37 enriched'
+       in _b109.getvalue(),
+   'and the run still reports what it finished with',
+   repr(_b109.getvalue()[:90]))
+report(getattr(_pl109, '_bg_scrapers', None) == [],
+   'and is released once it is done, so finished runs do not pile up',
+   repr(getattr(_pl109, '_bg_scrapers', None)))
+
+_b109 = _io105.StringIO()
+with _ctx105.redirect_stdout(_b109):
+    _detach109(_dg109)
+report(getattr(_pl109, '_bg_scrapers', None) == [],
+   'handing it on twice does nothing the second time')
+
+_pl109b = _Player109()
+_dg109b = _Dlg109(_Scraper109(running=False), _pl109b)
+with _ctx105.redirect_stdout(_io105.StringIO()):
+    _detach109(_dg109b)
+report(not hasattr(_pl109b, '_bg_scrapers'),
+   'and a scrape that already finished is not adopted as a background one')
+
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
