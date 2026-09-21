@@ -2962,6 +2962,11 @@ class MpvMediaPlayerAdapter(QObject):
         self._duration_ms = 0
         self._network_headers = {}
         self._tls_verify = True
+        # Hosts whose certificate mpv has already rejected this session and
+        # which then played fine with the check off. Remembered so the next
+        # video from the same CDN does not have to fail all over again to
+        # find that out.
+        self._tls_untrusted_hosts = set()
         self._pending_seek_ms = None
         self._pending_video_state = None
         self._last_filter_chain = None
@@ -3639,6 +3644,28 @@ class MpvMediaPlayerAdapter(QObject):
             except Exception:
                 pass
 
+    def note_tls_untrusted_host(self, url):
+        """Remember that this URL's host failed certificate verification.
+
+        Called when a load failed on a TLS certificate error and the retry
+        with the check disabled is about to run. Returns True if a host was
+        recorded, so a caller can tell a real URL from something that had no
+        host in it at all.
+        """
+        try:
+            host = (urlparse(str(url or '')).netloc or '').lower().split('@')[-1]
+        except Exception:
+            return False
+        host = host.split(':')[0]
+        if not host:
+            return False
+        hosts = getattr(self, '_tls_untrusted_hosts', None)
+        if not isinstance(hosts, set):
+            hosts = set()
+            self._tls_untrusted_hosts = hosts
+        hosts.add(host)
+        return True
+
     def setTlsVerify(self, enabled=True):
         self._tls_verify = bool(True if enabled is None else enabled)
         self._apply_tls_verify_option()
@@ -3922,6 +3949,20 @@ class MpvMediaPlayerAdapter(QObject):
                     # even though Python urllib fetched the same host fine.
                     self._tls_verify = False
                     self._apply_tls_verify_option()
+                elif _target_host in getattr(self, '_tls_untrusted_hosts', ()):
+                    # This CDN has already failed certificate verification
+                    # once this session and played fine with the check off.
+                    # Every new video from it was paying a full failed load
+                    # plus a retry to rediscover that -- three in a row in
+                    # one field log, on three different CDNs.
+                    self._tls_verify = False
+                    self._apply_tls_verify_option()
+                    try:
+                        print(f'[PLAYBACK] certificate check off for '
+                              f'{_target_host} (already refused it this '
+                              f'session)')
+                    except Exception:
+                        pass
                 _is_fileditch_page = 'fileditch' in _target_host and 'freakingfileditch' not in _target_host
                 _query_media_name = _query_media_name_hint(target)
                 _query_points_to_stream = _query_media_name.endswith(('.m3u8', '.m3u', '.mpd'))
@@ -53174,6 +53215,10 @@ try {
         if should_retry_tls_disabled:
             state = dict(state)
             state['tls_retry_tried'] = True
+            try:
+                self.media_player.note_tls_untrusted_host(cached_url)
+            except Exception:
+                pass
             retry_state[current] = {
                 **state,
                 'window_start': window_start,

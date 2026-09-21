@@ -11543,5 +11543,93 @@ report(not hasattr(_pl109b, '_bg_scrapers'),
    'and a scrape that already finished is not adopted as a background one')
 
 
+# -----------------------------------------------------------------------
+# 110. Every stream in a field log failed its first load with a TLS
+#      certificate error and then played fine on the retry with the check
+#      off -- three videos, three CDNs, three wasted loads. The failure was
+#      recognised precisely and then forgotten, so the next video paid for
+#      it again. The host is now remembered for the session.
+# -----------------------------------------------------------------------
+_note110 = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+            and n.name == 'note_tls_untrusted_host']
+report(len(_note110) == 1, 'a CDN that refuses its certificate is remembered')
+
+_g110 = {'print': print, 'urlparse': urlparse}
+if _note110:
+    exec(compile(ast.Module(body=_note110, type_ignores=[]), 'note110',
+                 'exec'), _g110)
+_note_fn110 = _g110.get('note_tls_untrusted_host') or (lambda self, url: False)
+
+
+class _TlsStub110(object):
+    def __init__(self, with_set=True):
+        if with_set:
+            self._tls_untrusted_hosts = set()
+
+
+_st110 = _TlsStub110()
+report(_note_fn110(_st110, 'https://video-nss-h.xhcdn.com/a/b/2160p.m3u8')
+       and _st110._tls_untrusted_hosts == {'video-nss-h.xhcdn.com'},
+   'by the host that actually served it, not the page it came from',
+   repr(_st110._tls_untrusted_hosts))
+_note_fn110(_st110, 'https://hls-cdn77.xvideos-cdn.com:8443/x/y.m3u8')
+report('hls-cdn77.xvideos-cdn.com' in _st110._tls_untrusted_hosts
+       and len(_st110._tls_untrusted_hosts) == 2,
+   'with the port dropped, since the same CDN answers on more than one',
+   repr(sorted(_st110._tls_untrusted_hosts)))
+_note_fn110(_st110, 'https://user:pw@WatchPorn.to/get_file/5/x.mp4')
+report('watchporn.to' in _st110._tls_untrusted_hosts,
+   'and the credentials and case in the URL do not stop it matching',
+   repr(sorted(_st110._tls_untrusted_hosts)))
+_before110 = len(_st110._tls_untrusted_hosts)
+for _bad110 in ('', None, 'not a url', 'file:///C:/x.mp4'):
+    report(_note_fn110(_st110, _bad110) is False
+           and len(_st110._tls_untrusted_hosts) == _before110,
+       'and something with no host in it is refused rather than recorded '
+       'as an empty string that would match nothing', repr(_bad110))
+_note_fn110(_st110, 'https://video-nss-h.xhcdn.com/other.mp4')
+report(len(_st110._tls_untrusted_hosts) == _before110,
+   'and remembering the same CDN twice does not grow the list')
+
+_st110b = _TlsStub110(with_set=False)
+report(_note_fn110(_st110b, 'https://video5.xhcdn.com/k.mp4')
+       and _st110b._tls_untrusted_hosts == {'video5.xhcdn.com'},
+   'even on a player that was built before the set existed')
+
+# Located by line number rather than by calling get_source_segment on
+# every function in a 2.8 MB file, which took the whole suite ten minutes.
+_e_off110 = SRC.find("'eporner' in _target_host")
+report(_e_off110 > 0, 'found the one place that decides verification per '
+   'stream')
+_e_line110 = SRC.count('\n', 0, _e_off110) + 1
+_enc110 = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+           and n.lineno <= _e_line110 <= (n.end_lineno or n.lineno)]
+_enc110.sort(key=lambda n: n.lineno)
+_lsrc110 = (ast.get_source_segment(SRC, _enc110[-1]) if _enc110 else '')
+report(bool(_lsrc110), 'and read the function that contains it',
+   _enc110[-1].name if _enc110 else 'none')
+
+_e110 = _lsrc110.find("'eporner' in _target_host")
+_u110 = _lsrc110.find('_tls_untrusted_hosts')
+report(-1 < _e110 < _u110,
+   'and it is consulted before the load is attempted, not after it has '
+   'already failed once')
+report('_tls_verify = False' in _lsrc110[_u110:]
+       and 'certificate check off for' in _lsrc110[_u110:],
+   'which is what stops the wasted load and its retry, and says so')
+_fail110 = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+            and n.name == '_handle_playback_load_failed']
+_fsrc110 = (ast.get_source_segment(SRC, _fail110[0])
+            if _fail110 else '')
+_r110 = _fsrc110.find('if should_retry_tls_disabled:')
+_n110 = _fsrc110.find('note_tls_untrusted_host(')
+report(-1 < _r110 < _n110,
+   'and it is recorded at the moment the certificate failure is '
+   'recognised, so only hosts that genuinely failed are trusted less')
+report('certificate verify failed' in _fsrc110
+       and 'error:0a000086' in _fsrc110,
+   'on the strength of the real mpv error, not a generic loading failed')
+
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
