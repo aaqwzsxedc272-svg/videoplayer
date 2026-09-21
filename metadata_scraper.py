@@ -733,18 +733,45 @@ class _BrowserGallerySession:
             if _is_challenge_page(html):
                 self._click_through_challenge(url)
                 deadline = time.time() + _CHALLENGE_GRACE
+                cleared = False
                 while time.time() < deadline:
                     try:
                         self._page.wait_for_load_state("networkidle",
                                                        timeout=1000)
                     except Exception:
                         pass
-                    html = self._page.content()
+                    try:
+                        html = self._page.content()
+                    except Exception:
+                        # The click started a navigation, and content()
+                        # refuses to answer while the page is moving. That
+                        # is the challenge working, not a failure. Letting
+                        # this exception escape is what turned a page that
+                        # was solving into "browser fetch error", so the
+                        # only thing the click achieved was to lose the
+                        # fetch entirely.
+                        continue
                     if not _is_challenge_page(html):
+                        cleared = True
+                        # The gate is gone but the page behind it has only
+                        # just arrived. Give it a moment and read it again,
+                        # keeping the last good HTML if that read fails.
+                        try:
+                            self._page.wait_for_load_state("networkidle",
+                                                           timeout=4000)
+                        except Exception:
+                            pass
+                        try:
+                            html = self._page.content()
+                        except Exception:
+                            pass
                         break
-                else:
+                if not cleared:
                     print(f"[Scraper] browser still on the challenge page "
                           f"after {_CHALLENGE_GRACE:.0f}s: {url}")
+                else:
+                    print(f"[Scraper] the challenge cleared after the click: "
+                          f"{url}")
                 _save_storage_state(self._context, self._cookie_path)
                 return html
             try:

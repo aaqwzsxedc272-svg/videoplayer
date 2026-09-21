@@ -8325,8 +8325,8 @@ class VideoPlayer(QMainWindow):
         self._deferred_playlist_analysis_active = False
         self._stream_resolution_cache = {}
         self._stream_resolution_failures = {}
-        print('[SUBS] caption detection build 6 (page scan, subtitle '
-              'endpoint, session warm-up, no-Referer retry)', flush=True)
+        print('[SUBS] caption detection build 7 (page scan, subtitle '
+              'endpoint, session warm-up, no-Referer retry logged)', flush=True)
         self._dood_resolve_lock = threading.Lock()
         self._playlist_url_mirrors = {}
         self._gofile_guest_token = None
@@ -30822,6 +30822,14 @@ try {
                 detail = detail or (type(exc).__name__ + ': ' + str(exc))[:160]
         if status == 403:
             bare_body, bare_status = self._fetch_caption_body_bare(url)
+            # Logged whether it worked or not. A retry that only reports
+            # success leaves a log that cannot say whether the attempt was
+            # even made, which is the same blind spot that cost several
+            # runs on the cookies.
+            print(f'[SUBS]   {str(url)[:110]} -> retried with no Referer: '
+                  f'HTTP {bare_status or 0}'
+                  f'{" -- caption body arrived" if bare_body else ""}',
+                  flush=True)
             if bare_body:
                 return bare_body, bare_status or 200
             status = bare_status or status
@@ -30851,8 +30859,6 @@ try {
                          'Accept': 'text/vtt, */*'},
                 timeout=20, allow_redirects=True)
             if response is not None and response.ok and response.content:
-                print(f'[SUBS]   {str(url)[:110]} -> fetched with no Referer '
-                      f'after the first refusal', flush=True)
                 return response.content, response.status_code
             return b'', int(getattr(response, 'status_code', 0) or 0)
         except Exception as exc:
