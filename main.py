@@ -203,7 +203,7 @@ except ImportError:
     QWebEngineScript = None
     _QT_WEBENGINE_AVAILABLE = False
 import xml.etree.ElementTree as ET
-from urllib.parse import unquote, urlparse, urljoin, urlunparse
+from urllib.parse import unquote, urlparse, urljoin, urlunparse, urlsplit
 from html import unescape as html_unescape
 from concurrent.futures import ThreadPoolExecutor
 # Force Python to ignore any stale compiled cache for keybindings_dialog
@@ -215,7 +215,7 @@ for _f in _kb_pyc.glob('keybindings_dialog*.pyc') if _kb_pyc.exists() else []:
 from keybindings_dialog import KeybindingsEditorDialog
 from settings_dialog import SettingsDialog
 from metadata_scraper import (init_metadata_scraper, _metadata_context_menu_hook,
-                               _meta_norm_path)
+                               _meta_norm_path, preview_info_for_path)
 import socket
 import http.server
 import threading
@@ -241,12 +241,397 @@ def _ftp_url_for_native_client(url_text):
     except Exception:
         return str(url_text or '')
 
+def _ftp_remote_path_from_url(url_text):
+    """The phone-side path an FTP URL refers to, including anything after a '#'.
+
+    Phone filenames legitimately contain a hash -- '#11-(16)Prologue 1
+    (LUCIA).mp4' is a real one -- and _ftp_url_for_native_client deliberately
+    unescapes the path so ffmpeg can RETR it. urlsplit then reads that '#' as
+    the start of a fragment and hands back the directory instead of the file,
+    so the playback proxy asked the phone for a folder and the video never
+    played while the same file played fine from a local disk. The same happens
+    to a '?' one level up, which urlsplit reads as a query. FTP has neither
+    syntax, so whatever follows either delimiter belongs to the path.
+    """
+    parsed = urlsplit(str(url_text or ''))
+    path = unquote(parsed.path or '')
+    if parsed.query:
+        path = path + '?' + parsed.query
+    if parsed.fragment:
+        path = path + '#' + parsed.fragment
+    return path
+
+
+# A QMenu is exactly as wide as its longest item, and the fullscreen overlay
+# panel is too, so a single long recent-file name stretched the Recent Files
+# list from edge to edge of the screen. Neither will wrap on its own, so the
+# break is made here.
+_MENU_LABEL_WRAP_WIDTH = 44
+_MENU_LABEL_WRAP_MAX_LINES = 3
+
+
+def _wrap_menu_label(text, width=None, max_lines=None):
+    """Break a long menu label over lines instead of over the screen.
+
+    QMenu draws an item on one line and measures itself against the longest
+    of them, so a long name widens the whole submenu; nothing in QAction
+    makes it wrap. Returns *text* untouched when it already fits, and
+    otherwise the same words split at spaces -- inside a word only when a
+    single token is longer than a line -- with an ellipsis on the last line
+    if the name does not fit in *max_lines* of them.
+    """
+    text = str(text or '')
+    # Not `or`: a caller passing 0 would silently get the default back.
+    w = _MENU_LABEL_WRAP_WIDTH if width is None else int(width)
+    limit = _MENU_LABEL_WRAP_MAX_LINES if max_lines is None else int(max_lines)
+    limit = max(1, limit)
+    if w < 1 or len(text) <= w:
+        return text
+    lines = []
+    for para in text.split('\n'):
+        cur = ''
+        for word in para.split():
+            while len(word) > w:
+                if cur:
+                    lines.append(cur)
+                    cur = ''
+                lines.append(word[:w])
+                word = word[w:]
+            if not word:
+                continue
+            if not cur:
+                cur = word
+            elif len(cur) + 1 + len(word) <= w:
+                cur = cur + ' ' + word
+            else:
+                lines.append(cur)
+                cur = word
+        if cur:
+            lines.append(cur)
+    if not lines:
+        return text
+    if len(lines) <= limit:
+        return '\n'.join(lines)
+    kept = lines[:limit]
+    kept[-1] = kept[-1][:w - 1] + '\u2026'
+    return '\n'.join(kept)
+
+
+class _WrappedMenuItemHover(QObject):
+    """Keeps a menu's highlight in step with a wrapping item.
+
+    A menu highlights whatever item it believes the pointer is on, but a
+    pointer over a QWidgetAction's widget is inside that widget: the menu
+    never sees the move, so it leaves the item it highlighted before lit
+    next to the one now under the mouse (QTBUG-10605). The label paints its
+    own highlight; this filter tells the menu which action is current at
+    the same moment, and QMenuPrivate::setCurrentAction repaints the rect
+    of the action it is replacing -- which is what turns the stale
+    highlight off. Qt clears its own highlight the same way, with
+    setActiveAction(0) from QMenu::leaveEvent.
+    """
+
+    def __init__(self, menu, action, parent=None):
+        super().__init__(parent)
+        self._wrap_menu = menu
+        self._wrap_action = action
+
+    def eventFilter(self, obj, event):
+        try:
+            if event.type() == QEvent.Type.Enter:
+                menu = self._wrap_menu
+                if menu is not None and self._wrap_action is not None:
+                    menu.setActiveAction(self._wrap_action)
+        except Exception:
+            pass
+        # Never swallow the event: the label still needs the Enter, and the
+        # press still has to reach the menu to trigger the action.
+        return False
+
+
+# A caption file the player can read as-is.
+_CAPTION_FILE_EXTS = ('vtt', 'srt', 'ass', 'ssa')
+
+# Path fragments that mark a URL as the place the caption TRACKS are listed
+# rather than a caption file itself. A site with auto-generated and machine
+# translated captions puts no .vtt in the page at all -- it hands the player
+# one of these and the browser fetches the tracks from it. That is why a scan
+# of the page for caption files comes back empty on exactly those sites.
+_SUB_ENDPOINT_MARKERS = (
+    'subtitle', 'captions', 'caption', 'timedtext', 'closedcaption', 'subtit',
+)
+
+_SUB_URL_KEYS = ('url', 'src', 'file', 'path', 'href', 'link', 'uri', 'data')
+_SUB_LANG_KEYS = ('lang', 'language', 'srclang', 'locale', 'code', 'iso',
+                  'label', 'name', 'title')
+# Marks a track as machine made rather than authored, so it can be listed
+# after a human one and labelled for what it is.
+_SUB_AUTO_MARKERS = ('auto', 'generated', 'machine', 'translated', 'asr')
+
+# Only real language codes are accepted as one, so a path segment like
+# "embed" or "json" never ends up on screen as a language name.
+_SUB_LANG_CODES = frozenset((
+    'en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'ja', 'zh', 'ko', 'ar', 'nl',
+    'pl', 'tr', 'sv', 'no', 'da', 'fi', 'cs', 'hu', 'ro', 'el', 'he', 'th',
+    'vi', 'id', 'hi', 'uk', 'bg', 'hr', 'sk', 'sl', 'sr', 'ca', 'et', 'lv',
+    'lt', 'ms', 'fa', 'ur', 'bn', 'ta', 'af', 'is', 'sq', 'mk', 'bs', 'ka',
+    'hy', 'kk', 'uz', 'mn', 'ne', 'si', 'km', 'lo', 'my', 'sw', 'und',
+))
+
+
+def _caption_ext_of(url):
+    """'vtt' for a caption URL, '' for anything the player cannot read."""
+    try:
+        path = urlsplit(str(url or '')).path or ''
+    except Exception:
+        path = ''
+    if not path:
+        path = str(url or '').split('?', 1)[0].split('#', 1)[0]
+    return os.path.splitext(path)[1].lstrip('.').lower()
+
+
+def _lang_from_url(url):
+    """The language a caption URL states about itself, or ''.
+
+    Reads ?lang=fr, a .../fr/... segment and x.fr.vtt alike, and only ever
+    returns a code that is actually a language. A filename can carry more
+    than one code -- xhamster calls them sw_en_1.vtt, where "sw" is a prefix
+    and "en" is the language -- so the token nearest the extension wins.
+    """
+    text = str(url or '').lower()
+    match = re.search(
+        r'[?&](?:lang|language|locale|hl|sub_?lang)=([a-z]{2,3})', text)
+    if match and match.group(1) in _SUB_LANG_CODES:
+        return match.group(1)
+    try:
+        path = urlsplit(text).path or text
+    except Exception:
+        path = text
+    stem = os.path.splitext(os.path.basename(path))[0]
+    tokens = [t for t in re.split(r'[^a-z]+', stem) if t]
+    for token in reversed(tokens):
+        if token in _SUB_LANG_CODES:
+            return token
+    for segment in reversed([s for s in path.split('/') if s]):
+        if segment in _SUB_LANG_CODES:
+            return segment
+    return ''
+
+
+# Markup worth keeping when a page advertises captions the app could not turn
+# into a track. These lines are the evidence for why: they show whether the
+# page names a caption file at all, and if not, what it hands the player
+# instead.
+_SUB_REPORT_KEYWORDS = (
+    'subtitle', 'caption', 'timedtext', '.vtt', '.srt', '.ass', '<track',
+    'srclang', 'webvtt',
+)
+
+
+def _subtitle_page_fragments(html, limit=60):
+    """The subtitle-bearing lines of a page, for subtitles_debug.txt."""
+    fragments = []
+    seen = set()
+    text = str(html or '').replace('\r\n', '\n').replace('\r', '\n')
+    for line in text.split('\n'):
+        low = line.lower()
+        hits = [k for k in _SUB_REPORT_KEYWORDS if k in low]
+        if not hits:
+            continue
+        piece = line.strip()
+        if len(piece) > 400:
+            # A minified line can run to tens of thousands of characters.
+            # Keep the neighbourhood of the keyword, not the whole line.
+            at = low.find(hits[0])
+            piece = piece[max(0, at - 160):at + 240].strip()
+        if not piece or piece in seen:
+            continue
+        seen.add(piece)
+        fragments.append(piece)
+        if len(fragments) >= max(1, int(limit or 1)):
+            break
+    return fragments
+
+
+def _subtitle_endpoint_candidates(html, page_url='', limit=4):
+    """URLs in *html* that list caption tracks rather than being one.
+
+    Nothing here knows a site: any quoted http(s) URL with a subtitle marker
+    in it and no caption extension of its own qualifies, so a site that
+    serves its auto captions from its own endpoint is found by the same rule
+    as any other. Same-host candidates come first, because those are the
+    ones the page is actually talking to.
+    """
+    text = str(html or '')
+    if not text:
+        return []
+    lowered = text.lower()
+    if not any(m in lowered for m in _SUB_ENDPOINT_MARKERS):
+        return []
+    try:
+        page_host = (urlparse(str(page_url or '')).netloc or '').lower()
+    except Exception:
+        page_host = ''
+    same_host = []
+    other_host = []
+    seen = set()
+    for match in re.finditer(r'["\']([^"\'\s<>]{6,600})["\']', text):
+        raw = match.group(1)
+        low = raw.lower()
+        if not any(m in low for m in _SUB_ENDPOINT_MARKERS):
+            continue
+        url = html_unescape(raw).replace('\\/', '/')
+        if '/' not in url:
+            # Not a URL or a path. kind="captions" and a subtitles: config key
+            # both land here, and joining either onto the page URL invents an
+            # endpoint that was never in the page.
+            continue
+        if url.startswith('//'):
+            url = 'https:' + url
+        elif not url.lower().startswith('http'):
+            if not str(page_url or ''):
+                continue
+            try:
+                url = urljoin(str(page_url), url)
+            except Exception:
+                continue
+        if _caption_ext_of(url) in _CAPTION_FILE_EXTS:
+            # A caption file. The scan of the page for those already has it.
+            continue
+        try:
+            host = (urlparse(url).netloc or '').lower()
+        except Exception:
+            continue
+        if not host:
+            continue
+        key = url.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        (same_host if host == page_host else other_host).append(url)
+    return (same_host + other_host)[:max(1, int(limit or 1))]
+
+
+def _subtitle_tracks_from_payload(payload, base_url=''):
+    """Pull caption tracks out of a subtitle-list payload.
+
+    Every site shapes this differently -- a list of objects, a dict keyed by
+    language, tracks nested under a player config -- so nothing here knows a
+    site. Any dict that carries a caption URL is a track, wherever in the
+    document it sits; the language comes from a language-ish key beside it,
+    or failing that from the URL itself.
+    """
+    tracks = []
+    seen = set()
+
+    def _lang_of(node):
+        for key in _SUB_LANG_KEYS:
+            value = node.get(key)
+            if not isinstance(value, str):
+                continue
+            value = value.strip()
+            if not value:
+                continue
+            head = re.split(r'[^A-Za-z]+', value.lower())[0]
+            if head in _SUB_LANG_CODES:
+                return head
+        return ''
+
+    def _auto_of(node):
+        blob = ' '.join(
+            str(v) for v in list(node.keys()) + list(node.values())
+            if isinstance(v, (str, bool, int, float)))
+        blob = blob.lower()
+        return any(m in blob for m in _SUB_AUTO_MARKERS)
+
+    def _emit(url, lang='', name='', automatic=False):
+        if not isinstance(url, str):
+            return
+        candidate = url.replace('\\/', '/').strip()
+        if not candidate:
+            return
+        if candidate.startswith('//'):
+            candidate = 'https:' + candidate
+        elif not candidate.lower().startswith('http'):
+            if not base_url:
+                return
+            try:
+                candidate = urljoin(base_url, candidate)
+            except Exception:
+                return
+        ext = _caption_ext_of(candidate)
+        if ext not in _CAPTION_FILE_EXTS:
+            return
+        key = (str(lang or '').lower(), candidate.lower())
+        if key in seen:
+            return
+        seen.add(key)
+        tracks.append({
+            'url': candidate,
+            'lang': str(lang or '').strip() or _lang_from_url(candidate) or 'und',
+            'ext': ext,
+            'name': str(name or '').strip(),
+            'automatic': bool(automatic),
+        })
+
+    def _walk(node, depth=0):
+        if depth > 8:
+            return
+        if isinstance(node, dict):
+            lang = _lang_of(node)
+            auto = _auto_of(node)
+            label = ''
+            for key in ('label', 'name', 'title'):
+                value = node.get(key)
+                if isinstance(value, str) and value.strip():
+                    label = value.strip()
+                    break
+            for key in _SUB_URL_KEYS:
+                _emit(node.get(key), lang, label, auto)
+            for value in node.values():
+                if isinstance(value, str):
+                    if _caption_ext_of(value) in _CAPTION_FILE_EXTS:
+                        _emit(value, lang, '', auto)
+                elif isinstance(value, (dict, list)):
+                    _walk(value, depth + 1)
+        elif isinstance(node, list):
+            for value in node:
+                _walk(value, depth + 1)
+
+    _walk(payload)
+    return tracks
+
+
 # ─── Supported format constants (add new formats here) ───────────────────────
 IMAGE_EXTENSIONS = (
     '.jpg', '.jpeg', '.png', '.gif', '.bmp',
     '.webp', '.avif', '.jxl', '.heic', '.heif',
     '.tiff', '.tif', '.ico', '.svg',
 )
+def _ext_probe_path(p):
+    """The slice of a path or URL that a file-extension test may look at.
+
+    A stream URL's QUERY STRING is not its filename. A doodstream playlist
+    row is 'https://playmogo.com/e/<id>?c_poster=...cover-player.jpg' -- it
+    ends in .jpg, so every bare endswith(IMAGE_EXTENSIONS) test called that
+    VIDEO an image. One wrong boolean, six symptoms: the arrow keys walked
+    the playlist instead of seeking, a side-click jumped rows, the
+    end-of-stream stall watchdog stood down, near-end auto-advance was
+    cancelled, and the title bar said "Now Viewing".
+
+    Local paths keep their literal '?' and '#' -- both are legal filename
+    characters on Windows and appear on FTP shares -- so only real URLs are
+    split. phone:// is deliberately not split for the same reason.
+    """
+    s = str(p or '')
+    if s.lower().startswith(('http://', 'https://', 'ftp://', 'ftps://')):
+        try:
+            return urlsplit(s).path or s
+        except Exception:
+            return s
+    return s
+
+
 VIDEO_EXTENSIONS = (
     '.mp4', '.mkv', '.avi', '.mov', '.wmv',
     '.flv', '.webm', '.m4v', '.mpg', '.mpeg',
@@ -1792,7 +2177,13 @@ class DraggableTableWidget(QTableWidget):
         # Enable context menu
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
-    
+
+        # Mouse tracking stays on so the player's eventFilter sees hover
+        # moves; the hover card itself belongs to the player, not to this
+        # widget, and it is the one that consults the metadata linker.
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
+
     def show_context_menu(self, position):
         """Show right-click context menu"""
         if not self.parent_player:
@@ -1890,7 +2281,11 @@ class DraggableTableWidget(QTableWidget):
         recent_files_menu = menu.addMenu("Recent Files")
         if hasattr(self.parent_player, 'recent_files') and self.parent_player.recent_files:
             for file_path in self.parent_player.recent_files[:10]:
-                action = recent_files_menu.addAction(self.parent_player._get_playlist_name_for_path(file_path))
+                _rf_name = self.parent_player._get_playlist_name_for_path(file_path)
+                if hasattr(pp, '_add_wrapped_menu_action'):
+                    action = pp._add_wrapped_menu_action(recent_files_menu, _rf_name)
+                else:
+                    action = recent_files_menu.addAction(_rf_name)
                 action.setData(file_path)
                 action.triggered.connect(lambda checked, path=file_path: self.parent_player.load_recent_file(path))
         else:
@@ -1901,7 +2296,11 @@ class DraggableTableWidget(QTableWidget):
         recent_playlists_menu = menu.addMenu("Recent Playlists")
         if hasattr(self.parent_player, 'recent_playlists') and self.parent_player.recent_playlists:
             for file_path in self.parent_player.recent_playlists[:10]:
-                action = recent_playlists_menu.addAction(os.path.basename(file_path))
+                _rp_name = os.path.basename(file_path)
+                if hasattr(pp, '_add_wrapped_menu_action'):
+                    action = pp._add_wrapped_menu_action(recent_playlists_menu, _rp_name)
+                else:
+                    action = recent_playlists_menu.addAction(_rp_name)
                 action.setData(file_path)
                 action.triggered.connect(lambda checked, path=file_path: self.parent_player.load_recent_playlist(path))
         else:
@@ -2240,7 +2639,7 @@ class ClickableGraphicsView(QGraphicsView):
             # Side-click navigation: ONLY for single images (not videos, CBZ, or Read Mode)
             p = self.parent_player
             current = getattr(p, 'current_file', '') or ''
-            is_single_image = (current.lower().endswith(IMAGE_EXTENSIONS)
+            is_single_image = (_ext_probe_path(current).lower().endswith(IMAGE_EXTENSIONS)
                               and not getattr(p, 'is_cbz_active', False)
                               and not getattr(p, 'read_mode', False))
             
@@ -2992,6 +3391,90 @@ class MpvMediaPlayerAdapter(QObject):
         if mirror_strategy_changed and self._pending_video_state:
             self._apply_pending_video_state()
 
+    # mpv happily opens a single still image and reports it as the video
+    # track. Inside an HLS stream that is never the film: these CDNs ship
+    # their segments behind a PNG wrapper (see _unwrap_png_wrapped_media),
+    # and when playback bypasses the proxy mpv decodes the wrapper instead
+    # of the media.
+    _IMAGE_VIDEO_CODECS = ('png', 'jpeg', 'jpg', 'bmp', 'gif', 'webp', 'tiff')
+
+    def _still_image_video_signature(self, codec, width, height, source=''):
+        """(is_still_image, reason) for an mpv video track.
+
+        Deliberately narrow: a real film must never be called an image.
+        'mjpeg' is absent on purpose - genuine old MJPEG .avi/.mov video
+        uses it - and a local image the user opened is excluded, since
+        showing it is exactly right. Only a still-image codec on a REMOTE
+        source counts, which is the shape the field log showed:
+        'codec=PNG (Portable Network Graphics)' at 0x0 with fps 0.00 on
+        audinifer's master.m3u8, held for the playlist's whole two-hour
+        claim until the end-of-stream watchdog advanced the row.
+        """
+        codec = str(codec or '').strip().lower()
+        source = str(source or '').strip()
+        if not codec or not source:
+            return False, ''
+        low = source.lower()
+        if not (low.startswith('http://') or low.startswith('https://')):
+            return False, ''
+        if _ext_probe_path(low).endswith(IMAGE_EXTENSIONS):
+            return False, ''
+        try:
+            width = int(width or 0)
+        except Exception:
+            width = 0
+        try:
+            height = int(height or 0)
+        except Exception:
+            height = 0
+        # Compare the codec ID exactly, never as a substring: 'jpeg' is
+        # contained in 'mjpeg', and old MJPEG .avi/.mov files are real video.
+        # mpv reports 'PNG (Portable Network Graphics)', so take the leading
+        # word as the ID.
+        # maxsplit must be a KEYWORD: passing it positionally is a
+        # DeprecationWarning on Python 3.13+, which the field console
+        # duly printed on every single file load.
+        codec_id = re.split(r'[\s(]', codec, maxsplit=1)[0].strip().lower()
+        if codec_id in self._IMAGE_VIDEO_CODECS:
+            # ...and there is no real frame behind it.
+            if width <= 0 or height <= 0:
+                return True, f'codec={codec} dims={width}x{height}'
+        return False, ''
+
+    def _report_still_image_stream(self):
+        """Log, once per source, that mpv is showing a single image where a
+        film should be. This is the diagnostic that decides the next move:
+        if the local proxy is stripping PNG wrappers correctly this never
+        fires, and if it does fire the segments are genuine decoy images
+        rather than wrapped media - a different bug entirely."""
+        try:
+            source = ''
+            try:
+                source = str(self._source.toString() or '')
+            except Exception:
+                source = ''
+            codec = self._get_mpv_property('video-codec', '') or ''
+            width = self._get_mpv_property('width', 0) or 0
+            height = self._get_mpv_property('height', 0) or 0
+            is_image, reason = self._still_image_video_signature(
+                codec, width, height, source)
+            if not is_image:
+                return
+            seen = getattr(self, '_still_image_stream_logged', None)
+            if not isinstance(seen, set):
+                seen = set()
+                self._still_image_stream_logged = seen
+            if source in seen:
+                return
+            seen.add(source)
+            duration = int(self._get_mpv_property('duration', 0) or 0)
+            print(f'[PLAYBACK][STILL_IMAGE_STREAM] mpv decoded a single image, '
+                  f'not a film ({reason}, claimed duration={duration} ms) - '
+                  f'the segments reached mpv un-stripped: {source[:170]}',
+                  flush=True)
+        except Exception:
+            pass
+
     def _right_angle_rotation(self, rotation):
         try:
             normalized = float(rotation or 0.0) % 360.0
@@ -3204,6 +3687,10 @@ class MpvMediaPlayerAdapter(QObject):
             self._apply_pending_video_state()
             self._apply_adaptive_performance_profile()
             QTimer.singleShot(250, self._apply_adaptive_performance_profile)
+            # Late enough that video-codec/width have settled, early enough
+            # to be useful: a still image must be named before the row sits
+            # on it for the duration the playlist claims.
+            QTimer.singleShot(700, self._report_still_image_stream)
 
         @self._mpv.event_callback('end-file')
         def _end_file(_event):
@@ -6636,6 +7123,15 @@ class RemoteDownloadWorker(QThread):
 
 
 class VideoPlayer(QMainWindow):
+    # How long the scene cover stays on screen in the hover card before the
+    # clip takes over. Buffering runs during the hold, so this is purely how
+    # long the cover is visible, not added latency before the clip.
+    HOVER_COVER_HOLD_MS = 1000
+    # Card width. Fixed rather than derived from the pixmap, so positioning
+    # never depends on what has been painted yet.
+    HOVER_PREVIEW_W = 340
+    HOVER_PREVIEW_MEDIA_H = 190
+
     video_info_updated = pyqtSignal(str, float, float)
     stream_resolved = pyqtSignal(str, object)
     remote_download_variants_ready = pyqtSignal(str, object)
@@ -7348,11 +7844,19 @@ class VideoPlayer(QMainWindow):
         self.hover_preview_layout.setSpacing(6)
         self.hover_preview_image = QLabel(self.hover_preview)
         self.hover_preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hover_preview_image.setMinimumWidth(220)
+        self.hover_preview_image.setFixedWidth(self.HOVER_PREVIEW_W - 16)
         self.hover_preview_text = QLabel(self.hover_preview)
         self.hover_preview_text.setWordWrap(True)
         self.hover_preview_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self.hover_preview_text.setMaximumWidth(280)
+        self.hover_preview_text.setFixedWidth(self.HOVER_PREVIEW_W - 16)
+        # The scene's own clip, played inside this same card rather than in a
+        # second popup. Hidden until the media is buffered, so the cover is
+        # what you see first.
+        self.hover_preview_video = QVideoWidget(self.hover_preview)
+        self.hover_preview_video.setFixedSize(self.HOVER_PREVIEW_W - 16,
+                                              self.HOVER_PREVIEW_MEDIA_H)
+        self.hover_preview_video.hide()
+        self.hover_preview_layout.addWidget(self.hover_preview_video)
         self.hover_preview_layout.addWidget(self.hover_preview_image)
         self.hover_preview_layout.addWidget(self.hover_preview_text)
         self.hover_preview.hide()
@@ -7371,6 +7875,40 @@ class VideoPlayer(QMainWindow):
         self._hover_preview_anchor_global_pos = None
         self._hover_preview_target_global_rect = None
         self._hover_preview_display_text = ""
+        self._hover_clip_player = None
+        self._hover_clip_timer = QTimer(self)
+        self._hover_clip_timer.setSingleShot(True)
+        self._hover_clip_timer.setInterval(6000)
+        self._hover_clip_timer.timeout.connect(self._abandon_hover_clip)
+        # Runs after the swap: the clip either plays, or the cover comes back.
+        self._hover_clip_watchdog = QTimer(self)
+        self._hover_clip_watchdog.setSingleShot(True)
+        self._hover_clip_watchdog.setInterval(2500)
+        self._hover_clip_watchdog.timeout.connect(self._check_hover_clip_started)
+        # The actual loop. EndOfMedia is not guaranteed to arrive, so the
+        # position is watched instead of waiting on a signal.
+        self._hover_clip_repeat_timer = QTimer(self)
+        self._hover_clip_repeat_timer.setInterval(400)
+        self._hover_clip_repeat_timer.timeout.connect(self._on_hover_clip_repeat_tick)
+        self._hover_clip_last_pos = -1
+        self._hover_clip_stall = 0
+        self._hover_clip_wanted = False
+        self._hover_clip_ready = False
+        # The cover is held on screen for this long before the clip takes
+        # over. Buffering starts immediately, so the swap is not delayed by
+        # the hold -- the hold is purely so the cover is actually seen.
+        self._hover_cover_hold_timer = QTimer(self)
+        self._hover_cover_hold_timer.setSingleShot(True)
+        self._hover_cover_hold_timer.setInterval(self.HOVER_COVER_HOLD_MS)
+        self._hover_cover_hold_timer.timeout.connect(self._swap_to_hover_clip)
+        # preview_info_for_path kicks off the cover download on the first
+        # hover of a row. Without this the card stays empty until you hover
+        # the same row a second time, so poll briefly for the file to land.
+        self._hover_cover_poll_timer = QTimer(self)
+        self._hover_cover_poll_timer.setInterval(400)
+        self._hover_cover_poll_timer.timeout.connect(self._poll_hover_cover)
+        self._hover_cover_poll_path = None
+        self._hover_cover_poll_tries = 0
 
         self.pdf_edge_switch_left_btn = QPushButton("< AVN", self)
         self.pdf_edge_switch_right_btn = QPushButton("AVN >", self)
@@ -7787,6 +8325,8 @@ class VideoPlayer(QMainWindow):
         self._deferred_playlist_analysis_active = False
         self._stream_resolution_cache = {}
         self._stream_resolution_failures = {}
+        print('[SUBS] caption detection build 7 (page scan, subtitle '
+              'endpoint, session warm-up, no-Referer retry logged)', flush=True)
         self._dood_resolve_lock = threading.Lock()
         self._playlist_url_mirrors = {}
         self._gofile_guest_token = None
@@ -8696,9 +9236,9 @@ class VideoPlayer(QMainWindow):
             return "Local Chapter"
         if lower.endswith('.pdf'):
             return "PDF"
-        if lower.endswith(AUDIO_EXTENSIONS):
+        if _ext_probe_path(lower).endswith(AUDIO_EXTENSIONS):
             return "Audio"
-        if lower.endswith(IMAGE_EXTENSIONS):
+        if _ext_probe_path(lower).endswith(IMAGE_EXTENSIONS):
             return "Image"
         if lower.endswith(ARCHIVE_EXTENSIONS):
             return "Archive"
@@ -8781,7 +9321,7 @@ class VideoPlayer(QMainWindow):
             kind = "Now Reading"
         elif lower.endswith(AUDIO_EXTENSIONS):
             kind = "Now Listening"
-        elif lower.endswith(IMAGE_EXTENSIONS):
+        elif _ext_probe_path(lower).endswith(IMAGE_EXTENSIONS):
             kind = "Now Viewing"
         else:
             kind = "Now Playing"
@@ -8832,13 +9372,29 @@ class VideoPlayer(QMainWindow):
     def _move_preview_widget(self, global_pos):
         if not hasattr(self, 'hover_preview'):
             return
+        # sizeHint, not width()/height(). Before the card has been shown once
+        # those are pre-layout values, and a height that reads too large makes
+        # both flip branches fire and clamp to (8, 8) -- the card lands in the
+        # top-left corner on the first hover and correctly on every one after.
+        # The layout can compute its hint on demand, shown or not.
+        hint = self.hover_preview.sizeHint()
+        w = int(hint.width()) or self.hover_preview.width() or self.HOVER_PREVIEW_W
+        h = int(hint.height()) or self.hover_preview.height() or 160
+        edge = 8
+        w = max(1, min(w, max(1, self.width() - 2 * edge)))
+        h = max(1, min(h, max(1, self.height() - 2 * edge)))
         local_pos = self.mapFromGlobal(global_pos)
         x = local_pos.x() + 18
         y = local_pos.y() + 18
-        if x + self.hover_preview.width() > self.width() - 8:
-            x = max(8, local_pos.x() - self.hover_preview.width() - 18)
-        if y + self.hover_preview.height() > self.height() - 8:
-            y = max(8, local_pos.y() - self.hover_preview.height() - 18)
+        if x + w > self.width() - edge:
+            x = local_pos.x() - w - 18
+        if y + h > self.height() - edge:
+            y = local_pos.y() - h - 18
+        # Clamped last and on both axes. The old max(8, ...) only ran inside
+        # the flip branches, so an overshoot parked the card at the corner
+        # instead of beside the row.
+        x = max(edge, min(x, max(edge, self.width() - w - edge)))
+        y = max(edge, min(y, max(edge, self.height() - h - edge)))
         self.hover_preview.move(x, y)
 
     def _get_preview_trigger_mode(self):
@@ -8968,8 +9524,299 @@ class VideoPlayer(QMainWindow):
         self._hover_preview_anchor_global_pos = None
         self._hover_preview_target_global_rect = QRect()
         self._hover_preview_display_text = ""
+        self._stop_metadata_hover_clip()
+        if hasattr(self, '_hover_cover_poll_timer'):
+            self._hover_cover_poll_timer.stop()
+        self._hover_cover_poll_path = None
         if hasattr(self, 'hover_preview'):
             self.hover_preview.hide()
+
+    # ── metadata cover + clip inside the hover card ──────────────────────────
+
+    def _poll_hover_cover(self):
+        """Pick up the cover the first hover started downloading."""
+        self._hover_cover_poll_tries += 1
+        path = self._hover_cover_poll_path
+        # 25 tries at 400 ms. Re-minting a dead cover costs two round trips --
+        # the watch page, then the image -- so 3 seconds was not enough for it
+        # to land. Moving the mouse away stops this anyway.
+        if not path or self._hover_cover_poll_tries > 25 or not self.hover_preview.isVisible():
+            self._hover_cover_poll_timer.stop()
+            return
+        try:
+            meta = preview_info_for_path(self, path) or {}
+        except Exception:
+            return
+        pm = self._metadata_cover_pixmap(meta)
+        if pm is None:
+            return
+        self._hover_cover_poll_timer.stop()
+        self.hover_preview_image.setPixmap(pm)
+        self.hover_preview_image.show()
+        self._refresh_hover_preview_layout()
+        self._reposition_hover_preview()
+
+    def _metadata_cover_pixmap(self, meta):
+        """The cover for a matched row, scaled to the card, or None.
+
+        Covers live in memory, not on disk -- the bytes are fetched straight
+        off the CDN when a row is first hovered. Returning None here is not a
+        failure: it just means they have not landed yet, and the poll timer
+        that starts alongside asks again shortly.
+        """
+        data = (meta or {}).get("cover_data") or b""
+        if not data:
+            return None
+        try:
+            pm = QPixmap()
+            if not pm.loadFromData(data) or pm.isNull():
+                return None
+            return self._scale_preview_pixmap(pm)
+        except Exception:
+            return None
+
+    def _ensure_hover_clip_player(self):
+        """Build the clip player lazily, so a Qt build without a multimedia
+        backend cannot take the app down at startup."""
+        if self._hover_clip_player is not None:
+            return self._hover_clip_player
+        try:
+            player = QMediaPlayer(self)
+            audio = QAudioOutput(self)
+            audio.setMuted(True)
+            audio.setVolume(0.0)
+            player.setAudioOutput(audio)
+            player.setVideoOutput(self.hover_preview_video)
+            # No setLoops(-1). The FFmpeg backend does not honour it for a
+            # remote stream, and leaving it set can swallow the EndOfMedia the
+            # restart depends on. The loop is driven from the position instead.
+            try:
+                player.setLoops(1)
+            except Exception:
+                pass
+            player.mediaStatusChanged.connect(self._on_hover_clip_status)
+            self._hover_clip_player = player
+        except Exception:
+            self._hover_clip_player = None
+        return self._hover_clip_player
+
+    def _start_metadata_hover_clip(self, meta):
+        """Cover first, then the scene's own clip if it has one.
+
+        Streamed, never downloaded. TeamSkeet's trailer_url on
+        images.psmcdn.net is unsigned and permanently public, so it plays from
+        the CDN forever. Nubiles signs its loops for about an hour, so a row
+        previews while that signature lasts and Update refreshes it; nothing is
+        ever written to disk for either. With no live URL the card stays on the
+        cover.
+        """
+        self._stop_metadata_hover_clip()
+        meta = meta or {}
+        url = str(meta.get("preview_url") or "")
+        if not url or not meta.get("preview_live"):
+            return
+        if self._ensure_hover_clip_player() is None:
+            return
+        self._hover_clip_wanted = True
+        self._hover_clip_ready = False
+        self._hover_clip_source = url
+        self._hover_clip_timer.start()
+        self._hover_cover_hold_timer.start()
+        try:
+            self._hover_clip_player.setSource(QUrl(url))
+        except Exception:
+            self._abandon_hover_clip()
+
+    def _on_hover_clip_status(self, status):
+        if not self._hover_clip_wanted:
+            return
+        try:
+            ready = (status == QMediaPlayer.MediaStatus.LoadedMedia
+                     or status == QMediaPlayer.MediaStatus.BufferedMedia)
+            bad = status == QMediaPlayer.MediaStatus.InvalidMedia
+            ended = status == QMediaPlayer.MediaStatus.EndOfMedia
+        except Exception:
+            return
+        if ready:
+            self._hover_clip_timer.stop()
+            self._hover_clip_ready = True
+            self._swap_to_hover_clip()
+        elif ended:
+            if not self._hover_clip_ready:
+                # It loaded and ran to the end while still hidden, before the
+                # cover hold was up. Take it as ready and start from the top.
+                self._hover_clip_timer.stop()
+                self._hover_clip_ready = True
+                self._swap_to_hover_clip()
+                return
+            self._restart_hover_clip()
+        elif bad:
+            self._abandon_hover_clip()
+
+    def _restart_hover_clip(self):
+        """Wind the hover clip back to the start and play it again.
+
+        The player is built with setLoops(-1), but the FFmpeg backend does not
+        honour that for a remote stream, so the clip played once and froze on
+        its last frame. The loop is driven from the status signal instead of
+        being left to a flag the backend may ignore.
+        """
+        if not (self._hover_clip_wanted and self._hover_clip_ready):
+            return
+        if self._hover_clip_player is None:
+            return
+        try:
+            self._hover_clip_player.setPosition(0)
+            self._hover_clip_player.play()
+        except Exception:
+            self._abandon_hover_clip()
+            return
+        try:
+            print("[HOVER] replaying the clip from the start ("
+                  + os.path.basename(str(
+                      getattr(self, '_hover_clip_source', '') or '')) + ")")
+        except Exception:
+            pass
+
+    def _swap_to_hover_clip(self):
+        """Cover has had its second and the clip is buffered: swap over.
+
+        Called from both sides -- the status signal and the hold timer --
+        because either can arrive last. Whichever comes second does the swap.
+        """
+        if not (self._hover_clip_wanted and self._hover_clip_ready):
+            return
+        if self._hover_cover_hold_timer.isActive():
+            return
+        self._hover_cover_poll_timer.stop()
+        self.hover_preview_image.hide()
+        self.hover_preview_video.show()
+        self._hover_clip_last_pos = -1
+        self._hover_clip_stall = 0
+        try:
+            try:
+                _dur_ms = int(self._hover_clip_player.duration() or 0)
+            except Exception:
+                _dur_ms = 0
+            print("[HOVER] clip swapped in: "
+                  + os.path.basename(str(
+                      getattr(self, '_hover_clip_source', '') or ''))
+                  + f" duration={_dur_ms} ms")
+        except Exception:
+            pass
+        try:
+            # Plain play(). Seeking here looked harmless and was not: at this
+            # point the player has parsed the header but not opened the stream,
+            # and setPosition(0) on the FFmpeg backend aborts the open --
+            # "Immediate exit requested", "partial file", "Demuxing failed" --
+            # leaving the video surface up and showing nothing. The loop is
+            # driven from EndOfMedia instead, where a seek is safe.
+            self._hover_clip_player.play()
+        except Exception:
+            self._abandon_hover_clip()
+        self._hover_clip_watchdog.start()
+        self._hover_clip_repeat_timer.start()
+
+    def _on_hover_clip_repeat_tick(self):
+        """Wind the clip back when it runs out, without waiting to be told.
+
+        EndOfMedia never arrived for the teamskeet trailers on
+        images.psmcdn.net: they played once and went quiet, and nothing
+        restarted them. Reading the position costs nothing every 400 ms and
+        does not depend on the backend emitting anything at all.
+        """
+        if not (self._hover_clip_wanted and self._hover_clip_ready):
+            self._hover_clip_repeat_timer.stop()
+            return
+        player = self._hover_clip_player
+        if player is None:
+            self._hover_clip_repeat_timer.stop()
+            return
+        try:
+            playing = (player.playbackState()
+                       == QMediaPlayer.PlaybackState.PlayingState)
+            pos = int(player.position() or 0)
+            dur = int(player.duration() or 0)
+        except Exception:
+            return
+        if not playing:
+            self._restart_hover_clip()
+            return
+        if dur > 0 and pos >= dur - 300:
+            self._restart_hover_clip()
+            return
+        if pos == self._hover_clip_last_pos:
+            # Claiming to play but the clock is not moving.
+            self._hover_clip_stall += 1
+            if self._hover_clip_stall >= 6:
+                print(f"[HOVER] clip clock stuck at {pos} ms, restarting it")
+                self._hover_clip_stall = 0
+                self._restart_hover_clip()
+                self._hover_clip_last_pos = pos
+                return
+        else:
+            self._hover_clip_stall = 0
+        self._hover_clip_last_pos = pos
+
+    def _check_hover_clip_started(self):
+        """Never leave a black rectangle where the cover was.
+
+        Swapping to the video surface hides the cover, so a clip that parses
+        its header and then fails to demux shows nothing at all. Ask whether
+        anything is actually playing, and hand the cover back if not.
+        """
+        if not (self._hover_clip_wanted and self._hover_clip_ready):
+            return
+        playing = False
+        try:
+            playing = (self._hover_clip_player is not None
+                       and self._hover_clip_player.playbackState()
+                       == QMediaPlayer.PlaybackState.PlayingState)
+        except Exception:
+            playing = False
+        if playing:
+            return
+        print("[HOVER] clip never started playing, keeping the cover instead")
+        self._abandon_hover_clip()
+
+    def _abandon_hover_clip(self):
+        """No clip: keep the cover up, which is why it is painted first."""
+        self._hover_clip_wanted = False
+        self._hover_clip_ready = False
+        self._hover_cover_hold_timer.stop()
+        self._hover_clip_timer.stop()
+        if hasattr(self, '_hover_clip_watchdog'):
+            self._hover_clip_watchdog.stop()
+        if hasattr(self, '_hover_clip_repeat_timer'):
+            self._hover_clip_repeat_timer.stop()
+        self._stop_clip_playback()
+        self.hover_preview_video.hide()
+        if self._hover_preview_frames:
+            self.hover_preview_image.show()
+
+    def _stop_clip_playback(self):
+        if self._hover_clip_player is None:
+            return
+        try:
+            self._hover_clip_player.stop()
+            self._hover_clip_player.setSource(QUrl(""))
+        except Exception:
+            pass
+
+    def _stop_metadata_hover_clip(self):
+        self._hover_clip_wanted = False
+        self._hover_clip_ready = False
+        if hasattr(self, '_hover_cover_hold_timer'):
+            self._hover_cover_hold_timer.stop()
+        if hasattr(self, '_hover_clip_timer'):
+            self._hover_clip_timer.stop()
+        if hasattr(self, '_hover_clip_watchdog'):
+            self._hover_clip_watchdog.stop()
+        if hasattr(self, '_hover_clip_repeat_timer'):
+            self._hover_clip_repeat_timer.stop()
+        self._stop_clip_playback()
+        if hasattr(self, 'hover_preview_video'):
+            self.hover_preview_video.hide()
 
     def _hide_pdf_edge_switch_buttons(self):
         for btn in (
@@ -9347,7 +10194,9 @@ class VideoPlayer(QMainWindow):
     def _scale_preview_pixmap(self, pixmap):
         if pixmap.isNull():
             return pixmap
-        return pixmap.scaled(220, 160, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        return pixmap.scaled(self.HOVER_PREVIEW_W - 20, self.HOVER_PREVIEW_MEDIA_H,
+                             Qt.AspectRatioMode.KeepAspectRatio,
+                             Qt.TransformationMode.SmoothTransformation)
 
     def _extract_video_preview_frame(self, path, timestamp_seconds):
         pixmap = QPixmap()
@@ -9489,7 +10338,14 @@ class VideoPlayer(QMainWindow):
                     return None
                 remote = path[8:]  # strip phone://
                 from urllib.parse import quote
-                ftp_url = f"ftp://{user}:{pw}@{ip}:{port}/{remote.lstrip('/')}"
+                # quote was imported here and never used, so a '#' in the
+                # filename opened a fragment and everything after it -- the
+                # whole file name -- dropped off the URL.
+                _userinfo = quote(str(user or 'anonymous'), safe='')
+                if pw:
+                    _userinfo += ':' + quote(str(pw), safe='')
+                ftp_url = (f"ftp://{_userinfo}@{ip}:{port}/"
+                           f"{quote(remote.lstrip('/'), safe='/')}")
             if not self._is_ftp_url(ftp_url):
                 return None
             return self._ftp_playback_proxy_url(ftp_url)
@@ -9585,7 +10441,8 @@ class VideoPlayer(QMainWindow):
             return
 
         margins = self.hover_preview_layout.contentsMargins()
-        max_content_width = max(140, min(220, self.width() - 80))
+        max_content_width = max(140, min(self.HOVER_PREVIEW_W - 20,
+                                         self.width() - 80))
         pixmap = self.hover_preview_image.pixmap()
         image_width = 0
         if pixmap is not None and not pixmap.isNull():
@@ -9620,6 +10477,15 @@ class VideoPlayer(QMainWindow):
         if not hasattr(self, 'hover_preview'):
             return
         display_text = text or os.path.basename(str(path).rstrip('/\\'))
+        # A row the metadata linker has matched carries a cover and sometimes
+        # the scene's own clip. This decorates the existing hover card; it
+        # does not open a second popup.
+        try:
+            meta = preview_info_for_path(self, path) or {}
+        except Exception:
+            meta = {}
+        if meta.get("name"):
+            display_text = str(meta["name"])
         _path_lower = path.lower()
         is_ftp_or_phone = self._is_ftp_url(path) or str(path).startswith('phone://')
         is_video = (is_ftp_or_phone and _path_lower.endswith(VIDEO_EXTENSIONS)) or (
@@ -9628,6 +10494,9 @@ class VideoPlayer(QMainWindow):
         frames = self._hover_preview_cache.get(norm_path)
         if frames is None or not is_video:
             frames = self._load_preview_frames_for_path(path)
+        _cover62 = self._metadata_cover_pixmap(meta)
+        if _cover62 is not None:
+            frames = [_cover62] + [f for f in (frames or []) if f is not None]
         self._hover_preview_display_text = display_text
         self._hover_preview_frames = frames
         self._hover_preview_frame_index = 0
@@ -9645,7 +10514,21 @@ class VideoPlayer(QMainWindow):
         self._move_preview_widget(global_pos)
         self.hover_preview.show()
         self.hover_preview.raise_()
+        # Showing it activates the layout, so the card now has its real size.
+        # Reposition once more or the first hover keeps the pre-layout guess.
+        self._reposition_hover_preview()
         self._hover_preview_path = path
+        self._hover_cover_poll_timer.stop()
+        self._hover_cover_poll_tries = 0
+        self._hover_cover_poll_path = None
+        if _cover62 is None and (meta.get("image_live") or meta.get("can_refresh")):
+            # No cover in memory yet, and something is already fetching one --
+            # either the stored URL is still signed, or its signature died and
+            # the watch page is being re-read to mint a new one. Wait for it
+            # instead of showing nothing.
+            self._hover_cover_poll_path = path
+            self._hover_cover_poll_timer.start()
+        self._start_metadata_hover_clip(meta)
 
     def _show_pending_hover_preview(self):
         if not self._hover_preview_pending:
@@ -10308,6 +11191,10 @@ class VideoPlayer(QMainWindow):
         'ID', 'ITEM', 'LIST', 'ML', 'MP3', 'MP4', 'NET', 'ORG', 'SD', 'TV',
         'UHD', 'URL', 'VIEWKEY', 'WATCH', 'WEB', 'WEBDL', 'WEBRIP', 'WWW',
         'X264', 'X265',
+        # 'XXX' is the porn marker these release names carry, not a studio
+        # label. Every "<Site>.<date>.<title>.XXX.1080p.mp4" row matched on it,
+        # so they all shared one seen key and marking one marked the lot.
+        'XXX',
     })
 
     def _extract_jav_code(self, text):
@@ -10338,8 +11225,15 @@ class VideoPlayer(QMainWindow):
         if heyzo_match:
             return f"HEYZO-{heyzo_match.group(1)}"
 
+        # Three digits minimum. Two was enough for a site name to read as a
+        # catalogue number: every "Porn00XXX.<date>.<title>.XXX.1080p.mp4" row
+        # in a playlist produced PORN-00, so marking one porn00 row marked all
+        # of them. Real codes are three digits or more (SSIS-123, MIDE-480,
+        # HEYZO-1234); the cost of missing a rare two-digit code is one row
+        # not grouped with its duplicate, which is far cheaper than the
+        # cross-marking this caused.
         generic_match = re.search(
-            r'(?<![A-Z0-9])([A-Z]{2,6})(?:\s*[-_])?\s*(\d{2,5})(?!\d)',
+            r'(?<![A-Z0-9])([A-Z]{2,6})(?:\s*[-_])?\s*(\d{3,5})(?!\d)',
             value,
             re.IGNORECASE,
         )
@@ -10349,6 +11243,13 @@ class VideoPlayer(QMainWindow):
         prefix = str(generic_match.group(1) or '').upper()
         number = str(generic_match.group(2) or '')
         if prefix in self._JAV_CODE_PREFIX_BLACKLIST:
+            return ""
+        # The number has to be a catalogue number, not a resolution. "…XXX
+        # 1080p.mp4" yields XXX-1080, and every release named that way lands on
+        # the same key -- two unrelated bunkr links were marked together by it.
+        # Requiring the digit run to be followed by P is what tells a
+        # resolution from a real code: MIDE-480 has no trailing P.
+        if re.search(r'(?<![0-9])' + re.escape(number) + r'\s*P(?![A-Z0-9])', value):
             return ""
         return f"{prefix}-{number}"
 
@@ -12873,7 +13774,7 @@ try {
             ftp.connect(parsed.hostname, parsed.port or 21, timeout=5)
             ftp.login(unquote(parsed.username) if parsed.username else 'anonymous',
                       unquote(parsed.password) if parsed.password else '')
-            return ftp.size(unquote(parsed.path)) or 0
+            return ftp.size(_ftp_remote_path_from_url(ftp_url)) or 0
         except Exception:
             return 0
         finally:
@@ -13186,6 +14087,71 @@ try {
 
         self._restore_session_playlist(new_playlist, loaded_metadata, current_file, current_index)
 
+    def _session_resume_target(self, playlist, current_file, current_index,
+                               saved_count):
+        """Which row a restored session should resume, and why.
+
+        Returns ``(path, reason)``; ``path`` is ``None`` for an empty playlist.
+
+        ``current_index`` indexes the playlist *as it was when the player
+        closed*. By the time the rows are back on screen that shape can have
+        changed: entries missing from disk are skipped, paths are relinked
+        through the seen list, and _collapse_duplicate_url_mirrors folds
+        mirrors into a single row. Every one of those shifts the rows after it,
+        so an index that was right when it was saved now points at a different
+        file -- and that file then resumes at its own remembered position. That
+        is the "random file at a random timestamp" a restore is supposed to
+        prevent. The index is therefore only trusted when nothing changed.
+        """
+        rows = list(playlist or [])
+        if not rows:
+            return None, 'empty playlist'
+        cf = str(current_file or '').strip()
+        try:
+            idx = int(current_index or 0)
+        except Exception:
+            idx = 0
+
+        if cf and cf in rows:
+            return cf, 'exact path'
+
+        if cf:
+            # The same row can come back under a different spelling: a
+            # normalised form of the saved path, a case or separator
+            # difference on a local path, or -- the common one -- the saved
+            # row was folded into another row as one of its mirrors.
+            key = self._mirror_path_key(cf)
+            if key:
+                for row in rows:
+                    if self._mirror_path_key(row) == key:
+                        return row, 'normalised path'
+            nc = os.path.normcase(cf)
+            for row in rows:
+                if os.path.normcase(str(row)) == nc:
+                    return row, 'case-normalised path'
+            try:
+                related = list(self._mirrors_for_visible_url(cf) or [])
+            except Exception:
+                related = []
+            for row in rows:
+                if row in related:
+                    return row, 'surviving mirror row'
+
+        try:
+            unchanged = int(saved_count) == len(rows)
+        except Exception:
+            unchanged = False
+        if unchanged and 0 <= idx < len(rows):
+            return rows[idx], 'saved index, playlist shape unchanged'
+
+        for row in rows:
+            try:
+                if self._playlist_entry_available(row):
+                    return row, 'first available row'
+            except Exception:
+                continue
+        return rows[0], 'first row'
+
     def _restore_session_playlist(self, new_playlist, loaded_metadata, current_file='', current_index=0):
         """Load ``new_playlist`` items into the player, resuming at the last track."""
         if not new_playlist:
@@ -13251,13 +14217,14 @@ try {
             self.apply_playlist_filtering()
 
         # Resume at the same track that was playing when the player was closed.
-        target = None
-        if current_file and current_file in self.playlist:
-            target = current_file
-        elif 0 <= current_index < len(self.playlist):
-            target = self.playlist[current_index]
-        if target is None:
-            target = next((p for p in self.playlist if self._playlist_entry_available(p)), None)
+        target, why = self._session_resume_target(
+            self.playlist, current_file, current_index, count)
+        if why != 'exact path':
+            # Worth a line in the log: this is the difference between resuming
+            # where the user left off and opening some other file.
+            print(f"[session restore] resume: saved {current_file!r} at index "
+                  f"{current_index}, {count} item(s) saved, "
+                  f"{len(self.playlist)} on screen -> {target!r} ({why})")
         if target:
             self.set_media(target)
 
@@ -14251,6 +15218,16 @@ try {
         match = re.search(r'https?://[^\s<>"]+', cleaned, re.IGNORECASE)
         if match:
             cleaned = match.group(0).strip()
+        # A protocol-relative URL — what an iframe src almost always carries —
+        # is recognised by nothing downstream: _is_remote_url returns False, so
+        # the playlist treats the value as a local file and Windows renders
+        # `\\cdn.example\x.mp4` as a UNC path, which is how an advert iframe
+        # from sextb.net showed up as a USB/network file. A leading `//` is
+        # never a Windows path (those use backslashes), so this is unambiguous.
+        # Done after the http(s) extraction above so a string that already
+        # contains a full URL is not touched.
+        if cleaned.startswith('//') and len(cleaned) > 2 and cleaned[2] not in '/ \\':
+            cleaned = 'https:' + cleaned
         # Also trim any leftover one-sided wrapper characters. This covers URLs
         # copied from chat/code formatting where only one edge survives token
         # extraction, e.g. https://host/video.m3u8`
@@ -17940,10 +18917,10 @@ try {
             return
         self.recent_menu.clear()
         for file_path in self.recent_files:
-            action = QAction(self._get_playlist_name_for_path(file_path), self)
+            action = self._add_wrapped_menu_action(
+                self.recent_menu, self._get_playlist_name_for_path(file_path))
             action.setData(file_path)
             action.triggered.connect(lambda checked, path=file_path: self.load_recent_file(path))
-            self.recent_menu.addAction(action)
             
     def update_recent_playlists_menu(self):
         """Update recent playlists menu"""
@@ -17951,10 +18928,10 @@ try {
             return
         self.recent_playlists_menu.clear()
         for file_path in self.recent_playlists:
-            action = QAction(os.path.basename(file_path), self)
+            action = self._add_wrapped_menu_action(
+                self.recent_playlists_menu, os.path.basename(file_path))
             action.setData(file_path)
             action.triggered.connect(lambda checked, path=file_path: self.load_recent_playlist(path))
-            self.recent_playlists_menu.addAction(action)
 
     def load_recent_file(self, file_path):
         """Load a file from recent files menu"""
@@ -18210,6 +19187,17 @@ try {
             content = content.replace('\r\n', '\n').replace('\r', '\n')
             # Normalize malformed SRT arrows (e.g., "->", "- >", "-- >", "- ->")
             content = re.sub(r'-\s*-?\s*>', '-->', content)
+
+            # Checked here rather than at download time so that a track restored
+            # from a saved mapping gets the same treatment as a freshly fetched
+            # one -- a thumbnail VTT already written into subtitle_mappings.json
+            # would otherwise keep coming back.
+            if not self._subtitle_content_is_captions(content):
+                print(f"[SUBTITLE][REJECTED] cue text is not captions, "
+                      f"ignoring: {srt_path}")
+                self.subtitles = []
+                self._invalidate_subtitle_runtime_cache()
+                return
             
             # Normalize spaces around colons/commas/dots in timestamps (e.g. "00: 00: 04, 716")
             content = re.sub(r'(?<=\d)\s*([:.,])\s*(?=\d)', r'\1', content)
@@ -18483,7 +19471,7 @@ try {
                 ftp_url = None
             elif self._is_ftp_url(file_path):
                 ftp_url = file_path
-                remote_path = _unquote(urlsplit(file_path).path)
+                remote_path = _ftp_remote_path_from_url(file_path)
             else:
                 return  # Not an FTP/phone path
 
@@ -19394,7 +20382,8 @@ try {
         recent_files_menu = menu.addMenu("Recent Files")
         if getattr(self, 'recent_files', None):
             for file_path in self.recent_files[:10]:
-                action = recent_files_menu.addAction(self._get_playlist_name_for_path(file_path))
+                action = self._add_wrapped_menu_action(
+                    recent_files_menu, self._get_playlist_name_for_path(file_path))
                 action.setData(file_path)
                 action.triggered.connect(
                     lambda checked=False, path=file_path: self.load_recent_file(path)
@@ -19406,7 +20395,8 @@ try {
         recent_playlists_menu = menu.addMenu("Recent Playlists")
         if getattr(self, 'recent_playlists', None):
             for file_path in self.recent_playlists[:10]:
-                action = recent_playlists_menu.addAction(os.path.basename(file_path))
+                action = self._add_wrapped_menu_action(
+                    recent_playlists_menu, os.path.basename(file_path))
                 action.setData(file_path)
                 action.triggered.connect(
                     lambda checked=False, path=file_path: self.load_recent_playlist(path)
@@ -19669,7 +20659,7 @@ try {
 
         msg.exec()
 
-    def _show_fullscreen_overlay_menu(self, global_pos, actions, title=None, clear_existing_menus=True, level=0, anchor_rect_global=None):
+    def _show_fullscreen_overlay_menu(self, global_pos, actions, title=None, clear_existing_menus=True, level=0, anchor_rect_global=None, anchor_button=None):
         if not self._is_app_fullscreen():
             return False
         if clear_existing_menus:
@@ -19680,6 +20670,10 @@ try {
         panel = QFrame(self)
         panel.setObjectName("fullscreenOverlayMenu")
         panel._fullscreen_overlay_level = int(level or 0)
+        # Which button this panel was opened from. The hover handler needs it
+        # to tell "this submenu is already up" from "open a different one";
+        # without it every MouseMove rebuilds the panel and it blinks.
+        panel._fullscreen_overlay_anchor = anchor_button
         panel.setStyleSheet(
             """
             QFrame#fullscreenOverlayMenu {
@@ -19707,6 +20701,25 @@ try {
             QPushButton#fullscreenOverlayMenuButton:disabled {
                 color: #777777;
             }
+            QFrame#fullscreenOverlayMenuRow {
+                background-color: transparent;
+                border: none;
+            }
+            QFrame#fullscreenOverlayMenuRow:hover {
+                background-color: #444444;
+            }
+            QPushButton#fullscreenOverlayMenuRowAction {
+                background-color: #4a4a4a;
+                color: #dddddd;
+                border: 1px solid #666666;
+                border-radius: 3px;
+                padding: 2px 10px;
+                margin: 4px 10px 4px 0px;
+                min-width: 0px;
+            }
+            QPushButton#fullscreenOverlayMenuRowAction:hover {
+                background-color: #5c5c5c;
+            }
             QFrame#fullscreenOverlayMenuSeparator {
                 background-color: #555555;
                 min-height: 1px;
@@ -19718,7 +20731,11 @@ try {
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(0)
 
-        if title:
+        # A submenu opened by hovering an item is passed that item's own
+        # label as its title, which reads as the button's name repeated on top
+        # of the list it came from. Out of fullscreen no submenu has a header,
+        # so only the top-level panel gets one.
+        if title and int(level or 0) == 0:
             title_label = QLabel(str(title), panel)
             title_label.setObjectName("fullscreenOverlayMenuTitle")
             layout.addWidget(title_label)
@@ -19730,6 +20747,14 @@ try {
                 sep.setObjectName("fullscreenOverlayMenuSeparator")
                 sep.setFrameShape(QFrame.Shape.HLine)
                 layout.addWidget(sep)
+                continue
+
+            # A mirror is one row holding two buttons, not two menu items.
+            row_specs = action.get('buttons')
+            if row_specs:
+                row = self._fullscreen_overlay_widget_row(panel, row_specs)
+                if row is not None:
+                    layout.addWidget(row)
                 continue
 
             label = str(action.get('label', '')).strip()
@@ -19761,41 +20786,12 @@ try {
                     clear_existing_menus=False,
                     level=next_level,
                     anchor_rect_global=self._make_global_rect(b, b.rect()),
+                    anchor_button=b,
                 )
                 btn._fullscreen_overlay_open_submenu = callback
                 submenu_buttons.append(btn)
             if callback is not None:
-                def _run_callback(_checked=False, cb=callback):
-                    old_source_menu = getattr(self, '_fullscreen_overlay_source_menu', None)
-                    old_clone_menu = getattr(self, '_fullscreen_overlay_qmenu_clone', None)
-                    self._close_fullscreen_overlay_menu(clear_menus=False)
-
-                    def _finalize_old_menus():
-                        if getattr(self, '_fullscreen_overlay_menu_widget', None) is not None:
-                            return
-                        for attr_name, menu_obj in (
-                            ('_fullscreen_overlay_source_menu', old_source_menu),
-                            ('_fullscreen_overlay_qmenu_clone', old_clone_menu),
-                        ):
-                            if menu_obj is not None and getattr(self, attr_name, None) is menu_obj:
-                                setattr(self, attr_name, None)
-                        for menu_obj in (old_clone_menu, old_source_menu):
-                            if menu_obj is None:
-                                continue
-                            try:
-                                menu_obj.hide()
-                            except Exception:
-                                pass
-                            try:
-                                menu_obj.deleteLater()
-                            except Exception:
-                                pass
-
-                    try:
-                        cb()
-                    finally:
-                        _finalize_old_menus()
-                btn.clicked.connect(_run_callback)
+                btn.clicked.connect(self._fullscreen_overlay_click_handler(callback))
             else:
                 btn.clicked.connect(self._close_fullscreen_overlay_menu)
             layout.addWidget(btn)
@@ -19833,6 +20829,29 @@ try {
             )
         return True
 
+    def _fullscreen_overlay_submenu_open_for(self, button):
+        """True when the submenu panel on screen was opened from this button.
+
+        Hover is not a single event: entering a menu button delivers Enter,
+        then a stream of MouseMove / HoverMove for as long as the pointer
+        stays on it. Treating each one as "open the submenu" tears the panel
+        down and builds it again dozens of times a second.
+        """
+        if button is None:
+            return False
+        for panel in list(
+                getattr(self, '_fullscreen_overlay_menu_panels', []) or []):
+            if getattr(panel, '_fullscreen_overlay_anchor', None) is not button:
+                continue
+            try:
+                if panel.isVisible():
+                    return True
+            except Exception:
+                # A panel we cannot query is still on the list; assume it is
+                # up rather than rebuild over it.
+                return True
+        return False
+
     def _open_fullscreen_overlay_submenu_button(self, button):
         if button is None:
             return False
@@ -19841,6 +20860,12 @@ try {
                 return False
         except Exception:
             return False
+        # Hover arrives on Enter AND on every MouseMove / HoverMove, and the
+        # 80 ms follow-up timer fires as well. Rebuilding a submenu that is
+        # already open is what made the list blink and the UI lag, so a panel
+        # already anchored to this button is a no-op rather than a rebuild.
+        if self._fullscreen_overlay_submenu_open_for(button):
+            return True
         callback = getattr(button, '_fullscreen_overlay_open_submenu', None)
         if callable(callback):
             try:
@@ -19854,7 +20879,10 @@ try {
         if not submenu_spec:
             return False
         try:
-            level = int(getattr(button, '_fullscreen_overlay_level', -1) or -1)
+            # Same trap as the hover guard: level 0 must stay 0, or the
+            # submenu panel is created at level 0 and collides with its parent.
+            _blvl = getattr(button, '_fullscreen_overlay_level', None)
+            level = int(_blvl) if _blvl is not None else -1
             anchor_rect = self._make_global_rect(button, button.rect())
             return self._show_fullscreen_overlay_menu(
                 anchor_rect.topRight(),
@@ -19863,9 +20891,232 @@ try {
                 clear_existing_menus=False,
                 level=level + 1,
                 anchor_rect_global=anchor_rect,
+                anchor_button=button,
             )
         except Exception:
             return False
+
+    def _add_wrapped_menu_action(self, menu, text):
+        """Add *text* to *menu*, on several lines when one is not enough.
+
+        Short labels stay ordinary actions. A long one goes into a QLabel
+        inside a QWidgetAction, which is the only menu item that can be two
+        lines tall. The text is already broken by _wrap_menu_label rather
+        than left to setWordWrap, because a word-wrapping QLabel reports the
+        UNWRAPPED text as its size hint and the menu would widen to it
+        anyway -- which is the thing being fixed. The action carries no text
+        of its own, or the menu would draw it next to the widget; the same
+        is already true of the mirror rows.
+
+        The label paints its OWN hover background. A menu does not: QMenu
+        only reserves space for a QWidgetAction's widget and never paints
+        the item highlight over it, which is why the single-line entries
+        highlighted on hover and the wrapped ones did not. It has to see
+        the mouse to do that, so it asks for hover events and mouse
+        tracking and is deliberately NOT made transparent to them -- and a
+        QLabel ignores a mouse press, so the press still travels up to the
+        menu, which is what triggers the action.
+
+        Seeing the mouse is also what breaks the menu's own bookkeeping: it
+        stops noticing the pointer has moved, and leaves the item it
+        highlighted before lit beside this one. _WrappedMenuItemHover tells
+        it otherwise.
+        """
+        label_text = _wrap_menu_label(text)
+        if '\n' not in label_text:
+            return menu.addAction(label_text)
+        action = QWidgetAction(menu)
+        row = QWidget(menu)
+        layout = QHBoxLayout(row)
+        # No margins: the label covers the whole item so its hover highlight
+        # spans the row exactly as a plain item's does.
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        label = QLabel(label_text, row)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setMouseTracking(True)
+        try:
+            label.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        except Exception:
+            pass
+        label.setStyleSheet(
+            "QLabel { background: transparent; color: #dddddd;"
+            " padding: 6px 22px 6px 24px; }"
+            "QLabel:hover { background: #444444; color: #dddddd; }")
+        try:
+            hover_sync = _WrappedMenuItemHover(menu, action, label)
+            # Kept on the label as well: parenting it is what Qt needs, the
+            # attribute is what keeps the Python wrapper reachable.
+            label._wrap_menu_hover = hover_sync
+            label.installEventFilter(hover_sync)
+        except Exception:
+            pass
+        layout.addWidget(label, 1)
+        action.setDefaultWidget(row)
+        try:
+            action.setToolTip(str(text or ''))
+        except Exception:
+            pass
+        menu.addAction(action)
+        return action
+
+    def _fullscreen_overlay_click_handler(self, callback):
+        """Wrap an item's callback so picking it also takes the menu down.
+
+        The two menus the overlay was built from have to outlive the panel --
+        every callback reaches back into them -- but not the click. They are
+        captured here, while the button is being built, and released once the
+        callback has run. Rows built from a QWidgetAction use the same
+        wrapper, so a mirror's Split button closes the menu exactly the way a
+        plain item does.
+        """
+        old_source_menu = getattr(self, '_fullscreen_overlay_source_menu', None)
+        old_clone_menu = getattr(self, '_fullscreen_overlay_qmenu_clone', None)
+
+        def _run_callback(_checked=False, cb=callback):
+            self._close_fullscreen_overlay_menu(clear_menus=False)
+
+            def _finalize_old_menus():
+                if getattr(self, '_fullscreen_overlay_menu_widget', None) is not None:
+                    return
+                for attr_name, menu_obj in (
+                    ('_fullscreen_overlay_source_menu', old_source_menu),
+                    ('_fullscreen_overlay_qmenu_clone', old_clone_menu),
+                ):
+                    if menu_obj is not None and getattr(self, attr_name, None) is menu_obj:
+                        setattr(self, attr_name, None)
+                for menu_obj in (old_clone_menu, old_source_menu):
+                    if menu_obj is None:
+                        continue
+                    try:
+                        menu_obj.hide()
+                    except Exception:
+                        pass
+                    try:
+                        menu_obj.deleteLater()
+                    except Exception:
+                        pass
+
+            try:
+                cb()
+            finally:
+                _finalize_old_menus()
+        return _run_callback
+
+    def _fullscreen_overlay_widget_row(self, parent, button_specs):
+        """Build one overlay row that carries more than one button.
+
+        Out of fullscreen a mirror is a QWidgetAction: the URL on the left, a
+        Split button on the right. Flattening that into two menu items showed
+        every mirror twice -- once as the URL and once as "<url> - Split" --
+        so the row is rebuilt here instead, with the same buttons in the same
+        order, each one doing what it does natively.
+        """
+        specs = [s for s in (button_specs or [])
+                 if isinstance(s, dict) and str(s.get('label') or '').strip()]
+        if not specs:
+            return None
+        # Stable sort: the label button is the expanding one on the left,
+        # whatever order the source row's findChildren returned them in.
+        specs.sort(key=lambda s: not s.get('primary'))
+        row = QFrame(parent)
+        row.setObjectName("fullscreenOverlayMenuRow")
+        row.setFrameShape(QFrame.Shape.NoFrame)
+        rlay = QHBoxLayout(row)
+        rlay.setContentsMargins(0, 0, 0, 0)
+        rlay.setSpacing(0)
+        for spec in specs:
+            b = QPushButton(str(spec.get('label')), row)
+            b.setFlat(True)
+            b.setEnabled(bool(spec.get('enabled', True)))
+            callback = spec.get('callback')
+            if spec.get('primary'):
+                b.setObjectName("fullscreenOverlayMenuButton")
+                b.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                QSizePolicy.Policy.Fixed)
+                rlay.addWidget(b, 1)
+            else:
+                b.setObjectName("fullscreenOverlayMenuRowAction")
+                b.setCursor(Qt.CursorShape.PointingHandCursor)
+                b.setSizePolicy(QSizePolicy.Policy.Fixed,
+                                QSizePolicy.Policy.Fixed)
+                rlay.addWidget(b, 0)
+            if callable(callback):
+                b.clicked.connect(
+                    self._fullscreen_overlay_click_handler(callback))
+            else:
+                b.clicked.connect(self._close_fullscreen_overlay_menu)
+        return row
+
+    def _fullscreen_widget_action_rows(self, menu_action, keeper=None):
+        """Turn a QWidgetAction's custom row into ONE overlay entry.
+
+        Returns [] for anything that is not a widget row. The row keeps its
+        shape: the button whose text is longest is the row's label -- in the
+        Mirrors row that is the mirror URL, not the five-letter Split button
+        -- and every other button rides beside it as a button of its own, the
+        way it is drawn out of fullscreen. Splitting them into separate menu
+        items is what made each mirror appear twice.
+        """
+        try:
+            widget = menu_action.defaultWidget()
+        except Exception:
+            return []
+        if widget is None:
+            return []
+        try:
+            buttons = list(widget.findChildren(QPushButton))
+        except Exception:
+            return []
+        buttons = [b for b in buttons if (b.text() or '').strip()]
+        if not buttons:
+            # Not every custom row is a mirror. A long recent-file name is a
+            # QLabel broken over lines: one entry, the label's own text, and
+            # the click belongs to the action rather than to a button.
+            try:
+                labels = [l for l in widget.findChildren(QLabel)
+                          if (l.text() or '').strip()]
+            except Exception:
+                return []
+            if not labels:
+                return []
+            longest = max(labels, key=lambda l: len(l.text() or ''))
+            text = (longest.text() or '').replace('&', '').strip()
+            if not text:
+                return []
+            return [{
+                'label': text,
+                'enabled': True,
+                'callback': lambda _checked=False, a=menu_action,
+                             k=keeper: a.trigger(),
+            }]
+        live = []
+        for button in buttons:
+            try:
+                if not button.isEnabled():
+                    continue
+            except Exception:
+                pass
+            live.append(button)
+        if not live:
+            return []
+        primary = max(live, key=lambda b: len((b.text() or '').strip()))
+        specs = []
+        for button in live:
+            specs.append({
+                'label': (button.text() or '').replace('&', '').strip(),
+                'enabled': True,
+                'primary': button is primary,
+                # keeper keeps the source menu alive: the button lives in it,
+                # and the menu is not shown in fullscreen, so nothing else
+                # would hold a reference.
+                'callback': lambda _checked=False, b=button, k=keeper: b.click(),
+            })
+        return [{
+            'label': (primary.text() or '').replace('&', '').strip(),
+            'enabled': True,
+            'buttons': specs,
+        }]
 
     def _build_fullscreen_qmenu_snapshot(self, menu, root_menu=None):
         if menu is None:
@@ -19911,6 +21162,15 @@ try {
                     raw_label = ""
             label = str(raw_label or "").replace("&", "").strip()
             if not label and submenu is None:
+                # The Mirrors list is not built from plain actions: every
+                # mirror is a QWidgetAction holding a load button and a Split
+                # button in one custom row. Such an action has no text and no
+                # submenu, so this skip dropped all of them and the fullscreen
+                # menu showed only the current file. Recover the buttons.
+                _wrows = self._fullscreen_widget_action_rows(
+                    menu_action, keeper=root_menu)
+                if _wrows:
+                    snapshot.extend(_wrows)
                 continue
 
             try:
@@ -20269,7 +21529,8 @@ try {
         recent_file_actions = []
         for file_path in getattr(self, 'recent_files', [])[:10]:
             recent_file_actions.append({
-                'label': self._get_playlist_name_for_path(file_path),
+                'label': _wrap_menu_label(
+                    self._get_playlist_name_for_path(file_path)),
                 'callback': lambda path=file_path: self.load_recent_file(path),
             })
         if not recent_file_actions:
@@ -20278,7 +21539,7 @@ try {
         recent_playlist_actions = []
         for file_path in getattr(self, 'recent_playlists', [])[:10]:
             recent_playlist_actions.append({
-                'label': os.path.basename(file_path),
+                'label': _wrap_menu_label(os.path.basename(file_path)),
                 'callback': lambda path=file_path: self.load_recent_playlist(path),
             })
         if not recent_playlist_actions:
@@ -21712,7 +22973,7 @@ try {
         if not file_path:
             return False
         lower_path = file_path.lower()
-        return lower_path.endswith('.cbz') or lower_path.endswith(IMAGE_EXTENSIONS)
+        return lower_path.endswith('.cbz') or _ext_probe_path(lower_path).endswith(IMAGE_EXTENSIONS)
 
     def _remote_folder_prefix(self):
         return "__remote_folder__::"
@@ -21936,7 +23197,7 @@ try {
         'roshy.tv', 'javgg', 'jav.guru', 'javguru', 'sextb.net', '123av',
         'javdock', 'javhdporn', 'javsubbed', 'javenglish', 'javhd.today',
         'javflix', 'javx', 'jable', 'missav', 'milfnut', 'eporner',
-        'eroticmv',
+        'eroticmv', 'supjav',
     )
 
     def _is_jav_site_host(self, host):
@@ -23573,12 +24834,19 @@ try {
             parsed = urlparse(self._canonicalize_remote_source_url(file_path))
             host = (parsed.netloc or '').replace('www.', '').lower()
             if self._is_fileditch_host(host):
-                file_title = self._fileditch_filename_from_url(file_path)
-                if file_title:
-                    title = file_title
-                else:
-                    _cache[file_path] = ""
-                    return ""
+                # A name the user gave the row through the metadata linker
+                # outranks the filename. The filename rule is there for rows
+                # nobody has named; letting it win over a deliberate rename is
+                # what kept three quality variants of one scene
+                # (..._720 / ..._1080 / ..._2160) as three rows after all three
+                # had been renamed to the same title.
+                if not self._get_name_override(file_path):
+                    file_title = self._fileditch_filename_from_url(file_path)
+                    if file_title:
+                        title = file_title
+                    else:
+                        _cache[file_path] = ""
+                        return ""
             if self._is_vidara_host(host):
                 code = self._jav_code_from_text(title)
                 if code:
@@ -23637,7 +24905,11 @@ try {
             r'\b(?:mkv|mp4|avi|mov|webm|m4v)\b'
         )
         base = re.sub(ignorable_tags, ' ', base)
-        base = re.sub(r'[\[\]\(\)\{\}_\-\./,;:!?"\'`~|<>+=]+', ' ', base, flags=re.UNICODE)
+        # '&' is punctuation, not a word: a bunkr row shown as "Fun &amp;
+        # Games" and a fileditch file named "Fun_Games.mp4" are the same
+        # video, and keeping the ampersand made one key 'fun & games' and
+        # the other 'fun games', so they never grouped.
+        base = re.sub(r'[\[\]\(\)\{\}_\-\./,;:!?"\'`~|<>+=&]+', ' ', base, flags=re.UNICODE)
         base = re.sub(r'\s+', ' ', base).strip()
         return base
 
@@ -23789,12 +25061,20 @@ try {
             primary_name = self._fileditch_filename_from_url(primary).strip().lower()
             if not primary_name:
                 continue
+            # Two rows the user renamed to the same title are the same video
+            # however their fileditch filenames differ. Without this the
+            # splitter pulls apart exactly the quality variants the group key
+            # has just folded together.
+            primary_override = str(self._get_name_override(primary) or '').strip().lower()
 
             kept = []
             detached = []
             for mirror_url in self._unique_paths(values):
                 mirror_name = self._fileditch_filename_from_url(mirror_url).strip().lower()
-                if self._is_fileditch_host(mirror_url) and mirror_name and mirror_name != primary_name:
+                mirror_override = str(self._get_name_override(mirror_url) or '').strip().lower()
+                same_override = bool(primary_override) and primary_override == mirror_override
+                if (self._is_fileditch_host(mirror_url) and mirror_name
+                        and mirror_name != primary_name and not same_override):
                     detached.append(mirror_url)
                 else:
                     kept.append(mirror_url)
@@ -25099,6 +26379,149 @@ try {
             print(f"[VOE_CAPTURE] Failed to read voe.js: {e}")
         return self._VOE_CAPTURE_JS
 
+    def _voe_browser_capture(self, source_url, timeout_ms=90000):
+        """Last resort for a VOE link: open the embed page in a real browser
+        with voe.js injected and take the .m3u8 it reports.
+
+        R45 removed the browser for VOE on the grounds that it was never
+        needed. The field log is the counter-evidence: one file id decoded
+        fine on a white-label mirror and failed on voe.sx itself --
+        '[VOE] static decode failed for https://voe.sx/e/b4z1hwaphvtf'.
+        voe.js was already on disk and already read by _get_voe_capture_js,
+        but nothing ever ran it in a browser.
+
+        voe.js logs 'VOE_M3U8::<url>' to the console, so the URL is read off
+        the console instead of being scraped out of its on-screen panel.
+        Returns the m3u8 URL, or '' when nothing was captured. Blocks the
+        calling thread; both call sites are already worker threads.
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as exc:
+            print(f'[VOE_BROWSER] playwright unavailable: {exc}')
+            return ''
+        js = self._get_voe_capture_js() or ''
+        if not js.strip():
+            print('[VOE_BROWSER] no capture script to inject')
+            return ''
+
+        parsed = urlparse(source_url)
+        slug_m = re.match(r'^/(?:e|v|f|embed)/([^/?#]+)', parsed.path or '',
+                          re.IGNORECASE)
+        if slug_m:
+            embed_url = urlunparse((parsed.scheme or 'https', parsed.netloc,
+                                    '/e/' + slug_m.group(1), '', '', ''))
+        else:
+            embed_url = source_url
+
+        # voe.js builds its DOM panel BEFORE it installs the fetch/XHR hooks,
+        # so injected at document-start -- when document.head does not exist
+        # yet -- it throws and never hooks anything, which is the whole point
+        # of it. So install the hooks first (the console marker is all this
+        # needs) and let voe.js add its panel and autoplay kick once the
+        # document exists. Its own hook install is guarded by the same window
+        # flags, so this cannot double-hook.
+        shim = (
+            "(() => {\n"
+            "  const emit = (u) => { try { console.log('VOE_M3U8::' + u); }"
+            " catch (e) {} };\n"
+            "  const ok = (u) => typeof u === 'string' &&"
+            " /^https?:\\/\\/.+\\.m3u8/.test(u);\n"
+            "  if (!window._m3u8CatcherFetchHooked) {\n"
+            "    window._m3u8CatcherFetchHooked = true;\n"
+            "    const of = window.fetch;\n"
+            "    window.fetch = function (...a) {"
+            " if (ok(a[0])) emit(a[0]); return of.apply(this, a); };\n"
+            "  }\n"
+            "  if (!window._m3u8CatcherXHRHooked) {\n"
+            "    window._m3u8CatcherXHRHooked = true;\n"
+            "    const oo = XMLHttpRequest.prototype.open;\n"
+            "    XMLHttpRequest.prototype.open = function (m, u, ...r) {"
+            " if (ok(u)) emit(u); return oo.call(this, m, u, ...r); };\n"
+            "  }\n"
+            "})();\n"
+        )
+        wrapped = (
+            shim
+            + "(function(){\n  var _voePanel = function () {\n"
+            + js
+            + "\n};\n"
+            + "  if (document.head) { try { _voePanel(); } catch (e) {} }\n"
+            + "  else { document.addEventListener('DOMContentLoaded',"
+              " function () { try { _voePanel(); } catch (e) {} },"
+              " {once: true}); }\n"
+            + "})();\n"
+        )
+
+        found = {'url': ''}
+
+        def _on_console(msg):
+            try:
+                text = msg.text or ''
+            except Exception:
+                return
+            for line in text.splitlines():
+                if line.startswith('VOE_M3U8::'):
+                    u = line[len('VOE_M3U8::'):].strip()
+                    if u and not found['url']:
+                        found['url'] = u
+                        print(f'[VOE_BROWSER] captured {u[:110]}')
+
+        try:
+            exe = _find_installed_chromium_like_executable() or ''
+        except Exception:
+            exe = ''
+        # A visible window, matching the missav capture: a page Chromium
+        # treats as hidden never starts its player, and there is nothing to
+        # capture from a player that never fetches its manifest.
+        args = ['--window-position=60,60', '--window-size=1280,800',
+                '--mute-audio', '--autoplay-policy=no-user-gesture-required',
+                '--disable-blink-features=AutomationControlled']
+        profile = os.path.join(tempfile.gettempdir(), 'voe_capture_profile')
+        try:
+            with sync_playwright() as p:
+                ctx = None
+                try:
+                    ctx = p.chromium.launch_persistent_context(
+                        user_data_dir=profile, headless=False,
+                        executable_path=exe or None, args=args,
+                        ignore_default_args=['--enable-automation'])
+                except Exception as exc:
+                    print(f'[VOE_BROWSER] persistent profile failed ({exc}); '
+                          'trying an ephemeral browser')
+                    ctx = p.chromium.launch(
+                        headless=False, executable_path=exe or None, args=args,
+                        ignore_default_args=['--enable-automation'])
+                try:
+                    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+                    page.on('console', _on_console)
+                    # VOE players sometimes pop the video into a new tab.
+                    try:
+                        ctx.on('page', lambda np: np.on('console', _on_console))
+                    except Exception:
+                        pass
+                    ctx.add_init_script(wrapped)
+                    try:
+                        page.goto(embed_url, wait_until='domcontentloaded',
+                                  timeout=45000)
+                    except Exception as exc:
+                        print(f'[VOE_BROWSER] goto: {exc}')
+                    deadline = time.time() + (timeout_ms / 1000.0)
+                    while time.time() < deadline and not found['url']:
+                        time.sleep(1)
+                finally:
+                    try:
+                        ctx.close()
+                    except Exception:
+                        pass
+        except Exception as exc:
+            print(f'[VOE_BROWSER] failed for {source_url}: {exc}')
+            return found['url']
+        if not found['url']:
+            print(f'[VOE_BROWSER] no m3u8 seen for {source_url} within '
+                  f'{timeout_ms // 1000}s')
+        return found['url']
+
     def _launch_voe_playwright(self, source_url, play_first=False):
         """
         Open the VOE embed page in installed Brave through Playwright,
@@ -25153,7 +26576,13 @@ try {
                         print(f"[VOE_CAPTURE] static decode failed for {target_url}: {exc}")
 
                 if not m3u8_url:
-                    raise RuntimeError("VOE static decode found no stream (VOE never opens a browser)")
+                    # Not a dead end any more: voe.js in a real browser is
+                    # the fallback R45 removed.
+                    m3u8_url = self._voe_browser_capture(target_url) or ''
+                if not m3u8_url:
+                    raise RuntimeError(
+                        "VOE static decode found no stream and the voe.js "
+                        "browser capture saw no .m3u8")
 
                 self.voe_capture_ready.emit(target_url, m3u8_url, title, bool(play_first))
 
@@ -25943,6 +27372,100 @@ try {
         except Exception:
             return False
 
+    def _fetch_hls_playlist_text(self, url, headers=None, referer=None, timeout=10):
+        """(manifest_text, final_url) for a bounded manifest read.
+
+        Returns ('', '') when it cannot be read or the body is not a
+        playlist. The final URL matters: relative variant/segment URIs must
+        be resolved against wherever the request was redirected to.
+        """
+        try:
+            import requests
+        except Exception:
+            return '', ''
+        try:
+            request_headers = self._stream_request_headers(referer, headers)
+            response = requests.get(
+                str(url or ''),
+                headers=request_headers,
+                stream=True,
+                timeout=timeout or 10,
+                allow_redirects=True,
+            )
+            try:
+                if int(getattr(response, 'status_code', 0) or 0) >= 400:
+                    return '', ''
+                chunk = next(response.iter_content(256 * 1024), b'') or b''
+                final_url = str(getattr(response, 'url', '') or url or '')
+            finally:
+                response.close()
+        except Exception:
+            return '', ''
+        text = bytes(chunk).decode('utf-8', errors='replace')
+        if '#extm3u' not in text[:128].lower():
+            return '', ''
+        return text, final_url
+
+    def _hls_manifest_ships_png_wrapped_segments(self, playback_url, headers=None,
+                                                 referer=None):
+        """True when an HLS stream's segments are media hidden behind PNG.
+
+        Only the local proxy strips those wrappers (see
+        _unwrap_png_wrapped_media). Playback handed straight to mpv instead
+        opens the wrapper: the field log for sextb's hglink hoster shows the
+        audinifer master.m3u8 loading, mpv reporting
+        'codec=PNG (Portable Network Graphics)' at 0x0, then holding that
+        single frame for the playlist's whole two-hour claim until the
+        end-of-stream watchdog advanced the row -- reported as "stuck at the
+        end". These CDNs put the wrappers one level down, so a master
+        playlist is followed to its best variant before the test.
+        """
+        if not playback_url:
+            return False
+        try:
+            text, base = self._fetch_hls_playlist_text(
+                playback_url, headers=headers, referer=referer)
+            if not text:
+                return False
+            if self._hls_playlist_looks_like_decoy(text):
+                return True
+            if '#ext-x-stream-inf' not in text.lower():
+                return False
+            variant = self._hls_best_variant_url(text, base or str(playback_url))
+            if not variant or variant == str(playback_url):
+                return False
+            variant_text, _ = self._fetch_hls_playlist_text(
+                variant, headers=headers, referer=referer)
+            return bool(variant_text) and self._hls_playlist_looks_like_decoy(variant_text)
+        except Exception:
+            return False
+
+    def _flag_png_wrapped_hls_for_proxy(self, info):
+        """Set route_local_proxy on a resolved HLS stream whose segments are
+        PNG-wrapped, so _apply_resolved_remote_stream routes it through the
+        proxy that can unwrap them. Mutates and returns info."""
+        try:
+            if not isinstance(info, dict) or info.get('route_local_proxy'):
+                return info
+            playback_url = str(info.get('playback_url') or '').strip()
+            if not playback_url:
+                return info
+            if not self._is_hls_stream_url(playback_url, info.get('content_type')):
+                return info
+            referer = str(info.get('source_url') or info.get('embed_url') or '')
+            if self._hls_manifest_ships_png_wrapped_segments(
+                    playback_url, headers=info.get('headers'), referer=referer):
+                info['route_local_proxy'] = True
+                print(f"[HLS_PNGWRAP] manifest ships PNG-wrapped segments, "
+                      f"routing through local proxy: {playback_url[:160]}", flush=True)
+        except Exception as exc:
+            # Never break playback over a probe, but never hide the failure
+            # either: a silent pass here once masked a missing dependency and
+            # the stream went back to being played direct.
+            print(f"[HLS_PNGWRAP] probe failed ({type(exc).__name__}: {exc}) "
+                  f"for {str(info.get('playback_url'))[:140]}", flush=True)
+        return info
+
     def _looks_like_png_wrapped_segment(self, target_url, content_type=''):
         """True for segment URLs that ship media hidden behind a PNG image
         wrapper (tiktokcdn ad-site '.image' URLs used by streamhls.click)."""
@@ -26309,8 +27832,8 @@ try {
             return ''
         ftp_url = _ftp_url_for_native_client(str(ftp_url))
         from urllib.parse import urlsplit
-        parsed = urlsplit(ftp_url)
-        base_name = os.path.basename((parsed.path or '').rstrip('/')).strip() or 'phone-video.mp4'
+        base_name = os.path.basename(
+            _ftp_remote_path_from_url(ftp_url).rstrip('/')).strip() or 'phone-video.mp4'
         safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', base_name) or 'phone-video.mp4'
         target_id = hashlib.sha1(ftp_url.encode('utf-8', errors='ignore')).hexdigest()[:16]
         sessions = getattr(self, '_local_hls_proxy_sessions', None)
@@ -26359,7 +27882,7 @@ try {
 
         from urllib.parse import urlsplit
         parsed = urlsplit(ftp_url)
-        remote_path = unquote(parsed.path or '')
+        remote_path = _ftp_remote_path_from_url(ftp_url)
         
         # Cache file size to avoid slow FTP connections for ffmpeg HEAD requests
         if not hasattr(self.__class__, '_ftp_size_cache'):
@@ -27847,6 +29370,26 @@ try {
             return False
 
     @staticmethod
+    def _capture_line_is_manifest(line):
+        """True for a capture line naming an HLS/DASH playlist.
+
+        Used only to decide that the capture has nothing left to give:
+        once the player has asked for a manifest it has finished
+        negotiating, and every hoster in the sextb family announces its
+        stream this way (``cdn1.turboviplay.com/.../<id>.m3u8``,
+        ``srv1-2.plauymito.live/hls/<id>/master.txt``,
+        ``<host>/hls3/.../<id>_n/master.txt``).
+        """
+        try:
+            raw = str(line or '')
+            if not raw.startswith(('MEDIA_URL::', 'VOE_M3U8::')):
+                return False
+            path = (urlparse(raw.split('::', 1)[1].strip()).path or '').lower()
+            return path.endswith(('.m3u8', '.m3u', '.mpd', 'master.txt'))
+        except Exception:
+            return False
+
+    @staticmethod
     def _is_turbocdn_media_line(line):
         """True for a capture line naming a turbo.cr signed media file.
 
@@ -27958,6 +29501,62 @@ try {
             return False
         return path.endswith('.txt') and '/cdn/hls/' in path
 
+    @staticmethod
+    def _browser_retry_needs_headed(media_lines):
+        """Whether a second, off-screen-headed capture is worth a window.
+
+        True only when the headless run produced no media-bearing capture
+        line at all — the signature of an engine blocked before the page
+        said anything (bot wall, unsupported codec path, instant crash).
+        That is the one case where a different engine can genuinely help.
+
+        A run that saw the page's media and still found nothing playable
+        will see exactly the same media headed. A field log on sextb's
+        hosters had both engines run for hglink.to and player.upn.one and
+        return the same capture; the second window bought nothing and
+        doubled the wait.
+        """
+        try:
+            return int(media_lines or 0) <= 0
+        except Exception:
+            return True
+
+    def _capture_candidate_is_source_page(self, url, source_url):
+        """True when a capture is just the page we opened the browser on.
+
+        The capture script reports the document it navigated to as a
+        MEDIA_URL like any other request, so the browser's own source URL
+        always lands in the candidate list. Promoting it back as the
+        playback URL cannot work — that page is HTML, and it is the very
+        reason the browser was launched (its static HTML held no media).
+        A field log shows it twice over, each time followed by the whole
+        load-failed ladder::
+
+            [BROWSER_CLICK] probe rejected all 11 candidate(s) ...; using best-ranked capture anyway
+            [PLAYBACK][LOADFILE] https://playmate.to/embed/o9Mwa5Cd5r6es
+            [MPV][error][cplayer] Failed to recognize file format.
+
+        A candidate that carries a real media extension is kept: on some
+        hosts the source URL *is* the file, and refusing it would be worse.
+        """
+        url = str(url or '').strip()
+        src = str(source_url or '').strip()
+        if not url or not src:
+            return False
+        try:
+            path = (urlparse(url).path or '').lower()
+        except Exception:
+            return False
+        if path.endswith(('.m3u8', '.m3u', '.mpd', 'master.txt')
+                         + VIDEO_EXTENSIONS + AUDIO_EXTENSIONS):
+            return False
+        try:
+            same = (self._canonicalize_remote_source_url(self._sanitize_url(url))
+                    == self._canonicalize_remote_source_url(self._sanitize_url(src)))
+        except Exception:
+            same = False
+        return bool(same) or url == src
+
     def _capture_candidate_is_clearly_not_media(self, url):
         """True only for captures that cannot possibly be a video.
 
@@ -27972,6 +29571,21 @@ try {
         if any(token in low for token in self._NON_MEDIA_HOST_TOKENS):
             return True
         try:
+            scheme = (urlparse(url).scheme or '').lower()
+        except Exception:
+            scheme = ''
+        # A placeholder, not a URL. Players ship these as the src of an
+        # <iframe>/<video> they have not filled in yet, the capture script
+        # reports them like any other MEDIA_URL, and nothing below can rank
+        # them out: urlparse('javascript:false') has no host and a path of
+        # 'false', so every host- and suffix-based test waves it through.
+        # It then reached mpv as a playback_url and was opened as a local
+        # file -- "Cannot open file '...\\javascript:false'" -- which looped
+        # the whole load-failed ladder, several times per link.
+        # An empty scheme is a protocol-relative //host/path, which is real.
+        if scheme and scheme not in ('http', 'https'):
+            return True
+        try:
             path = (urlparse(url).path or '').lower()
         except Exception:
             return False
@@ -27979,6 +29593,57 @@ try {
                     for suffix in self._NON_MEDIA_URL_SUFFIXES)
                 or path.endswith('/js')
                 or path.endswith('/css'))
+
+    def _capture_candidate_has_media_shape(self, url):
+        """Positive shape test for the promote-an-UNVERIFIED-capture fallback.
+
+        That fallback hands mpv something the probe has already refused, so
+        it only earns the attempt when the URL at least looks like a file: a
+        media/playlist extension, or an extension-less but signed CDN path.
+        An ad redirect endpoint is neither. playmate.to's capture promoted
+        https://vd.ambotalaing.com/r19XC1eW9QAwPN/147054 -- a bare
+        two-segment path with no query at all -- which bought two
+        "unrecognized file format" loads and an anti-bot decoy round trip
+        through the local proxy before the row gave up.
+
+        Nothing here names a host: every ad network this has been seen on
+        serves its creative from the same bare-path shape, while the real
+        extension-less CDNs (cloudatacdn's .../k2xybd3hxr~B0OPg12FPJ) always
+        arrive signed.
+        """
+        url = str(url or '').strip()
+        if not url:
+            return False
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return False
+        # A placeholder scheme (javascript:, blob:, data:) is not a URL we
+        # can play. An EMPTY one is a protocol-relative //host/path, which
+        # the capture script does report, so it is judged on its path.
+        _scheme = (parsed.scheme or '').lower()
+        if _scheme and _scheme not in ('http', 'https'):
+            return False
+        path = (parsed.path or '').rstrip('/').lower()
+        if path.endswith(self._PLAYABLE_MEDIA_SUFFIXES + VIDEO_EXTENSIONS
+                         + AUDIO_EXTENSIONS):
+            return True
+        try:
+            if self._is_hls_stream_url(url):
+                return True
+        except Exception:
+            pass
+        try:
+            # A .txt playlist is a manifest, not a text file: the JW-8
+            # hoster family renames them (playmate.to's plauymito.live CDN
+            # serves srv1-2.plauymito.live/hls/<id>/master.txt), and without
+            # this the capture would announce the stream and the fallback
+            # would immediately discard it again.
+            if self._is_disguised_hls_manifest(url):
+                return True
+        except Exception:
+            pass
+        return len(parsed.query or '') >= 16
 
     def _familypornhd_player_page(self, candidates, source_url=''):
         """The embedded player's page, to use as Referer for its CDN files.
@@ -28490,6 +30155,71 @@ try {
         host = str(host or '').lower()
         return any(marker in host for marker in ('tulipvid.net', 'onlythot.net'))
 
+    @staticmethod
+    def _browser_capture_candidate_window(media_candidates, limit=12):
+        """The capture lines worth ranking.
+
+        The old fixed ``media_candidates[:12]`` silently dropped the answer.
+        On hglink.to the capture is 17 player/ad scripts followed, at index
+        17, by the one URL that matters::
+
+            MEDIA_URL::https://<host>/<id>/hls3/01/14959/x0o069k2qb38_o/master.txt
+
+        so the stream never reached the ranking stage at all and the fallback
+        promoted an advert instead. Manifests are exactly what we are looking
+        for, so any of them beyond the window is appended; everything else
+        still gets the same first-12 treatment.
+        """
+        items = list(media_candidates or [])
+        window = items[:limit]
+        try:
+            extra = [
+                u for u in items[limit:]
+                if VideoPlayer._is_disguised_hls_manifest(u) and u not in window
+            ]
+        except Exception:
+            extra = []
+        return window + extra
+
+    @staticmethod
+    def _is_disguised_hls_manifest(url):
+        """True for an HLS playlist served with a .txt extension.
+
+        The JW-Player-8 hoster family sextb embeds (hglink.to / hanerix.com /
+        vibuxer.com / audinifer.com, and playmate.to's plauymito.live CDN)
+        renames every playlist to .txt to slip past adblockers. A user
+        fetched one directly and it is a perfectly ordinary cleartext
+        master::
+
+            #EXTM3U
+            #EXT-X-VERSION:6
+            #EXT-X-STREAM-INF:BANDWIDTH=1696988,...,RESOLUTION=1920x1080
+            index_avc_1080p.txt
+
+        So the variant playlists are .txt too, and so this matches both
+        shapes. It is deliberately NOT the same as
+        _capture_candidate_is_obfuscated_master: watchstreamhd's
+        /cdn/hls/<id>/master.txt is AES ciphertext whose entries are the
+        literal scheme "\\m3\\", and that one must never be played.
+        """
+        try:
+            path = (urlparse(str(url or '')).path or '').lower()
+        except Exception:
+            return False
+        if not path.endswith('.txt'):
+            return False
+        if '/hls3/' not in path and '/hls/' not in path:
+            return False
+        # watchstreamhd's /cdn/hls/<id>/master.txt also satisfies everything
+        # above but its entries are AES ciphertext ("\\m3\\..."), so it must
+        # stay out: handing that one to mpv produced six failed attempts in
+        # one field log. That path is _capture_candidate_is_obfuscated_master's
+        # business, not ours.
+        if '/cdn/hls/' in path:
+            return False
+        base = path.rsplit('/', 1)[-1]
+        return base == 'master.txt' or bool(re.match(r'index[_-][\w.-]*\.txt$', base))
+
     def _is_hls_stream_url(self, url, content_type=''):
         ctype = str(content_type or '').lower()
         if 'mpegurl' in ctype or 'x-mpegurl' in ctype or 'vnd.apple.mpegurl' in ctype:
@@ -28507,6 +30237,13 @@ try {
             # (field: treating segments as playlists rewrote binary
             # bodies and crashed the rewrite on garbage lines).
             if ('urlset/' in path and path.endswith('.txt')) or re.search(r'index-f\d+-v\d+-a\d+\.txt$', path):
+                return True
+            # The sextb hoster family (hglink/hanerix/vibuxer/audinifer and
+            # playmate's plauymito CDN) serves the master AND every variant
+            # as .txt under /hls3/ or /hls/. Without this the proxy hands the
+            # body through unrewritten, so mpv resolves index_avc_1080p.txt
+            # against the CDN with no Referer and gets refused.
+            if self._is_disguised_hls_manifest(url):
                 return True
             # Some wrappers/proxies carry the manifest as a query or fragment
             # value instead of the visible URL path.
@@ -28860,6 +30597,10 @@ try {
             extension_path.endswith(('.m3u8', '.m3u'))
             or 'mpegurl' in content_type
             or 'application/vnd.apple.mpegurl' in content_type
+            # sextb's hoster family serves the master and every variant as
+            # .txt under /hls3/ or /hls/, with a text/plain Content-Type, so
+            # neither the extension nor the MIME test above sees a playlist.
+            or self._is_disguised_hls_manifest(final_url)
         )
         if content_type.startswith('video/') or content_type.startswith('audio/') or is_hls:
             resolved = {
@@ -28963,9 +30704,348 @@ try {
         tracks.sort(key=_track_key)
         return tracks
 
+    # Words that mark a .vtt as something other than captions when they sit
+    # right in front of the URL, as in kind="thumbnails" or a JS config key.
+    # Searched over the last 60 characters before a bare .vtt URL, so it
+    # catches both kind="thumbnails" on a tag and a thumbnails: key in a JS
+    # player config, wherever the URL actually sits inside either.
+    _NON_CAPTION_CUE_CTX = re.compile(
+        r'(?:thumbnails?|preview|sprite|storyboard|chapters?|scrubber)'
+        r'["\']?\s*[:=]', re.IGNORECASE)
+
+    def _cookie_header_for(self, url):
+        """A Cookie header for *url*, from the same cookies.txt mpv plays with.
+
+        The video itself comes back fine through mpv from this CDN family, and
+        mpv is the one thing in this app that sends cookies.txt. The caption
+        request that sends nothing is answered 403.
+        """
+        try:
+            host = (urlparse(str(url or '')).hostname or '').lower()
+        except Exception:
+            host = ''
+        if not host:
+            return ''
+        parts = host.split('.')
+        domains = ['.'.join(parts[k:]) for k in range(len(parts) - 1)]
+        pairs = []
+        seen = set()
+        try:
+            import http.cookiejar
+            for path in self._cookies_txt_paths(domains):
+                jar = http.cookiejar.MozillaCookieJar(path)
+                jar.load(ignore_discard=True, ignore_expires=True)
+                for cookie in jar:
+                    cookie_domain = str(
+                        getattr(cookie, 'domain', '') or '').lower().lstrip('.')
+                    if not any(cookie_domain == d
+                               or cookie_domain.endswith('.' + d)
+                               for d in domains):
+                        continue
+                    name = str(getattr(cookie, 'name', '') or '')
+                    if not name or name in seen:
+                        continue
+                    seen.add(name)
+                    value = getattr(cookie, 'value', '') or ''
+                    pairs.append(name + '=' + str(value))
+        except Exception as exc:
+            print(f'[SUBS] could not read cookies for {host}: {exc}',
+                  flush=True)
+        return '; '.join(pairs)
+
+    def _refusal_snippet(self, response):
+        """What a refused response says about itself, on one line."""
+        try:
+            body = getattr(response, 'content', None) or b''
+            if not body:
+                body = str(getattr(response, 'text', '') or '').encode(
+                    'utf-8', 'replace')
+            snippet = body[:400].decode('utf-8', 'replace')
+            return re.sub(r'\s+', ' ', snippet).strip()[:220]
+        except Exception:
+            return ''
+
+    def _fetch_caption_body(self, url, page_url=''):
+        """Fetch one caption file, as the bytes to hand the player.
+
+        Sends the page's own Referer and Origin, a browser TLS fingerprint
+        when curl_cffi is available, and the cookies mpv plays the video with.
+        A field log showed the caption CDN refusing a header-only request with
+        HTTP 403 while the video from the same CDN family played fine through
+        mpv -- the one request here that does send cookies.txt.
+
+        When a fetch is still refused, the reason is printed. The CDN says why
+        in the body it sends back; throwing that away is what made this take
+        several runs to find.
+        """
+        headers = self._media_playback_headers(page_url, url)
+        headers['Accept'] = 'text/vtt, application/octet-stream, text/plain, */*'
+        headers['Sec-Fetch-Dest'] = 'empty'
+        cookie_header = self._cookie_header_for(url)
+        if cookie_header:
+            headers['Cookie'] = cookie_header
+        status = 0
+        via = 'requests'
+        detail = ''
+        warmed = 0
+        try:
+            import curl_cffi.requests as cfreq
+        except Exception:
+            cfreq = None
+        if cfreq is not None:
+            via = 'curl_cffi'
+            try:
+                session = cfreq.Session(impersonate='chrome131')
+                warmed = self._warm_caption_session(session, page_url, headers)
+                response = session.get(
+                    url, headers=headers, timeout=20, allow_redirects=True)
+                if response is not None and response.ok and response.content:
+                    return response.content, response.status_code
+                status = int(getattr(response, 'status_code', 0) or 0)
+                detail = self._refusal_snippet(response)
+            except Exception as exc:
+                status = 0
+                detail = (type(exc).__name__ + ': ' + str(exc))[:160]
+        if not status or status >= 400:
+            try:
+                import requests
+                session = requests.Session()
+                warmed = max(warmed, self._warm_caption_session(
+                    session, page_url, headers))
+                response = session.get(
+                    url, headers=headers, timeout=20, allow_redirects=True)
+                if response is not None and response.ok and response.content:
+                    return response.content, response.status_code
+                status = int(getattr(response, 'status_code', 0) or 0) or status
+                detail = self._refusal_snippet(response) or detail
+            except Exception as exc:
+                detail = detail or (type(exc).__name__ + ': ' + str(exc))[:160]
+        if status == 403:
+            bare_body, bare_status = self._fetch_caption_body_bare(url)
+            # Logged whether it worked or not. A retry that only reports
+            # success leaves a log that cannot say whether the attempt was
+            # even made, which is the same blind spot that cost several
+            # runs on the cookies.
+            print(f'[SUBS]   {str(url)[:110]} -> retried with no Referer: '
+                  f'HTTP {bare_status or 0}'
+                  f'{" -- caption body arrived" if bare_body else ""}',
+                  flush=True)
+            if bare_body:
+                return bare_body, bare_status or 200
+            status = bare_status or status
+        print(f'[SUBS]   {str(url)[:110]} -> refused, HTTP {status} via '
+              f'{via}, cookies='
+              f'{"yes" if cookie_header else "none"}, '
+              f'{warmed} from the page: {detail}', flush=True)
+        return b'', status
+
+    def _fetch_caption_body_bare(self, url):
+        """One retry carrying no Referer and no Origin at all.
+
+        These captions sit on the site's thumbnail CDN, and an nginx
+        `valid_referers none` rule answers 403 to a request that has a
+        Referer -- the opposite of what a video CDN wants. There is no way to
+        tell from a refusal which way round the rule is set, so the one
+        combination that has not been tried gets one attempt.
+        """
+        try:
+            import requests
+        except Exception:
+            return b'', 0
+        try:
+            response = requests.get(
+                url,
+                headers={'User-Agent': self._stream_user_agent(),
+                         'Accept': 'text/vtt, */*'},
+                timeout=20, allow_redirects=True)
+            if response is not None and response.ok and response.content:
+                return response.content, response.status_code
+            return b'', int(getattr(response, 'status_code', 0) or 0)
+        except Exception as exc:
+            print(f'[SUBS]   no-Referer retry failed: '
+                  f'{type(exc).__name__}: {exc}', flush=True)
+            return b'', 0
+
+    def _session_cookie_count(self, session):
+        try:
+            return len(session.cookies)
+        except Exception:
+            return 0
+
+    def _warm_caption_session(self, session, page_url, headers):
+        """Load the watch page into *session* before asking it for the caption.
+
+        The signed caption URL is minted for the visit that produced it, and a
+        bare nginx 403 is what comes back when the request arrives without the
+        cookies that visit set. Nothing here needs to know which cookies
+        matter: asking for the page first puts them in the session, the way a
+        browser already has them by the time it fetches the track.
+        """
+        page_url = str(page_url or '').strip()
+        if not page_url.lower().startswith('http'):
+            return 0
+        try:
+            session.get(page_url, headers=headers, timeout=20,
+                        allow_redirects=True)
+            count = self._session_cookie_count(session)
+            print(f'[SUBS]   warmed the caption session from '
+                  f'{page_url[:90]}: {count} cookie(s)', flush=True)
+            return count
+        except Exception as exc:
+            print(f'[SUBS]   could not warm the caption session from '
+                  f'{page_url[:90]}: {type(exc).__name__}: {exc}', flush=True)
+            return 0
+
+    def _subtitle_endpoint_body(self, url, referer=''):
+        """Fetch a subtitle-list endpoint. curl_cffi first: these sit behind
+        the same CDN edge as the video and a bare `requests` GET tends to get
+        a challenge page instead of the JSON."""
+        headers = self._stream_request_headers(
+            url, {'Accept': 'application/json, text/plain, */*'})
+        if referer:
+            headers['Referer'] = referer
+        try:
+            import curl_cffi.requests as cfreq
+        except Exception:
+            cfreq = None
+        if cfreq is not None:
+            try:
+                response = cfreq.Session(impersonate='chrome131').get(
+                    url, headers=headers, timeout=12, allow_redirects=True)
+                if response is not None and response.ok and response.text:
+                    return response.text
+            except Exception:
+                pass
+        try:
+            import requests
+        except Exception:
+            return ''
+        try:
+            response = requests.get(
+                url, headers=headers, timeout=12, allow_redirects=True)
+            if response is not None and response.ok:
+                return response.text or ''
+        except Exception:
+            pass
+        return ''
+
+    def _subtitle_tracks_from_body(self, body, base_url=''):
+        """Read one endpoint's response: a track list, or a caption file."""
+        text = str(body or '').strip()
+        if not text:
+            return []
+        if text[:1] in ('{', '['):
+            try:
+                return _subtitle_tracks_from_payload(json.loads(text), base_url)
+            except Exception:
+                pass
+        if text.startswith('WEBVTT') or '-->' in text[:4000]:
+            # The endpoint was the caption file all along.
+            return [{
+                'url': base_url,
+                'lang': _lang_from_url(base_url) or 'und',
+                'ext': _caption_ext_of(base_url) or 'vtt',
+                'name': '',
+                'automatic': True,
+            }]
+        return []
+
+    def _dump_subtitle_report(self, html, page_url):
+        """Write what a page says about subtitles to subtitles_debug.txt.
+
+        Called only when a page yielded no caption track. What the page does
+        with its captions is the one thing that cannot be settled by reading
+        this code, and these fragments settle it: whether a caption file is
+        named at all, and if not, what the player is given instead.
+        """
+        try:
+            fragments = _subtitle_page_fragments(html)
+            directory = str(getattr(self, 'data_dir', '') or '') or os.getcwd()
+            path = os.path.join(directory, 'subtitles_debug.txt')
+            block = ['=== %s  %s' % (time.strftime('%Y-%m-%d %H:%M:%S'),
+                                     page_url),
+                     '--- %d subtitle line(s) in the page ---' % len(fragments)]
+            block.extend(fragments)
+            block.append('')
+            text = '\n'.join(block) + '\n'
+            existing = ''
+            try:
+                if os.path.exists(path):
+                    with open(path, 'r', encoding='utf-8',
+                              errors='replace') as handle:
+                        existing = handle.read()
+            except Exception:
+                existing = ''
+            if len(existing) > 400000:
+                existing = existing[-200000:]
+            with open(path, 'w', encoding='utf-8') as handle:
+                handle.write(existing + text)
+            return path, len(fragments)
+        except Exception as exc:
+            print(f'[SUBS] could not write subtitles_debug.txt: {exc}',
+                  flush=True)
+            return '', 0
+
+    def _report_subtitle_page(self, html, page_url):
+        path, count = self._dump_subtitle_report(html, page_url)
+        if path:
+            print(f'[SUBS] wrote {count} subtitle line(s) from the page to '
+                  f'{path} -- that file says what the site actually offers',
+                  flush=True)
+        return path
+
+    def _extract_subtitle_tracks_from_endpoints(self, html, page_url, limit=3):
+        """Second pass: read the caption list from the page's own endpoint.
+
+        _extract_subtitle_tracks_from_html can only see caption FILES. A site
+        with auto-generated and machine-translated captions puts none in the
+        page -- it hands the player an endpoint that returns the tracks -- so
+        the first pass comes back empty on exactly the sites that have the
+        feature. This finds that endpoint in the same HTML, fetches it, and
+        reads whatever shape of JSON comes back. It logs either way: what it
+        tried and what came back is what says whether a site is reachable at
+        all.
+        """
+        host = (urlparse(str(page_url or '')).netloc or '').lower() or '?'
+        candidates = _subtitle_endpoint_candidates(html, page_url)
+        if not candidates:
+            print(f'[SUBS] {host}: no caption file and no subtitle endpoint '
+                  f'referenced in the page', flush=True)
+            self._report_subtitle_page(html, page_url)
+            return []
+        picked = candidates[:max(1, int(limit or 1))]
+        print(f'[SUBS] {host}: page holds no caption file; trying '
+              f'{len(picked)} subtitle endpoint(s)', flush=True)
+        tracks = []
+        for endpoint in picked:
+            body = self._subtitle_endpoint_body(endpoint, page_url)
+            if not body:
+                print(f'[SUBS]   {endpoint[:120]} -> no response', flush=True)
+                continue
+            found = self._subtitle_tracks_from_body(body, endpoint)
+            langs = [str(t.get('lang') or '') for t in found]
+            print(f'[SUBS]   {endpoint[:120]} -> {len(found)} track(s)'
+                  + (f' [{", ".join(langs[:8])}]' if langs else '')
+                  + (f', {len(body)} byte(s)' if not found else ''), flush=True)
+            for track in found:
+                if track not in tracks:
+                    tracks.append(track)
+        if not tracks:
+            print(f'[SUBS] {host}: no caption tracks in what those '
+                  f'endpoint(s) returned', flush=True)
+            self._report_subtitle_page(html, page_url)
+            return []
+        print(f'[SUBS] {host}: {len(tracks)} caption track(s) offered by the '
+              f'site', flush=True)
+        return self._preferred_remote_subtitle_tracks(tracks, limit=6)
+
     def _extract_subtitle_tracks_from_html(self, html, page_url):
         tracks = []
         seen = set()
+        # src URLs of tracks that declared themselves as something other than
+        # captions. The catch-all URL scan below would otherwise pick them
+        # straight back up out of the same tag it just rejected.
+        skipped = set()
 
         def _add_track(url, lang='', ext='', name='', automatic=False):
             sub_url = self._normalize_extracted_media_url(url, page_url)
@@ -28988,8 +31068,18 @@ try {
 
         for match in re.finditer(r'<track\b([^>]*)>', str(html or ''), re.IGNORECASE):
             attrs = match.group(1) or ''
+            # kind defaults to "subtitles" when the attribute is absent, so
+            # only an explicit non-caption kind is a reason to skip. Video.js
+            # players declare their preview scrubber as kind="thumbnails" and
+            # point it at a .vtt, which used to be taken for a caption track.
             src = re.search(r'\bsrc=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
             if not src:
+                continue
+            kind = re.search(r'\bkind=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+            if kind and str(kind.group(1)).strip().lower() not in ('subtitles', 'captions'):
+                _norm = self._normalize_extracted_media_url(src.group(1), page_url)
+                if _norm:
+                    skipped.add(str(_norm).lower())
                 continue
             lang = re.search(r'\b(?:srclang|lang)=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
             label = re.search(r'\blabel=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
@@ -29003,10 +31093,20 @@ try {
         for pattern in patterns:
             for match in re.finditer(pattern, str(html or ''), re.IGNORECASE):
                 sub_url = html_unescape(match.group(1)).replace('\\/', '/')
+                _norm = self._normalize_extracted_media_url(sub_url, page_url)
+                if _norm and str(_norm).lower() in skipped:
+                    continue
                 prefix = str(html or '')[max(0, match.start() - 180):match.start()]
+                if self._NON_CAPTION_CUE_CTX.search(prefix[-60:]):
+                    continue
                 lang_match = re.search(r'["\'](?:lang|language|srclang|label)["\']\s*:\s*["\']([^"\']+)["\']', prefix, re.IGNORECASE)
                 auto = bool(re.search(r'auto(?:matic)?', prefix, re.IGNORECASE))
-                _add_track(sub_url, lang_match.group(1) if lang_match else '', automatic=auto)
+                # The filename states its own language and the text around the
+                # URL only describes a neighbour, so trust the URL first and
+                # keep the page's wording as the label.
+                label = str(lang_match.group(1) or '').strip() if lang_match else ''
+                _add_track(sub_url, _lang_from_url(sub_url) or label,
+                           name=label, automatic=auto)
 
         return self._preferred_remote_subtitle_tracks(tracks, limit=6) if tracks else []
 
@@ -34918,9 +37018,25 @@ try {
         except Exception as e:
             print(f"[VOE] static decode failed for {source_url}: {e}")
 
-        # R45: no browser fallback for VOE — static decode only (field
-        # guidance: opening a browser is not necessary for VOE links).
-        print(f'[VOE] static decode failed for {source_url} — returning None (no browser, BBB-safe)')
+        # R45 said VOE never needs a browser. The field log says otherwise:
+        # the same file id decoded on a white-label mirror and failed on
+        # voe.sx itself. voe.js exists for exactly this, so run it.
+        print(f'[VOE] static decode failed for {source_url} — trying the '
+              'voe.js browser capture')
+        try:
+            browser_url = self._voe_browser_capture(source_url)
+        except Exception as exc:
+            print(f'[VOE] browser capture failed for {source_url}: {exc}')
+            browser_url = ''
+        if browser_url:
+            return {
+                'playback_url': browser_url,
+                'title': page_title,
+                'headers': self._hls_request_headers(source_url),
+                'content_type': 'application/vnd.apple.mpegurl',
+            }
+        print(f'[VOE] no stream for {source_url} from static decode or the '
+              'browser capture')
         return None
 
     def _voe_decode_source_candidates(self, html):
@@ -35244,9 +37360,24 @@ try {
                 }
                 if _cookie_hdr:
                     _cf_headers['Cookie'] = _cookie_hdr
-                _cf_resp = _cfreq.get(
-                    embed_url, impersonate='chrome131',
-                    headers=_cf_headers, timeout=20, allow_redirects=True)
+                try:
+                    _cf_resp = _cfreq.get(
+                        embed_url, impersonate='chrome131',
+                        headers=_cf_headers, timeout=20, allow_redirects=True)
+                except Exception as _ssl_exc:
+                    # Field: lulu.st died here with 'curl: (60) SSL
+                    # certificate problem: unable to get local issuer
+                    # certificate' and the whole decode was lost. Playback
+                    # already runs tls_verify=False for these hosts; the
+                    # page fetch has to survive the same broken chain.
+                    if 'certificate' not in str(_ssl_exc).lower():
+                        raise
+                    print(f'[VOE-mirror] retrying {host} without cert '
+                          'verification (broken chain)')
+                    _cf_resp = _cfreq.get(
+                        embed_url, impersonate='chrome131',
+                        headers=_cf_headers, timeout=20, allow_redirects=True,
+                        verify=False)
                 if _cf_resp.ok and (_cf_resp.text or '').strip():
                     html = _cf_resp.text
                     page_url = _cf_resp.url or embed_url
@@ -35450,6 +37581,8 @@ try {
                 if not self._is_usable_extracted_media_url(candidate, page_url):
                     continue
                 if any(d in candidate for d in _BBB_DECOY_HOSTS):
+                    continue
+                if self._media_url_is_site_promo(candidate):
                     continue
                 is_hls = self._is_hls_stream_url(candidate)
                 hdrs   = (self._hls_request_headers(page_url)
@@ -37597,7 +39730,7 @@ try {
             # embed page), sanitize and dedupe every candidate before probing.
             normalized_candidates = []
             seen_candidates = set()
-            for raw_candidate in media_candidates[:12]:
+            for raw_candidate in self._browser_capture_candidate_window(media_candidates):
                 candidate = self._normalize_extracted_media_url(raw_candidate, page_url)
                 if not candidate or candidate.startswith(('blob:', 'about:')):
                     continue
@@ -37616,6 +39749,21 @@ try {
                     _n = self._canonicalize_remote_source_url(self._sanitize_url(_n))
                     if _n:
                         verified_normalized.add(_n)
+
+            # The page the browser was opened on is an HTML document, not a
+            # stream. The capture script reports the navigation as a
+            # MEDIA_URL like any other request, so it is always in this
+            # list — and the promote-an-unverified-capture fallback used to
+            # hand it straight back as the playback URL, which mpv then
+            # failed on three different ways down the load-failed ladder.
+            _self_pages = [c for c in normalized_candidates
+                           if self._capture_candidate_is_source_page(c, page_url)]
+            if _self_pages:
+                normalized_candidates = [
+                    c for c in normalized_candidates
+                    if not self._capture_candidate_is_source_page(c, page_url)]
+                print(f"[BROWSER_CLICK] dropped {len(_self_pages)} candidate(s) "
+                      f"that are the source page itself: {_self_pages[0][:120]}")
 
             # Same normalization for the measured-duration table so its keys
             # match the normalized candidates below.
@@ -37652,11 +39800,21 @@ try {
                     score += 4
                 if embed_slug and embed_slug in lower_url:
                     score += 3
+                if self._is_disguised_hls_manifest(url):
+                    # The .txt-disguised HLS master (sextb's hoster family).
+                    # It is the stream; every other capture on that page is a
+                    # player script or an advert.
+                    score += 6
                 if '.m3u8' in lower_url:
                     score += 1
-                if url in verified_normalized:
+                if (url in verified_normalized
+                        and not (0.1 <= _measured_duration(url) < 45.0)):
                     # Duration-verified in the live browser: played as real
-                    # long-form content, so it beats any ad capture.
+                    # long-form content, so it beats any ad capture. A
+                    # VERIFIED_MEDIA line only says a <video> played it, not
+                    # that it is the film: sextb's own ad network serves a
+                    # 30-second spot through a real <video> element and
+                    # earned the bonus, then played "the video" as an advert.
                     score += 6
                 if _measured_duration(url) >= 45.0:
                     # Long duration measured directly from a page <video>.
@@ -37721,7 +39879,7 @@ try {
 
             for candidate in normalized_candidates[:6]:
                 _m_dur = _measured_duration(candidate)
-                if 0.1 <= _m_dur < 20 and candidate not in verified_normalized:
+                if 0.1 <= _m_dur < 45:
                     # The page itself measured this as a few seconds long —
                     # it is a pre-roll ad, not the video. Never hand it to
                     # the player even when it probes perfectly.
@@ -37759,7 +39917,7 @@ try {
             # load-failed ladder can still retry via proxy/browser cookies.
             _non_ad = [
                 c for c in normalized_candidates
-                if not (0.1 <= _measured_duration(c) < 20 and c not in verified_normalized)
+                if not (0.1 <= _measured_duration(c) < 45)
             ]
             # ...and neither is a script: this branch promotes an
             # UNVERIFIED capture, the one place a Google tag endpoint
@@ -37767,6 +39925,13 @@ try {
             _non_ad = [
                 c for c in _non_ad
                 if not self._capture_candidate_is_clearly_not_media(c)
+            ]
+            # ...and it has to look like a file. This is the one place an
+            # unverified capture reaches mpv, and an ad endpoint with no
+            # extension and no signed query never is one.
+            _non_ad = [
+                c for c in _non_ad
+                if self._capture_candidate_has_media_shape(c)
             ]
             if _non_ad:
                 print(f"[MIXDROP_CLICK] probe rejected all {len(_non_ad)} candidate(s) for {page_url}; using best-scoring non-ad capture anyway")
@@ -38683,6 +40848,7 @@ try {
             _pw_m3u8_at = None
             _pw_family_cdn_at = None
             _pw_turbocdn_at = None
+            _pw_manifest_at = None
             _pw_child_dead_at = None
             while True:
                 _now = time.time()
@@ -38713,6 +40879,9 @@ try {
                     elif line.startswith('MEDIA_URL::'):
                         if _pw_media_at is None:
                             _pw_media_at = time.time()
+                        if (_pw_manifest_at is None
+                                and self._capture_line_is_manifest(line)):
+                            _pw_manifest_at = time.time()
                         if (_pw_family_cdn_at is None
                                 and self._is_family_cdn_media_line(line)):
                             _pw_family_cdn_at = time.time()
@@ -38792,6 +40961,20 @@ try {
                         # that hls.js blob: players never raise.
                         _kill_pw_tree('embed-HLS m3u8 captured, closing browser')
                         break
+                    if (_pw_manifest_at is not None
+                            and _now - _pw_last_line_at > 12):
+                        # The player already asked for its playlist and the
+                        # pipe has been silent for 12 seconds since: nothing
+                        # more is coming. Every failing sextb hoster
+                        # (player.upn.one, playmate.to, hglink.to) otherwise
+                        # sat out the full ~120s window per link with a
+                        # browser window on the desktop — several minutes
+                        # for one page of results. 12s of silence is the
+                        # guard against closing while a real video is still
+                        # negotiating: a page that is about to hand over
+                        # VERIFIED_MEDIA keeps the pipe busy.
+                        _kill_pw_tree('manifest captured and capture idle, closing browser')
+                        break
                     if (_pw_html_at is not None
                             and _now - _pw_html_at > 8):
                         _kill_pw_tree('final HTML dumped, child stuck closing browser')
@@ -38812,6 +40995,18 @@ try {
             return None
 
         combined = '\n'.join(_pw_out_lines)
+        # How many media-bearing lines this run produced. The caller uses
+        # it to decide whether a second, headed attempt is worth a browser
+        # window: zero means the engine was blocked before the page said
+        # anything, which is the one case where a different engine can
+        # genuinely help. A run that captured plenty of URLs and still
+        # found nothing playable will capture the same URLs headed.
+        try:
+            self._last_browser_click_media_lines = sum(
+                1 for _l in _pw_out_lines
+                if _l.startswith(('MEDIA_URL::', 'VOE_M3U8::', 'VERIFIED_MEDIA::')))
+        except Exception:
+            self._last_browser_click_media_lines = 0
         media_candidates = []
         verified_candidates = set()
         measured_media = {}
@@ -38870,6 +41065,10 @@ try {
                                 print(f"[FAMILYPORNHD] legacy playlist handoff: {_family_url[:180]}")
                     except Exception as legacy_exc:
                         print(f"[FAMILYPORNHD] legacy playlist handoff failed: {legacy_exc}")
+                try:
+                    self._flag_png_wrapped_hls_for_proxy(value)
+                except Exception:
+                    pass
             return value
 
         def _with_browser_ua(headers):
@@ -38982,7 +41181,7 @@ try {
             )
             normalized_candidates = []
             seen_candidates = set()
-            for raw_candidate in media_candidates[:12]:
+            for raw_candidate in self._browser_capture_candidate_window(media_candidates):
                 candidate = self._normalize_extracted_media_url(raw_candidate, source_url)
                 if not candidate or candidate.startswith(('blob:', 'about:')):
                     continue
@@ -39115,6 +41314,21 @@ try {
                     if _n:
                         verified_normalized.add(_n)
 
+            # The page the browser was opened on is an HTML document, not a
+            # stream. The capture script reports the navigation as a
+            # MEDIA_URL like any other request, so it is always in this
+            # list — and the promote-an-unverified-capture fallback used to
+            # hand it straight back as the playback URL, which mpv then
+            # failed on three different ways down the load-failed ladder.
+            _self_pages = [c for c in normalized_candidates
+                           if self._capture_candidate_is_source_page(c, source_url)]
+            if _self_pages:
+                normalized_candidates = [
+                    c for c in normalized_candidates
+                    if not self._capture_candidate_is_source_page(c, source_url)]
+                print(f"[BROWSER_CLICK] dropped {len(_self_pages)} candidate(s) "
+                      f"that are the source page itself: {_self_pages[0][:120]}")
+
             # Same normalization for the measured-duration table so its keys
             # match the normalized candidates below.
             measured_normalized = {}
@@ -39151,14 +41365,25 @@ try {
                     # same weight on its own rather than relying on the
                     # browser having finished measuring the <video>.
                     score += 6
+                if self._is_disguised_hls_manifest(url):
+                    # The .txt-disguised HLS master (sextb's hoster family).
+                    # It is the stream; every other capture on that page is a
+                    # player script or an advert, and the promote fallback
+                    # would otherwise hand one of those to mpv.
+                    score += 6
                 if '.m3u8' in lower_url:
                     score += 2
                 if re.search(r'[?&](s|token|sig|signature|expires?|exp|e)=', lower_url):
                     score += 1
-                if url in verified_normalized:
+                if (url in verified_normalized
+                        and not (0.1 <= _measured_duration(url) < 45.0)):
                     # Duration-verified in the live browser: a <video> was
                     # playing this as real long-form content (pre-roll ads
                     # are seconds long / low-res). Beats any ad capture.
+                    # Verified is not the same as long: sextb's ad network
+                    # (video.sacdnssedge.com) plays a 30-second spot through
+                    # a real <video>, measured 30s, and won the ranking —
+                    # so a measured sub-45s duration cancels the bonus.
                     score += 6
                 if _measured_duration(url) >= 45.0:
                     # Long duration measured directly from a page <video>.
@@ -39247,7 +41472,7 @@ try {
 
             for candidate in normalized_candidates[:6]:
                 _m_dur = _measured_duration(candidate)
-                if 0.1 <= _m_dur < 20 and candidate not in verified_normalized:
+                if 0.1 <= _m_dur < 45:
                     # The page itself measured this as a few seconds long —
                     # it is a pre-roll ad, not the video. Never hand it to
                     # the player even when it probes perfectly.
@@ -39288,7 +41513,7 @@ try {
             # than reporting no stream.
             _non_ad = [
                 c for c in normalized_candidates
-                if not (0.1 <= _measured_duration(c) < 20 and c not in verified_normalized)
+                if not (0.1 <= _measured_duration(c) < 45)
             ]
             # ...and neither is a script: this branch promotes an
             # UNVERIFIED capture, which is how gtag/js reached mpv and
@@ -39298,6 +41523,23 @@ try {
                 c for c in _non_ad
                 if not self._capture_candidate_is_clearly_not_media(c)
             ]
+            # ...and it has to look like a file. This is the one place an
+            # unverified capture reaches mpv: playmate.to's headless capture
+            # never started the player, so every candidate here was a script
+            # or an ad endpoint, and the best-ranked one
+            # (vd.ambotalaing.com/r19XC1eW9QAwPN/147054) was promoted as the
+            # video. Reporting no stream is faster and honest; the ladder
+            # still gets its other rungs.
+            _shapeless = [
+                c for c in _non_ad
+                if not self._capture_candidate_has_media_shape(c)
+            ]
+            if _shapeless:
+                _non_ad = [c for c in _non_ad
+                           if self._capture_candidate_has_media_shape(c)]
+                print(f"[BROWSER_CLICK] dropped {len(_shapeless)} candidate(s) "
+                      f"with no media shape (unverified fallback): "
+                      f"{str(_shapeless[0])[:140]}")
             if _non_ad:
                 best = _non_ad[0]
                 print(f"[BROWSER_CLICK] probe rejected all {len(normalized_candidates)} candidate(s) for {source_url}; using best-ranked capture anyway")
@@ -39601,6 +41843,182 @@ try {
                     continue
                 results.append((url, label or (f'{height}p' if height else ''), height))
         return results
+
+    # ------------------------------------------------------------------
+    # playmate.to  (sextb's "PM" server row)
+    # ------------------------------------------------------------------
+    # The embed page carries NO media URL. window.__PM holds only
+    # {videoId, referrer, countKey, duration} and /assets/js/player-core.min.js
+    # mints the stream at runtime, so five capture rounds could not find one:
+    # the field probe printed
+    #     [BROWSER_CLICK][JWPROBE] jwplayer_api=True containers=1 \
+    #                              playlist_items=0 source_files=0 files=[]
+    # i.e. JW's API is loaded and a container exists, but player-core never
+    # configured a playlist, so there was nothing in the DOM and nothing on
+    # the wire for a capture to see.
+    #
+    # player-core.min.js is javascript-obfuscator output (string array encoded
+    # with a CUSTOM base64 table that starts lowercase). Decoding that array
+    # with the site's own decoder gives the real call verbatim:
+    #
+    #     let filecode = getFilecodeFromURL();      // last path segment
+    #     let q = new URLSearchParams(location.search);
+    #     q.delete('filecode');
+    #     apiURL = '/api/s' + (q.toString() ? '?' + q.toString() : '');
+    #     fetch(apiURL, {method: 'POST',
+    #                    headers: {'Content-Type': 'application/json'},
+    #                    body: JSON.stringify({c: filecode, d: detectDevice()})})
+    #       .then(r => r.json())
+    #       .then(data => ({streaming_url: data.sx, title: data.tx,
+    #                       thumbnail: data.ix, vast_ads: data.ax,
+    #                       default_sub_lang: data.lx, filecode: data.cx,
+    #                       subtitles: (data.kx || []).map(...)}))
+    #
+    # and setupPlayer() then hands data.streaming_url to JW Player as
+    # playlist[0].file with type 'hls'. So `sx` IS the manifest URL, in
+    # plaintext: the pako + crypto-js scripts on the page are used only by
+    # flushBeacon()'s analytics payload, never by the stream.
+    # detectDevice() returns 'ios' | 'android' | 'web'.
+    #
+    # Confirmed against the live host: GET https://playmate.to/api/s answers
+    # {"error":"Method not allowed"} -- the route exists and is POST-only,
+    # exactly as the decoded code says. This is the same shape as the URL a
+    # user pasted by hand and that played immediately:
+    #     https://srv1-2.plauymito.live/hls/<32 chars>/master.txt
+    _PLAYMATE_HOSTS = ('playmate.to',)
+
+    def _is_playmate_host(self, host):
+        host = str(host or '').lower().lstrip('.')
+        if not host:
+            return False
+        return any(host == h or host.endswith('.' + h)
+                   for h in self._PLAYMATE_HOSTS)
+
+    def _playmate_filecode(self, source_url):
+        """player-core's getFilecodeFromURL(): the last path segment."""
+        try:
+            path = urlparse(str(source_url or '')).path or ''
+        except Exception:
+            return ''
+        match = re.match(r'^/embed/([^/?#]+)/?$', path, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        segments = [seg for seg in path.split('/') if seg]
+        return segments[-1] if segments else ''
+
+    def _resolve_playmate_source(self, source_url):
+        """POST playmate's own /api/s and read the manifest URL out of `sx`.
+
+        No browser, no click, no DOM scan. Returns None on any failure so
+        the existing capture ladder still runs unchanged.
+        """
+        parsed = urlparse(str(source_url or ''))
+        host = (parsed.netloc or '').lower()
+        if not self._is_playmate_host(host):
+            return None
+        filecode = self._playmate_filecode(source_url)
+        if not filecode:
+            print(f"[PLAYMATE_API] no filecode in {str(source_url)[:140]}", flush=True)
+            return None
+        scheme = parsed.scheme or 'https'
+        origin = f"{scheme}://{parsed.netloc}"
+        api_url = f"{origin}/api/s"
+        # player-core forwards the embed page's own query string, minus a
+        # 'filecode' parameter (the decoded source is
+        # e.delete('filecode') before e.toString()). Pairs are kept verbatim
+        # so nothing is re-encoded on the way through.
+        _pairs = [kv for kv in (parsed.query or '').split('&') if kv]
+        _pairs = [kv for kv in _pairs
+                  if kv.split('=', 1)[0].strip().lower() != 'filecode']
+        if _pairs:
+            api_url = f"{api_url}?{'&'.join(_pairs)}"
+        payload = json.dumps({'c': filecode, 'd': 'web'})
+        headers = self._stream_request_headers(source_url)
+        headers['Content-Type'] = 'application/json'
+        headers.setdefault('Accept', 'application/json, text/plain, */*')
+        headers['Referer'] = source_url
+        headers['Origin'] = origin
+        print(f"[PLAYMATE_API] POST {api_url} filecode={filecode}", flush=True)
+
+        data = None
+        try:
+            import curl_cffi.requests as cfreq
+        except Exception as exc:
+            cfreq = None
+            print(f"[PLAYMATE_API] curl_cffi unavailable "
+                  f"({type(exc).__name__}: {exc}), trying requests", flush=True)
+        if cfreq is not None:
+            try:
+                response = cfreq.Session(impersonate='chrome131').post(
+                    api_url, headers=headers, data=payload,
+                    timeout=25, allow_redirects=True)
+                print(f"[PLAYMATE_API] http {getattr(response, 'status_code', '?')} "
+                      f"({len(getattr(response, 'text', '') or '')} bytes)", flush=True)
+                if response is not None and response.ok:
+                    data = response.json()
+            except Exception as exc:
+                print(f"[PLAYMATE_API] curl_cffi POST failed "
+                      f"({type(exc).__name__}: {exc})", flush=True)
+        if data is None:
+            try:
+                import requests
+            except Exception as exc:
+                requests = None
+                print(f"[PLAYMATE_API] requests unavailable "
+                      f"({type(exc).__name__}: {exc})", flush=True)
+            if requests is not None:
+                try:
+                    response = requests.post(
+                        api_url, headers=headers, data=payload,
+                        timeout=25, allow_redirects=True)
+                    print(f"[PLAYMATE_API] http {response.status_code} "
+                          f"({len(response.text or '')} bytes, requests)", flush=True)
+                    if response.ok:
+                        data = response.json()
+                except Exception as exc:
+                    print(f"[PLAYMATE_API] requests POST failed "
+                          f"({type(exc).__name__}: {exc})", flush=True)
+        if not isinstance(data, dict):
+            print(f"[PLAYMATE_API] {api_url} returned no JSON object; "
+                  f"falling back to the capture", flush=True)
+            return None
+
+        # player-core renames the short keys itself; accept both spellings.
+        stream = str(data.get('sx') or data.get('streaming_url') or '').strip()
+        if not stream:
+            print(f"[PLAYMATE_API] response carried no stream key "
+                  f"(keys: {sorted(str(k) for k in data)[:12]})", flush=True)
+            return None
+        if not re.match(r'^https?://', stream, re.IGNORECASE):
+            stream = urljoin(origin + '/', stream)
+        print(f"[PLAYMATE_API] stream resolved with no browser: {stream[:200]}",
+              flush=True)
+
+        info = {
+            'playback_url': stream,
+            'download_url': stream,
+            'content_type': 'application/vnd.apple.mpegurl',
+            'headers': self._hls_request_headers(stream),
+            'pre_resolved_playback_url': True,
+            'resolver_provider': 'playmate_api',
+            'source_url': source_url,
+            'resolved_at_ms': int(time.time() * 1000),
+        }
+        title = str(data.get('tx') or data.get('title') or '').strip()
+        if title:
+            info['title'] = self._clean_remote_title(title) or title
+        thumb = str(data.get('ix') or data.get('thumbnail') or '').strip()
+        if thumb:
+            info['thumbnail_url'] = thumb
+        # plauymito.live renames its playlists to .txt and may PNG-wrap the
+        # segments exactly like hglink/hanerix do, so let the shared probe
+        # decide whether the local unwrapping proxy is needed.
+        try:
+            self._flag_png_wrapped_hls_for_proxy(info)
+        except Exception as exc:
+            print(f"[PLAYMATE_API] png-wrap probe failed "
+                  f"({type(exc).__name__}: {exc})", flush=True)
+        return info
 
     def _resolve_noodle_family_source(self, source_url):
         """Resolve the REAL stream on a noodlemagazine-family site.
@@ -40005,6 +42423,56 @@ try {
             return False
         return bool(re.match(r'^tr[_-]?\d{2,4}p?\.', name, re.IGNORECASE))
 
+    # A JAV site publishes a short promo of the film alongside it and names
+    # it the same way everywhere: <CODE>_PR.mp4. sextb's watch page embeds
+    # that preview, so a page scan decodes it as a media candidate -- the
+    # field log for the player.upn.one hoster row shows
+    # cdn.faleno.net/top/wp-content/uploads/2026/08/FNS-257_PR.mp4 played as
+    # "the video", a two-minute 4K preview instead of the film. Unlike a
+    # low-resolution teaser rendition this is the site's own advert, so it is
+    # dropped even when it is the only candidate on the page.
+    _SITE_PROMO_STEM_TOKENS = (
+        'pr', 'trailer', 'preview', 'prev', 'teaser', 'promo', 'sample',
+    )
+
+    # Some hosters put the marker in a PATH segment instead of the filename.
+    # sextb's playmate row resolved
+    #   https://cdn-dl.webstream.ne.jp/gigadlcdn/dl/
+    #       3aaimRZTQPQTwYuGELr8_s_sample_zen/_3000.mp4
+    # whose basename stem is just '_3000', so the stem test above passed it
+    # and the player burned three retries on a 403. Deliberately narrower
+    # than the stem list: 'pr' and 'prev' are far too short to trust across
+    # an arbitrary path, where every real URL above splits into segments
+    # like 'hls2', 'data1', 'get', 'file', '08595', 'master', 'm3u8'.
+    _SITE_PROMO_PATH_TOKENS = (
+        'sample', 'samples', 'trailer', 'preview', 'teaser', 'promo',
+    )
+
+    def _media_url_is_site_promo(self, url):
+        """True for a site's own promo/preview file rather than the film.
+
+        Only a promo token that ENDS the filename stem matches (optionally
+        ahead of a resolution tag), so a real product code such as
+        SOD-PR123.mp4 or APR-001.mp4 is never mistaken for one.
+        """
+        try:
+            path = urlparse(str(url or '')).path or ''
+        except Exception:
+            return False
+        name = os.path.basename(path)
+        if not name:
+            return False
+        stem = os.path.splitext(name)[0]
+        stem = re.sub(r'[_-]\d{3,4}p$', '', stem, flags=re.IGNORECASE)
+        tail = re.split(r'[_\-.]', stem)[-1].lower()
+        if tail in self._SITE_PROMO_STEM_TOKENS:
+            return True
+        # ...or a promo-named directory anywhere above the file.
+        directory = (path or '').rsplit('/', 1)[0] if '/' in (path or '') else ''
+        return any(seg in self._SITE_PROMO_PATH_TOKENS
+                   for seg in re.split(r'[/_\-.]', directory.lower())
+                   if seg)
+
     @staticmethod
     def _media_url_height_hint(url):
         """Resolution parsed out of a media filename, 0 when absent."""
@@ -40020,18 +42488,27 @@ try {
             return 0
 
     def _rank_real_media_candidates(self, urls, label=''):
-        """Drop trailer/preview renditions and sort the rest best-quality
-        first. Falls back to the untouched list when every candidate looks
-        like a trailer, so a page offering only a teaser still plays."""
+        """Drop the site's own promos and trailer/preview renditions, then
+        sort the rest best-quality first. Falls back to the promo-free list
+        when every remaining candidate looks like a teaser rendition, so a
+        page offering only a teaser still plays - a site promo is never
+        restored, because it advertises the film instead of being it."""
         urls = [u for u in (urls or []) if u]
-        real = [u for u in urls
+        # Site promos are dropped for good; teaser RENDITIONS keep the
+        # "play something" fallback below, because a page that only offers a
+        # teaser is still worth opening. A page that only offers its own
+        # advert is not.
+        usable = [u for u in urls if not self._media_url_is_site_promo(u)]
+        dropped_promo = len(urls) - len(usable)
+        real = [u for u in usable
                 if not self._media_url_is_trailer(u)
                 and not self._media_url_looks_like_preview(u)]
-        dropped = len(urls) - len(real)
-        if dropped and label:
-            print(f'[{label}] dropped {dropped} trailer/preview candidate(s) '
-                  f'of {len(urls)}', flush=True)
-        return sorted(real or urls, key=self._media_url_height_hint, reverse=True)
+        dropped = len(usable) - len(real)
+        if (dropped or dropped_promo) and label:
+            print(f'[{label}] dropped {dropped_promo} site promo(s) + '
+                  f'{dropped} trailer/preview candidate(s) of {len(urls)}',
+                  flush=True)
+        return sorted(real or usable, key=self._media_url_height_hint, reverse=True)
 
     def _resolve_stream_from_html(self, source_url):
         try:
@@ -40065,8 +42542,21 @@ try {
         html = response.text or ''
         page_url = response.url or source_url
         page_title = self._clean_remote_title(self._html_page_title(html))
-        subtitle_tracks = self._extract_subtitle_tracks_from_html(html, page_url)
         page_host = (urlparse(page_url).netloc or '').lower()
+        subtitle_tracks = self._extract_subtitle_tracks_from_html(html, page_url)
+        if subtitle_tracks:
+            # Named out loud: a track found here is never followed up on, so
+            # if it is the wrong file nothing else gets a chance to look.
+            print(f'[SUBS] {page_host}: page scan named '
+                  f'{len(subtitle_tracks)} caption file(s) -- '
+                  + '; '.join(
+                      f"{t.get('lang') or '?'} {str(t.get('url') or '')[:80]}"
+                      for t in subtitle_tracks[:3]), flush=True)
+        else:
+            # Sites with auto-generated captions have no caption file in the
+            # page to find; the tracks live behind an endpoint of their own.
+            subtitle_tracks = self._extract_subtitle_tracks_from_endpoints(
+                html, page_url)
         if self._is_fileditch_host(page_host):
             file_title = self._clean_remote_title(
                 self._fileditch_filename_from_url(page_url)
@@ -40652,6 +43142,12 @@ try {
                 # also writes other hosters into the h1 title, which become
                 # this row's mirrors.
                 resolved = self._resolve_sxyprn_source(source_url)
+            elif self._is_playmate_host(host):
+                # sextb's PM row. The manifest is minted by an XHR, not
+                # rendered, and the headless player never even configures a
+                # playlist — so call playmate's own /api/s directly instead
+                # of capturing anything.
+                resolved = self._resolve_playmate_source(source_url)
             elif self._is_noodle_family_host(host):
                 # Must run before the VOE auto-detect at the end of this
                 # ladder: these pages ARE VOE-format, so _detect_voe_and_resolve
@@ -40853,13 +43349,25 @@ try {
             # screen. This path runs whenever every static resolver
             # failed — including permanently dead links (file deleted,
             # hoster down): those used to pop a visible browser window
-            # on top of the desktop for nothing. Always the off-screen
-            # headed engine (same as missav/eporner/fileditch/embed
-            # hosts — the page stays 'visible' to Chromium, so playback
-            # and the auto-clicker keep working).
+            # on top of the desktop for nothing.
+            #
+            # "Off-screen headed" does NOT achieve that on Windows — the
+            # window is created and the user sees it, which is exactly the
+            # complaint behind sextb's hosters ("browser opens many time").
+            # So try the true headless engine first, the same ladder the
+            # turbo.cr path above uses, and fall back to off-screen headed
+            # only when headless fails: some bot walls fingerprint headless
+            # Chromium, and there the headed engine is still the better
+            # answer than no stream at all.
+            self._last_browser_click_media_lines = 0
             resolved = self._resolve_stream_via_browser_click(
-                source_url, headed_hidden=True,
+                source_url, headless=True,
                 referer=self._embed_origin_referer(source_url))
+            if resolved is None and self._browser_retry_needs_headed(
+                    getattr(self, '_last_browser_click_media_lines', 0)):
+                resolved = self._resolve_stream_via_browser_click(
+                    source_url, headed_hidden=True,
+                    referer=self._embed_origin_referer(source_url))
             if resolved is None:
                 # Short-ish cooldown for pages that needed the click path:
                 # a fresh attempt is expensive but worth retrying sooner
@@ -41259,6 +43767,12 @@ try {
                 # proxy (turbovid family: stitched post-roll ad stripping)
                 or (provider == 'embed_hls_unpack'
                     and stream_info.get('route_local_proxy'))
+                # A browser-captured manifest whose segments ship behind a
+                # PNG wrapper (sextb's hglink/audinifer family). mpv played
+                # direct decodes the wrapper and reports codec=PNG; only the
+                # proxy's content-sniffed unwrap gets the real TS out.
+                or (provider == 'browser_click'
+                    and stream_info.get('route_local_proxy'))
                 # R56: emturbovid / turbovidhls stuck-at-end even when
                 # an older cache entry never set route_local_proxy.
                 or self._embed_hls_needs_adstrip_proxy(
@@ -41273,6 +43787,9 @@ try {
                 _proxy_label = (
                     'HLSVOD_PROXY'
                     if self._hls_needs_vod_playlist_proxy(playback_target, file_path)
+                    else 'PNGHLS_PROXY'
+                    if (provider == 'browser_click'
+                        and stream_info.get('route_local_proxy'))
                     else 'EMBEDHLS_PROXY'
                     if (provider == 'embed_hls_unpack'
                         and stream_info.get('route_local_proxy'))
@@ -41434,6 +43951,55 @@ try {
         self._remote_download_workers[job_id] = worker
         worker.start()
 
+    _SUBTITLE_SPRITE_HINTS = ('#xywh',)
+    _SUBTITLE_IMAGE_EXT = re.compile(
+        r'\.(?:jpe?g|png|webp|gif|bmp|avif)(?:[?#]|\s|$)', re.IGNORECASE)
+
+    def _subtitle_content_is_captions(self, content):
+        """True only if the cue payloads look like text a viewer can read.
+
+        A Video.js thumbnail scrubber ships a .vtt whose cue payload is a
+        sprite image URL carrying an ``#xywh=`` fragment. Nothing about it is
+        distinguishable from a real caption track by extension or by timing --
+        it has a ``.vtt`` extension, a WEBVTT header and valid cue times -- so
+        the payload itself is the only thing that can be checked. Without this
+        the player renders the image URL as a subtitle line, which is what
+        appeared on a video that has no captions at all.
+
+        A track is rejected when half or more of its cue lines are an image
+        reference rather than words, so a genuine caption that happens to
+        mention a URL still loads.
+        """
+        text = str(content or '')
+        if '-->' not in text:
+            return False
+        payloads = 0
+        sprites = 0
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line or '-->' in line:
+                continue
+            upper = line.upper()
+            if upper.startswith(('WEBVTT', 'NOTE', 'STYLE', 'REGION',
+                                 'KIND:', 'LANGUAGE:', 'IDENTIFIER:')):
+                continue
+            if line.startswith('::'):
+                continue
+            if re.fullmatch(r'\d+', line):
+                continue
+            if line.lower().startswith(('align:', 'position:', 'size:',
+                                        'line:', 'vertical:')):
+                continue
+            payloads += 1
+            low = line.lower()
+            if (any(h in low for h in self._SUBTITLE_SPRITE_HINTS)
+                    or low.startswith(('http://', 'https://', '//'))
+                    or self._SUBTITLE_IMAGE_EXT.search(low)):
+                sprites += 1
+        if not payloads:
+            return False
+        return sprites * 2 < payloads
+
     def _preferred_remote_subtitle_tracks(self, tracks, limit=4):
         usable = []
         seen = set()
@@ -41463,10 +44029,20 @@ try {
         return usable[:max(1, int(limit or 1))]
 
     def _load_remote_subtitles_async(self, file_path, stream_info):
-        tracks = self._preferred_remote_subtitle_tracks((stream_info or {}).get('subtitle_tracks'), limit=2)
+        offered = (stream_info or {}).get('subtitle_tracks') or []
+        tracks = self._preferred_remote_subtitle_tracks(offered, limit=2)
         tracks = [track for track in tracks if str(track.get('ext') or '').lower() in {'srt', 'vtt'}]
-        if not tracks or getattr(self, 'subtitles', None):
+        if not tracks:
+            # The line that says a video simply has no caption the app could
+            # read. Silent here is indistinguishable from never being called.
+            print(f'[SUBS] no usable caption track for '
+                  f'{str(file_path)[:90]} '
+                  f'({len(offered)} offered by the resolver)', flush=True)
             return False
+        if getattr(self, 'subtitles', None):
+            return False
+        print(f'[SUBS] fetching {len(tracks)} caption track(s) for '
+              f'{str(file_path)[:90]}', flush=True)
         pending_key = str(file_path or '')
         pending = getattr(self, '_remote_subtitle_pending', set())
         if pending_key in pending:
@@ -41486,19 +44062,19 @@ try {
                     sub_url = str(track.get('url') or '').strip()
                     ext = str(track.get('ext') or 'vtt').lower().lstrip('.') or 'vtt'
                     lang = re.sub(r'[^A-Za-z0-9_-]+', '', str(track.get('lang') or 'sub')) or 'sub'
-                    response = requests.get(
-                        sub_url,
-                        headers=self._stream_request_headers(file_path),
-                        timeout=20,
-                        allow_redirects=True,
-                    )
-                    if response.status_code >= 400 or not response.content:
+                    body, status = self._fetch_caption_body(sub_url, file_path)
+                    if not body:
+                        print(f'[SUBS]   {sub_url[:110]} -> HTTP {status}, '
+                              f'no caption body, skipped', flush=True)
                         continue
                     candidate = os.path.join(subtitle_dir, f"{safe_title}.{lang}.{ext}")
                     with open(candidate, 'wb') as fh:
-                        fh.write(response.content)
+                        fh.write(body)
                     if os.path.exists(candidate) and os.path.getsize(candidate) > 0:
                         saved_path = candidate
+                        print(f'[SUBS]   {sub_url[:110]} -> saved '
+                              f'{os.path.getsize(candidate)} byte(s) to '
+                              f'{candidate}', flush=True)
                         break
             except Exception as exc:
                 print(f"[SUBTITLE][REMOTE_ERROR] {file_path}: {exc}")
@@ -41507,6 +44083,9 @@ try {
                     self._remote_subtitle_pending.discard(pending_key)
                 except Exception:
                     pass
+            if not saved_path:
+                print(f'[SUBS]   none of the {len(tracks)} caption track(s) '
+                      f'could be fetched', flush=True)
             if saved_path:
                 try:
                     from PyQt6.QtCore import Q_ARG
@@ -50290,7 +52869,7 @@ try {
             if getattr(self, '_suppress_end_of_media_once', False):
                 return
             current = getattr(self, 'current_file', None)
-            if current and str(current).lower().endswith(IMAGE_EXTENSIONS):
+            if current and _ext_probe_path(current).lower().endswith(IMAGE_EXTENSIONS):
                 return
             print(f'[PLAYBACK] end-of-stream stall watchdog fired '
                   f'({position}/{duration} ms, no EOF) - advancing playlist')
@@ -50310,7 +52889,7 @@ try {
         if str(current_file).startswith("__rpa_header__"):
             self._cancel_near_end_auto_advance()
             return
-        if str(current_file).lower().endswith(IMAGE_EXTENSIONS):
+        if _ext_probe_path(current_file).lower().endswith(IMAGE_EXTENSIONS):
             self._cancel_near_end_auto_advance()
             return
         if getattr(self, '_auto_advance_pending', False):
@@ -50416,7 +52995,7 @@ try {
             return True
 
         # Images are intentionally not auto-advanced here.
-        if self.current_file and self.current_file.lower().endswith(IMAGE_EXTENSIONS):
+        if self.current_file and _ext_probe_path(self.current_file).lower().endswith(IMAGE_EXTENSIONS):
             try:
                 self.media_player.stop()
             except Exception:
@@ -51169,7 +53748,12 @@ try {
                 return True
 
         overlay_submenu = getattr(obj, '_fullscreen_overlay_submenu', None)
-        overlay_level = int(getattr(obj, '_fullscreen_overlay_level', -1) or -1)
+        # Not `... or -1`: a TOP-LEVEL overlay button carries level 0, and
+        # `0 or -1` is -1, which made the guard below false and silently
+        # switched off hover for every submenu on the first menu panel. That
+        # is why Recent Files / Recent Playlists only opened on a click.
+        _olvl = getattr(obj, '_fullscreen_overlay_level', None)
+        overlay_level = int(_olvl) if _olvl is not None else -1
         hover_events = (_ENT, _MM, _HENT, _HMV)
         if overlay_level >= 0:
             if overlay_submenu and _etype in hover_events:
@@ -52093,7 +54677,7 @@ try {
             # Check if current file is an image
             is_image = False
             if self.current_file:
-                is_image = self.current_file.lower().endswith(IMAGE_EXTENSIONS)
+                is_image = _ext_probe_path(self.current_file).lower().endswith(IMAGE_EXTENSIONS)
             
             if key == Qt.Key.Key_Space:
                 self.play_video()
@@ -57072,11 +59656,28 @@ if __name__ == "__main__":
                         # but not screenshot names such as ``preview.mp4.jpg``.
                         _media_ext_re = re.compile(r'\.(?:mp4|mkv|webm|mov|m4v)(?:/?(?:[?#]|$))', re.IGNORECASE)
 
+                        def _is_renamed_hls_playlist(req_url):
+                            """The JW-8 hoster family (playmate.to's
+                            plauymito.live CDN, hglink.to and friends) renames
+                            every playlist to .txt to slip past adblockers, so
+                            neither branch below matched and the one request
+                            that mattered was never announced at all -- the
+                            capture reported scripts and adverts and nothing
+                            else. Reuses the predicate the rest of the file
+                            already trusts, including its carve-out for
+                            watchstreamhd's AES-ciphertext master.txt."""
+                            try:
+                                return bool(VideoPlayer._is_disguised_hls_manifest(req_url))
+                            except Exception:
+                                return False
+
                         def handle_request(route, request):
                             req_url = request.url
                             if '.m3u8' in req_url:
                                 _announce_media_url(req_url, prefix='VOE_M3U8::')
                             elif _media_ext_re.search(urlparse(req_url).path or ''):
+                                _announce_media_url(req_url)
+                            elif _is_renamed_hls_playlist(req_url):
                                 _announce_media_url(req_url)
                             route.continue_()
 
@@ -57323,6 +59924,21 @@ if __name__ == "__main__":
                                 # and nothing was ever captured. Those ad-layer
                                 # selectors stay last as a fallback only.
                                 ".vjs-big-play-button",
+                                # JW Player 8 (sextb's playmate.to and the
+                                # hglink family) draws its own display layer
+                                # over the <video>, so the button has to be
+                                # found BEFORE the bare element below - and
+                                # _click_play stops at the first match, so the
+                                # old order clicked the raw <video> and never
+                                # reached any .jw-* selector at all. JW treats
+                                # a click on its own media element as a
+                                # passthrough, not a play toggle, which is why
+                                # the capture saw the player script load and
+                                # then nothing.
+                                ".jw-icon-display",
+                                ".jw-display-icon-display",
+                                ".jw-display-icon-container .jw-icon",
+                                ".jw-icon-playback",
                                 "video",
                                 "button.play",
                                 ".jw-display-icon-container",
@@ -57516,15 +60132,50 @@ if __name__ == "__main__":
                                             }
                                         }
                                     } catch (e) {}
+                                    // JW Player 8 keeps the media in
+                                    // item.sources[]; item.file is only set on
+                                    // a single-source (JW 7 style) setup. So
+                                    // reading item.file alone got undefined on
+                                    // sextb's playmate.to, whose
+                                    // player-core.min.js builds a multi-source
+                                    // playlist -- the manifest was configured
+                                    // in the player and readable before anyone
+                                    // pressed play, and this probe saw nothing.
+                                    const pushJwItem = (item) => {
+                                        if (!item) return;
+                                        try {
+                                            if (Array.isArray(item.sources)) {
+                                                for (const src of item.sources) {
+                                                    try { if (src && src.file) push(src.file, 0, 0, 0); } catch (e) {}
+                                                }
+                                            }
+                                        } catch (e) {}
+                                        try { if (item.file) push(item.file, 0, 0, 0); } catch (e) {}
+                                    };
                                     try {
                                         if (window.jwplayer) {
-                                            for (const el of document.querySelectorAll('.jwplayer')) {
+                                            // jwplayer() with no argument hands
+                                            // back the first instance even
+                                            // before the .jwplayer class has
+                                            // been applied to the container.
+                                            try { pushJwItem(window.jwplayer().getPlaylistItem && window.jwplayer().getPlaylistItem()); } catch (e) {}
+                                            try {
+                                                const _l0 = window.jwplayer().getPlaylist && window.jwplayer().getPlaylist();
+                                                if (Array.isArray(_l0)) { for (const _i0 of _l0) pushJwItem(_i0); }
+                                            } catch (e) {}
+                                            for (const el of document.querySelectorAll('.jwplayer, #jwplayer, .jwplayer-container, [id^="jwplayer"]')) {
                                                 try {
                                                     const api = window.jwplayer(el.id);
-                                                    if (api && api.getPlaylistItem) {
-                                                        const item = api.getPlaylistItem();
-                                                        if (item && item.file) push(item.file, 0, 0, 0);
-                                                    }
+                                                    if (!api) continue;
+                                                    try {
+                                                        const list = api.getPlaylist && api.getPlaylist();
+                                                        if (Array.isArray(list)) {
+                                                            for (const it of list) pushJwItem(it);
+                                                        }
+                                                    } catch (e) {}
+                                                    try {
+                                                        if (api.getPlaylistItem) pushJwItem(api.getPlaylistItem());
+                                                    } catch (e) {}
                                                 } catch (e) {}
                                             }
                                         }
@@ -57544,6 +60195,44 @@ if __name__ == "__main__":
                                     return found.length ? found : null;
                                 }
                             """
+
+                            # One-shot diagnostic. Until this existed the JW
+                            # probe failed silently: a capture that found
+                            # nothing looked identical whether the probe never
+                            # ran, jwplayer was absent, or the playlist was
+                            # empty -- so there was no way to tell a stale
+                            # build from a real miss.
+                            _jw_status_js = """
+                                () => {
+                                    const out = {api: false, els: 0, items: 0,
+                                                 sources: 0, files: []};
+                                    try {
+                                        out.api = typeof window.jwplayer === 'function';
+                                        out.els = document.querySelectorAll(
+                                            '.jwplayer, #jwplayer, .jwplayer-container, [id^="jwplayer"]').length;
+                                        if (!out.api) return out;
+                                        const take = (item) => {
+                                            if (!item) return;
+                                            out.items++;
+                                            try { if (item.file) out.files.push(String(item.file)); } catch (e) {}
+                                            try {
+                                                if (Array.isArray(item.sources)) {
+                                                    for (const s of item.sources) {
+                                                        if (s && s.file) { out.sources++; out.files.push(String(s.file)); }
+                                                    }
+                                                }
+                                            } catch (e) {}
+                                        };
+                                        try {
+                                            const l = window.jwplayer().getPlaylist && window.jwplayer().getPlaylist();
+                                            if (Array.isArray(l)) { for (const it of l) take(it); }
+                                        } catch (e) {}
+                                        try { take(window.jwplayer().getPlaylistItem && window.jwplayer().getPlaylistItem()); } catch (e) {}
+                                    } catch (e) {}
+                                    return out;
+                                }
+                            """
+                            _jw_status_reported = False
 
                             # Pre-roll ads on these players load AND play
                             # first — the real video's URL only appears once
@@ -57578,6 +60267,28 @@ if __name__ == "__main__":
                                 # every accessible frame, not only the top
                                 # document; cross-origin frames are still
                                 # readable through Playwright's frame API.
+                                if not _jw_status_reported:
+                                    # Printed once, on the first pass, so the
+                                    # log states plainly whether the JW player
+                                    # object existed at all and whether it had
+                                    # a playlist configured.
+                                    try:
+                                        _jw_st = page.evaluate(_jw_status_js) or {}
+                                        print('[BROWSER_CLICK][JWPROBE] '
+                                              'jwplayer_api=%s containers=%s '
+                                              'playlist_items=%s source_files=%s files=%s'
+                                              % (bool(_jw_st.get('api')),
+                                                 int(_jw_st.get('els') or 0),
+                                                 int(_jw_st.get('items') or 0),
+                                                 int(_jw_st.get('sources') or 0),
+                                                 [str(f)[:150] for f in (_jw_st.get('files') or [])[:4]]))
+                                        sys.stdout.flush()
+                                        _jw_status_reported = True
+                                    except Exception as _jw_exc:
+                                        print('[BROWSER_CLICK][JWPROBE] failed: %s: %s'
+                                              % (type(_jw_exc).__name__, _jw_exc))
+                                        sys.stdout.flush()
+                                        _jw_status_reported = True
                                 dom_recs = []
                                 try:
                                     _dom_frames = list(page.frames)
