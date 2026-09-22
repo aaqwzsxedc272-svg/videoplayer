@@ -1149,16 +1149,40 @@ function Await($op, $type) {
         return $t.Result
     } catch { Say ('await=failed:' + $_.Exception.Message); return $null }
 }
+$pnType = $null
 try {
-    [Windows.Devices.Enumeration.Pnp.PnpObject,Windows.Devices.Enumeration,ContentType=WindowsRuntime] | Out-Null
+    $pnType = [Windows.Devices.Enumeration.Pnp.PnpObject]
     Say 'pnp=loaded'
 } catch { Say ('pnp=failed:' + $_.Exception.Message) }
-$props = [string[]]@('System.ItemNameDisplay', 'System.Devices.Aep.Battery.LevelPercent')
+$ov = @()
+if ($pnType) {
+    try { $ov = @($pnType.GetMethods() | Where-Object { $_.Name -eq 'FindAllAsync' }) } catch {}
+    # What is actually callable, printed before anything is attempted. Two
+    # runs were spent on PowerShell rejecting both the two- and the
+    # three-argument form, which says its overload binder cannot see the
+    # projected signatures at all rather than that they are absent.
+    $sigs = @()
+    foreach ($m in $ov) {
+        $ps = @()
+        foreach ($p in $m.GetParameters()) { $ps += $p.ParameterType.Name }
+        $sigs += ($ps -join '+')
+    }
+    Say ('overloads=' + ($sigs -join ' | '))
+}
+$mi = $ov | Where-Object { $_.GetParameters().Count -eq 3 } | Select-Object -First 1
+$props = New-Object 'System.Collections.Generic.List[string]'
+$props.Add('System.ItemNameDisplay') | Out-Null
+$props.Add('System.Devices.Aep.Battery.LevelPercent') | Out-Null
+$listType = $null
+try { $listType = [System.Collections.Generic.IReadOnlyList`1].MakeGenericType($pnType) } catch {}
 foreach ($kind in @('AssociatedEndpoints', 'Devices', 'DeviceInterfaces')) {
-    $found = $null
-    try {
-        $found = Await ([Windows.Devices.Enumeration.Pnp.PnpObject]::FindAllAsync([Windows.Devices.Enumeration.Pnp.PnpObjectType]::$kind, $props, '')) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Enumeration.Pnp.PnpObject]])
-    } catch { Say ($kind + '=failed:' + $_.Exception.Message); continue }
+    if (-not $pnType) { break }
+    if (-not $mi) { Say ($kind + '=no-3-argument-overload'); continue }
+    $enumVal = $null
+    try { $enumVal = [Enum]::Parse([Windows.Devices.Enumeration.Pnp.PnpObjectType], $kind) } catch { Say ($kind + '=enum:' + $_.Exception.Message); continue }
+    $op = $null
+    try { $op = $mi.Invoke($null, @($enumVal, $props, '')) } catch { Say ($kind + '=invoke:' + $_.Exception.Message); continue }
+    $found = Await $op $listType
     if (-not $found) { Say ($kind + '=none'); continue }
     $withCharge = 0
     $noCharge = @()
@@ -1215,6 +1239,7 @@ def _bluetooth_battery_levels():
             ['powershell', '-NoProfile', '-NonInteractive',
              '-ExecutionPolicy', 'Bypass', '-Command', _BATTERY_POWERSHELL],
             capture_output=True, text=True, timeout=25,
+            encoding='utf-8', errors='replace',
             startupinfo=startupinfo, creationflags=creationflags,
         )
     except Exception as exc:

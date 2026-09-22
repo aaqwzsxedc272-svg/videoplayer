@@ -12243,16 +12243,29 @@ report('await=timeout' in _log115,
 #      user's own language. Pinned here because nothing in Python can
 #      catch an argument count in a script it only ships as text.
 # -----------------------------------------------------------------------
-report(_script115.count('FindAllAsync(') == 1
-       and "$props, '')" in _script115,
-   'the enumeration call passes the empty AQS filter the properties '
-   'overload requires, since asking for the two-argument form is what '
-   'made every scope fail and the probe report nothing',
-   '%d call(s), filter present: %s' % (_script115.count('FindAllAsync('),
-                                       "$props, '')" in _script115))
-report('OutputEncoding' in _script115,
-   'and the console is put into UTF-8 first, so a failure message written '
-   'in the local language arrives readable instead of as mojibake')
+# Calling the method by name is gone entirely: PowerShell's overload
+# binder rejected both the two- and the three-argument form of a method
+# whose three-argument form certainly exists, so the signature is looked
+# up by reflection and invoked directly instead of being left to it.
+report(_script115.count('FindAllAsync(') == 0
+       and "$mi.Invoke" in _script115
+       and "GetParameters().Count -eq 3" in _script115,
+   'the enumeration goes through reflection on the three-argument '
+   'signature rather than a call PowerShell cannot resolve',
+   'direct calls=%d, reflection=%s' % (
+       _script115.count('FindAllAsync('), "$mi.Invoke" in _script115))
+report("$props, ''" in _script115
+       and 'List[string]' in _script115,
+   'with the property list and the empty filter it needs, as a type the '
+   'projected signature will actually accept')
+report("'overloads='" in _script115,
+   'and it prints which overloads it can see before trying any of them, '
+   'so a binder that disagrees with the API says so on the first run '
+   'instead of costing two')
+report('OutputEncoding' in _script115
+       and "encoding='utf-8'" in SRC,
+   'with the console set to UTF-8 and read back as UTF-8 -- setting only '
+   'one of the two is what turned the last message into mojibake')
 
 
 print('FAILURES:', FAILS)
