@@ -1184,7 +1184,24 @@ $props.Add('System.ItemNameDisplay') | Out-Null
 $props.Add('System.Devices.Aep.Battery.LevelPercent') | Out-Null
 $listType = $null
 try { $listType = [System.Collections.Generic.IReadOnlyList`1].MakeGenericType($pnType) } catch {}
-foreach ($kind in @('AssociatedEndpoints', 'Devices', 'DeviceInterfaces')) {
+# Read the scope names off the enum rather than spelling them out. They are
+# singular -- AssociationEndpoint, Device, DeviceInterface -- and a hand-
+# written list costs a whole field run every time a name is wrong.
+# AssociationEndpoint goes first because that is the scope where a paired
+# peripheral's System.Devices.Aep.Battery.LevelPercent lives; the rest are
+# fallbacks, and Unknown (0) is documented as unused.
+$scopes = @()
+try {
+    $names = @([Enum]::GetNames([Windows.Devices.Enumeration.Pnp.PnpObjectType]))
+    Say ('enumnames=' + ($names -join ','))
+    foreach ($want in @('AssociationEndpoint', 'Device', 'DeviceInterface')) {
+        if ($names -contains $want) { $scopes += $want }
+    }
+    foreach ($n in $names) {
+        if ($n -ne 'Unknown' -and $scopes -notcontains $n) { $scopes += $n }
+    }
+} catch { Say ('enumnames=failed:' + $_.Exception.Message) }
+foreach ($kind in $scopes) {
     if (-not $pnType) { break }
     if (-not $mi) { Say ($kind + '=no-3-argument-overload'); continue }
     $enumVal = $null

@@ -12177,9 +12177,14 @@ report(not _st114.battery_label.shown,
 #      reports every step it took.
 # -----------------------------------------------------------------------
 _script115 = str(_g114.get('_BATTERY_POWERSHELL') or '')
-report(all(kind in _script115 for kind in
-           ('AssociatedEndpoints', 'Devices', 'DeviceInterfaces')),
-   'the probe asks all three device scopes rather than betting on one, '
+# Used to assert three literal scope names. It was right when written and
+# it caught this rewrite correctly, but the names it pinned were ones I
+# had made up -- PnpObjectType has no 'AssociatedEndpoints'. What the
+# assertion was actually for is the coverage, so that is what it tests
+# now, and section 119 pins where the names come from.
+report('foreach ($kind in $scopes)' in _script115
+       and '$scopes += ' in _script115,
+   'the probe covers every device scope rather than betting on one, '
    'since the charge is not exposed the same way in each')
 report(_script115.count('Say ') >= 10 and "'SilentlyContinue'" not in _script115,
    'and it no longer swallows its own errors, which is what left the last '
@@ -12456,6 +12461,37 @@ finally:
 report('range ignored (HTTP 200) for chunk fetch' not in SRC,
    'the error text that made a working response look like a broken one '
    'is gone from the source')
+
+
+# -----------------------------------------------------------------------
+# 119. The probe reached the API at last and the field log named the next
+#      wall: "La valeur demandee 'AssociatedEndpoints' est introuvable."
+#      PnpObjectType has no such member. The members are singular --
+#      AssociationEndpoint, Device, DeviceInterface -- and the list of
+#      three had been written from memory, not from the enum. Rather than
+#      substitute a second guessed list, the scopes are now read off the
+#      enum itself, so a name cannot be wrong again.
+# -----------------------------------------------------------------------
+_bad119 = [_w for _w in ("'AssociatedEndpoints'", "'Devices'", "'DeviceInterfaces'")
+           if _w in _script115]
+report(not _bad119,
+   'the invented scope names are gone from the script',
+   'still present: %s' % (_bad119 or 'none'))
+report('[Enum]::GetNames(' in _script115 and 'foreach ($kind in $scopes)' in _script115,
+   'the scopes are read off PnpObjectType instead of being spelled out, '
+   'so the list cannot drift from the enum it enumerates',
+   'GetNames=%s' % ('[Enum]::GetNames(' in _script115))
+_p119 = [_script115.find(_w) for _w in ("'AssociationEndpoint'", "'Device'",
+                                        "'DeviceInterface'")]
+report(-1 not in _p119 and _p119 == sorted(_p119),
+   'and AssociationEndpoint is asked first, that being the scope where a '
+   'paired peripheral reports System.Devices.Aep.Battery.LevelPercent',
+   'offsets=%s' % _p119)
+report("-ne 'Unknown'" in _script115,
+   'skipping Unknown, which the enum documents as unused')
+report("'enumnames='" in _script115,
+   'printing every name the enum actually has, so the next disagreement '
+   'is answered on the first run rather than the fourth')
 
 
 print('FAILURES:', FAILS)
