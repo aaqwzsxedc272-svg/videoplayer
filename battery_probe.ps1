@@ -49,11 +49,11 @@ function Await($op, $type) {
         if ($box.error) {
             $e = $box.error
             try { if ($e.InnerException) { $e = $e.InnerException } } catch {}
-            Say ('await=failed:' + $e.Message); return $null
+            Say ('await=failed:' + $e.ToString()); return $null
         }
         if (-not $box.done) { Say 'await=timeout'; return $null }
         return $box.result
-    } catch { Say ('await=failed:' + $_.Exception.Message); return $null }
+    } catch { Say ('await=failed:' + $_.Exception.ToString()); return $null }
 }
 
 # Both projections, registered before either type is used: PowerShell 5.1
