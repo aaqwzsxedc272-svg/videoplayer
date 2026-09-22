@@ -1122,6 +1122,101 @@ SWP_NOACTIVATE = 0x0010
 SWP_SHOWWINDOW = 0x0040
 SWP_NOOWNERZORDER = 0x0200
 
+# Bluetooth audio devices report their charge, but not through anything Qt
+# can see: QMediaDevices enumerates outputs and knows nothing about power.
+# Windows keeps the level in its device-enumeration store, which is WinRT
+# only -- there is no Win32 call for a Bluetooth peripheral's battery.
+# PowerShell is used because it ships with Windows and can load WinRT types
+# directly, so this stays dependency-free.
+_BATTERY_POWERSHELL = r'''
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
+function Await($op, $type) {
+    if (-not $asTask) { return $null }
+    $t = $asTask.MakeGenericMethod($type).Invoke($null, @($op))
+    if (-not $t.Wait(5000)) { return $null }
+    return $t.Result
+}
+[Windows.Devices.Enumeration.Pnp.PnpObject,Windows.Devices.Enumeration,ContentType=WindowsRuntime] | Out-Null
+$props = [string[]]@('System.ItemNameDisplay', 'System.Devices.Aep.Battery.LevelPercent')
+$found = Await ([Windows.Devices.Enumeration.Pnp.PnpObject]::FindAllAsync([Windows.Devices.Enumeration.Pnp.PnpObjectType]::AssociatedEndpoints, $props)) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Enumeration.Pnp.PnpObject]])
+if ($found) {
+    foreach ($d in $found) {
+        $lvl = $d.Properties['System.Devices.Aep.Battery.LevelPercent']
+        if ($null -ne $lvl) {
+            $nm = $d.Properties['System.ItemNameDisplay']
+            if (-not $nm) { $nm = $d.Name }
+            Write-Output (@($nm, $lvl) -join "`t")
+        }
+    }
+}
+'''
+
+_BATTERY_PROBE_STATE = {'reported': False}
+
+# Labels Windows uses when it has no model name for an audio device. They
+# match almost anything, so they are the weakest possible identification.
+_GENERIC_AUDIO_NAMES = frozenset((
+    'headphones', 'headphone', 'headset', 'earphones', 'earphone',
+    'earbuds', 'buds', 'airpods', 'speaker', 'speakers', 'audio',
+))
+
+
+def _bluetooth_battery_levels():
+    """{lowercase device name: charge percent}, empty when there is nothing.
+
+    Returns {} rather than raising on every failure path: a battery reading
+    is decoration, and it must never be able to cost the player anything.
+    The first probe always logs what came back, so a top bar with no battery
+    in it says why instead of leaving it to guesswork.
+    """
+    if os.name != 'nt':
+        return {}
+    import subprocess
+    startupinfo = None
+    creationflags = 0
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    except Exception:
+        startupinfo = None
+        creationflags = 0
+    try:
+        proc = subprocess.run(
+            ['powershell', '-NoProfile', '-NonInteractive',
+             '-ExecutionPolicy', 'Bypass', '-Command', _BATTERY_POWERSHELL],
+            capture_output=True, text=True, timeout=25,
+            startupinfo=startupinfo, creationflags=creationflags,
+        )
+    except Exception as exc:
+        if not _BATTERY_PROBE_STATE['reported']:
+            _BATTERY_PROBE_STATE['reported'] = True
+            print(f'[BATTERY] probe could not run: '
+                  f'{type(exc).__name__}: {exc}', flush=True)
+        return {}
+    levels = {}
+    for line in str(getattr(proc, 'stdout', '') or '').splitlines():
+        line = line.strip()
+        if '\t' not in line:
+            continue
+        name, _, value = line.rpartition('\t')
+        try:
+            levels[name.strip().lower()] = int(float(value.strip()))
+        except Exception:
+            continue
+    if not _BATTERY_PROBE_STATE['reported']:
+        _BATTERY_PROBE_STATE['reported'] = True
+        detail = f': {sorted(levels.items())}' if levels else ''
+        err = str(getattr(proc, 'stderr', '') or '').strip()
+        if err:
+            detail = f'{detail} -- {err[:200]}'
+        print(f'[BATTERY] Windows reported {len(levels)} device(s) with a '
+              f'charge{detail}', flush=True)
+    return levels
+
+
 # Windows taskbar/appbar constants
 ABM_GETSTATE = 0x00000004
 ABM_GETTASKBARPOS = 0x00000005
@@ -8687,6 +8782,22 @@ class VideoPlayer(QMainWindow):
         self.download_progress = QProgressBar(self)
         self.download_progress.setRange(0, 100)
         self.download_progress.setValue(0)
+
+        # Charge of the current audio device, in the top bar beside the
+        # subtitle sync tool. Stays hidden until a device actually reports
+        # a level, so a wired headset or a machine with no Bluetooth shows
+        # nothing rather than an empty box.
+        self.battery_label = QLabel('', self)
+        self.battery_label.setVisible(False)
+        self.battery_label.setStyleSheet(
+            'QLabel { background:transparent; color:#3a8ee6; '
+            'padding:2px 6px; font-size:11px; font-weight:bold; }')
+        self._battery_levels = {}
+        self._battery_refresh_timer = QTimer(self)
+        self._battery_refresh_timer.setInterval(60000)
+        self._battery_refresh_timer.timeout.connect(self._refresh_audio_battery)
+        self._battery_refresh_timer.start()
+        QTimer.singleShot(2500, self._refresh_audio_battery)
         
         # Subtitle Sync Tool
         self.sub_sync_container = QWidget(self)
@@ -57624,6 +57735,16 @@ try {
                 self.sub_sync_container.raise_()
                 right_offset += self.sub_sync_container.width() + margin
 
+        # 2.6 Audio device battery -- beside the subtitle sync tool, which
+        # is what the rest of the row is measured from.
+        if hasattr(self, 'battery_label') and self.battery_label.isVisible():
+            self.battery_label.adjustSize()
+            bat_x = self.width() - self.battery_label.width() - right_offset
+            bat_y = max(2, (menubar_h - self.battery_label.height()) // 2)
+            self.battery_label.move(bat_x, bat_y)
+            self.battery_label.raise_()
+            right_offset += self.battery_label.width() + margin
+
         # 3. Download Button
         if hasattr(self, 'download_btn') and self.download_btn.isVisible():
             self.download_btn.adjustSize()
@@ -57667,6 +57788,109 @@ try {
         else:
             self.mp3_progress.hide()
         self._reposition_mp3_btn()
+
+    def _refresh_audio_battery(self):
+        """Read the audio device's charge, off the GUI thread.
+
+        The probe shells out to PowerShell, which is far too slow to run
+        here, so it goes to the thread pool and the answer comes back
+        through a queued slot.
+        """
+        def _work():
+            levels = _bluetooth_battery_levels()
+            try:
+                from PyQt6.QtCore import Q_ARG
+                QMetaObject.invokeMethod(
+                    self, 'apply_audio_battery',
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(str, json.dumps(levels)),
+                )
+            except Exception:
+                pass
+
+        try:
+            self.thread_pool.submit(_work)
+        except Exception:
+            pass
+
+    def _current_audio_device_name(self):
+        try:
+            return str(self.audio_output.device().description() or '')
+        except Exception:
+            return ''
+
+    @pyqtSlot(str)
+    def apply_audio_battery(self, payload):
+        """Show the charge of whatever audio device is currently selected.
+
+        Windows reports every paired Bluetooth device that has a level, so
+        the one that matters is picked by name: the selected output first,
+        then any headphone-like device, so the number follows the audio
+        rather than showing some earbuds sitting in their case.
+        """
+        try:
+            levels = json.loads(payload or '{}')
+        except Exception:
+            levels = {}
+        if not isinstance(levels, dict):
+            levels = {}
+        self._battery_levels = levels
+        if not levels:
+            self.battery_label.setVisible(False)
+            self._reposition_hb_overlay()
+            return
+
+        current = self._current_audio_device_name().strip().lower()
+        percent = None
+        device = ''
+        if current:
+            # Best match wins, not first: Windows can report a bare
+            # 'Headphones' alongside the specific 'WH-1000XM4', and dict
+            # order would otherwise decide which one the number came from.
+            # A generic label carries less identifying information than a
+            # model name, so it loses; length settles everything else.
+            best_score = (-1, -1)
+            for name, value in levels.items():
+                if not name:
+                    continue
+                if name not in current and current not in name:
+                    continue
+                score = (0 if name.strip() in _GENERIC_AUDIO_NAMES else 1,
+                         len(name))
+                if score > best_score:
+                    best_score = score
+                    percent = value
+                    device = name
+        if percent is None:
+            for name, value in levels.items():
+                if self._is_headphone_like_device(name):
+                    percent = value
+                    device = name
+                    break
+        if percent is None:
+            self.battery_label.setVisible(False)
+            self._reposition_hb_overlay()
+            return
+
+        try:
+            percent = max(0, min(100, int(percent)))
+        except Exception:
+            self.battery_label.setVisible(False)
+            self._reposition_hb_overlay()
+            return
+        color = '#e05252' if percent <= 15 else (
+            '#e0a63a' if percent <= 35 else '#4caf7d')
+        self.battery_label.setText(f'\U0001F50B {percent}%')
+        self.battery_label.setToolTip(
+            f'{device or "Audio device"} battery: {percent}%')
+        self.battery_label.setStyleSheet(
+            'QLabel { background:transparent; color:' + color + '; '
+            'padding:2px 6px; font-size:11px; font-weight:bold; }')
+        if self._is_app_fullscreen():
+            self.battery_label.setVisible(False)
+        else:
+            self.battery_label.setVisible(True)
+        self._reposition_hb_overlay()
 
     def _update_download_topbar_ui(self):
         if not hasattr(self, 'download_dlg') or not hasattr(self, 'download_btn'):

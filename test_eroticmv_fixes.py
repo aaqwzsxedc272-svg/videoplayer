@@ -11952,5 +11952,223 @@ report('TRUNCATED' not in _log113,
    'report rather than a truncation')
 
 
+# -----------------------------------------------------------------------
+# 114. The charge of the audio device, in the top bar. Windows reports
+#      every paired Bluetooth device that has a level, so the part that can
+#      actually go wrong is picking the one that is in use -- showing the
+#      number for earbuds sitting in their case instead of the headset on
+#      your head would be worse than showing nothing.
+# -----------------------------------------------------------------------
+_bat114 = [n for n in TREE.body if isinstance(n, ast.FunctionDef)
+           and n.name == '_bluetooth_battery_levels']
+report(len(_bat114) == 1, 'the player can ask Windows for a device charge')
+
+# The module-level dict the probe reports through, seeded here because
+# only the function is lifted, not the assignment beside it.
+# The probe's two module-level companions come with it: the PowerShell
+# script it runs, and the dict it reports through. Lifting the function on
+# its own leaves it raising NameError the moment it is called.
+_ps114 = [n for n in TREE.body if isinstance(n, ast.Assign)
+          and getattr(n.targets[0], 'id', '') in
+          ('_BATTERY_POWERSHELL', '_BATTERY_PROBE_STATE',
+           '_GENERIC_AUDIO_NAMES')]
+report(len(_ps114) == 3,
+   'with the script it runs and the state it reports through',
+   'found %d' % len(_ps114))
+_g114 = {'print': print, 'os': os,
+         '_BATTERY_PROBE_STATE': {'reported': False}}
+if _ps114:
+    exec(compile(ast.Module(body=_ps114, type_ignores=[]), 'batps114',
+                 'exec'), _g114)
+if _bat114:
+    exec(compile(ast.Module(body=_bat114, type_ignores=[]), 'bat114', 'exec'),
+         _g114)
+_probe114 = _g114.get('_bluetooth_battery_levels') or (lambda: {})
+
+report(_probe114() == {},
+   'and on anything that is not Windows it says nothing rather than '
+   'guessing, so the label simply never appears', repr(_probe114()))
+
+
+class _Proc114(object):
+    def __init__(self, stdout='', stderr=''):
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+import sys as _sys114
+import types as _types114
+import os as _os114
+
+
+def _probe_run114(stdout, stderr='', exc=None):
+    calls = {}
+
+    def _run(cmd, **kwargs):
+        calls['cmd'] = cmd
+        calls['kwargs'] = kwargs
+        if exc is not None:
+            raise exc
+        return _Proc114(stdout, stderr)
+
+    mod = _types114.ModuleType('subprocess')
+    mod.run = _run
+    mod.CREATE_NO_WINDOW = 0x08000000
+    saved = _sys114.modules.get('subprocess')
+    saved_name = _os114.name
+    _sys114.modules['subprocess'] = mod
+    _g114['_BATTERY_PROBE_STATE']['reported'] = True
+    _os114.name = 'nt'
+    try:
+        out = _probe114()
+    finally:
+        _os114.name = saved_name
+        if saved is None:
+            _sys114.modules.pop('subprocess', None)
+        else:
+            _sys114.modules['subprocess'] = saved
+    return out, calls
+
+
+_out114, _calls114 = _probe_run114(
+    'WH-1000XM4\t78\nAirPods Pro\t45\r\n')
+report(_out114 == {'wh-1000xm4': 78, 'airpods pro': 45},
+   'Windows\' answer is parsed into charge per device, lowercased so it can '
+   'be matched against the audio output name', repr(_out114))
+# .get() rather than an index: a subscript on a dict that a failed run
+# never filled aborts the whole file instead of recording a failure.
+_cmd114 = _calls114.get('cmd') or ['']
+_kw114 = _calls114.get('kwargs') or {}
+report(str(_cmd114[0]).lower() == 'powershell'
+       and '-NoProfile' in _cmd114,
+   'through a shell that ships with Windows, so nothing has to be installed')
+report(_kw114.get('startupinfo') is not None
+       or _kw114.get('creationflags') is not None,
+   'with its window suppressed -- a console flashing up once a minute would '
+   'be its own bug')
+
+_out114, _ = _probe_run114('garbage line\nNoBatteryHere\nBuds\t12\n')
+report(_out114 == {'buds': 12},
+   'and a line with no level in it is skipped rather than becoming a device')
+_out114, _ = _probe_run114('', exc=OSError('no powershell'))
+report(_out114 == {},
+   'and a machine where the probe cannot run at all costs nothing but an '
+   'empty label')
+
+_apply114 = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+             and n.name == 'apply_audio_battery']
+report(len(_apply114) == 1, 'the top bar can be told what to show')
+
+# pyqtSlot comes with the source segment, so it has to exist here; a
+# pass-through decorator is all the lifted function needs.
+_g114b = {'print': print, 'json': json,
+          '_GENERIC_AUDIO_NAMES': _g114.get('_GENERIC_AUDIO_NAMES')
+          or frozenset(),
+          'pyqtSlot': lambda *a, **k: (lambda f: f)}
+if _apply114:
+    exec(compile(ast.Module(body=_apply114, type_ignores=[]), 'apply114',
+                 'exec'), _g114b)
+
+
+class _Label114(object):
+    def __init__(self):
+        self.text = ''
+        self.tip = ''
+        self.style = ''
+        self.shown = False
+
+    def setText(self, value):
+        self.text = value
+
+    def setToolTip(self, value):
+        self.tip = value
+
+    def setStyleSheet(self, value):
+        self.style = value
+
+    def setVisible(self, value):
+        self.shown = bool(value)
+
+
+class _BatStub114(object):
+    apply_audio_battery = (_g114b.get('apply_audio_battery')
+                           or (lambda self, payload: None))
+
+    def __init__(self, device):
+        self.battery_label = _Label114()
+        self._device = device
+        self.repositioned = 0
+
+    def _current_audio_device_name(self):
+        return self._device
+
+    def _is_headphone_like_device(self, value):
+        return any(k in str(value or '').lower() for k in
+                   ('headphone', 'headset', 'earphone', 'earbud',
+                    'airpod', 'buds'))
+
+    def _is_app_fullscreen(self):
+        return False
+
+    def _reposition_hb_overlay(self):
+        self.repositioned += 1
+
+
+_st114 = _BatStub114('WH-1000XM4 (Stereo)')
+_st114.apply_audio_battery(
+    json.dumps({'wh-1000xm4': 78, 'linkbuds': 9}))
+report(_st114.battery_label.text == '\U0001F50B 78%'
+       and _st114.battery_label.shown,
+   'the device that is actually selected is the one whose charge is shown, '
+   'matched by name rather than by whichever came back first',
+   repr(_st114.battery_label.text))
+report(_st114.repositioned > 0,
+   'and the top bar is re-laid out so it lands beside the subtitle tool')
+
+_st114 = _BatStub114('Headphones (WH-1000XM4)')
+_st114.apply_audio_battery(json.dumps({'headphones': 20, 'wh-1000xm4': 78}))
+report(_st114.battery_label.text == '\U0001F50B 78%',
+   'and the most specific name wins, so a generic Headphones entry cannot '
+   'take the number away from the device it actually belongs to',
+   repr(_st114.battery_label.text))
+
+_st114 = _BatStub114('Speakers (Realtek Audio)')
+_st114.apply_audio_battery(json.dumps({'airpods pro': 62}))
+report(_st114.battery_label.text == '\U0001F50B 62%',
+   'and when the selected output reports no charge at all, a headphone-like '
+   'device is used rather than showing nothing',
+   repr(_st114.battery_label.text))
+
+_st114 = _BatStub114('Speakers (Realtek Audio)')
+_st114.apply_audio_battery(json.dumps({'monitor audio': 55}))
+report(not _st114.battery_label.shown,
+   'and a device that is neither the selected output nor headphone-like is '
+   'left alone, since its charge says nothing about what you are hearing')
+
+_st114 = _BatStub114('Buds')
+_st114.apply_audio_battery(json.dumps({'buds': 55}))
+report(_st114.battery_label.shown, 'a charge is on screen to begin with')
+_st114.apply_audio_battery('{}')
+report(not _st114.battery_label.shown,
+   'and an empty answer hides the label instead of leaving a stale charge '
+   'on screen')
+
+_st114 = _BatStub114('Buds')
+_st114.apply_audio_battery(json.dumps({'buds': 140}))
+report(_st114.battery_label.text == '\U0001F50B 100%',
+   'with an out-of-range reading clamped rather than printed as it came')
+_st114.apply_audio_battery(json.dumps({'buds': 10}))
+report('#e05252' in _st114.battery_label.style,
+   'and a nearly flat device is coloured as a warning',
+   repr(_st114.battery_label.style[:60]))
+report('buds' in _st114.battery_label.tip and '10%' in _st114.battery_label.tip,
+   'with the device named in the tooltip, since the bar has room only for '
+   'the number', repr(_st114.battery_label.tip))
+_st114.apply_audio_battery('not json at all')
+report(not _st114.battery_label.shown,
+   'and an unparseable answer hides the label rather than raising on the '
+   'GUI thread')
+
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
