@@ -1226,6 +1226,25 @@ $BAT = 'System.Devices.Aep.Battery.LevelPercent'
 
 function TryCombo($label, $api, $kv, [string[]]$propNames) {
     $p = MakeProps $propNames
+    # Try the projected static method first. MethodInfo.Invoke returns a
+    # bare __ComObject on Windows PowerShell, which cannot be handed to
+    # AsTask as the projected IAsyncOperation even when the invocation itself
+    # succeeded. The direct call preserves the projection.
+    $direct = $null
+    try {
+        if ($api -eq 'di') { $direct = $diType::FindAllAsync('', $p, $kv) }
+        else { $direct = $pnType::FindAllAsync($kv, $p, '') }
+    } catch { Say ($label + '=direct:' + $_.Exception.Message) }
+    if ($direct) {
+        $lt = $null
+        try {
+            if ($api -eq 'di') { $lt = [Windows.Devices.Enumeration.DeviceInformationCollection] }
+            else { $lt = [Windows.Devices.Enumeration.Pnp.PnpObjectCollection] }
+        } catch { Say ('listtype=failed:' + $_.Exception.Message) }
+        $found = Await $direct $lt
+        if ($found) { Say ($label + '=ok count=' + $found.Count); return $found }
+        Say ($label + '=await-null')
+    }
     $op = $null
     try {
         if ($api -eq 'di') { $op = CallFindAll $diType @('', $p, $kv) }
@@ -1241,20 +1260,6 @@ function TryCombo($label, $api, $kv, [string[]]$propNames) {
         if ($api -eq 'di') { $lt = [Windows.Devices.Enumeration.DeviceInformationCollection] }
         else { $lt = [Windows.Devices.Enumeration.Pnp.PnpObjectCollection] }
     } catch { Say ('listtype=failed:' + $_.Exception.Message) }
-    # A directly-called static method comes back properly projected; one
-    # reached through MethodInfo.Invoke is a bare __ComObject, which is
-    # what the await could not convert. So try the plain call first.
-    $direct = $null
-    try {
-        if ($api -eq 'di') { $direct = $diType::FindAllAsync('', $p, $kv) }
-        else { $direct = $pnType::FindAllAsync($kv, $p, '') }
-    } catch { Say ($label + '=direct:' + $_.Exception.Message) }
-    if ($direct) {
-        $found = Await $direct $lt
-        if (-not $found) { Say ($label + '=await-null'); return $null }
-        Say ($label + '=ok count=' + $found.Count)
-        return $found
-    }
     $found = Await $op $lt
     if (-not $found) { Say ($label + '=await-null'); return $null }
     Say ($label + '=ok count=' + $found.Count)
