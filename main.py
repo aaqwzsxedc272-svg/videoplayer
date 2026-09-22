@@ -1173,7 +1173,7 @@ function Await($op, $type) {
         try { $waiter.Wait(10000) | Out-Null } catch {
             $e = $_.Exception
             try { if ($e.InnerException) { $e = $e.InnerException } } catch {}
-            Say ('await=failed:' + $e.Message)
+            Say ('await=failed:' + $e.ToString())
             return $null
         }
         if ($box.error) {
