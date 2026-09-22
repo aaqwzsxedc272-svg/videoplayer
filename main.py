@@ -1130,6 +1130,7 @@ SWP_NOOWNERZORDER = 0x0200
 # directly, so this stays dependency-free.
 _BATTERY_POWERSHELL = r"""
 $ErrorActionPreference = 'Continue'
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 function Say($m) { Write-Output ('#diag ' + $m) }
 try {
     Add-Type -AssemblyName System.Runtime.WindowsRuntime
@@ -1156,7 +1157,7 @@ $props = [string[]]@('System.ItemNameDisplay', 'System.Devices.Aep.Battery.Level
 foreach ($kind in @('AssociatedEndpoints', 'Devices', 'DeviceInterfaces')) {
     $found = $null
     try {
-        $found = Await ([Windows.Devices.Enumeration.Pnp.PnpObject]::FindAllAsync([Windows.Devices.Enumeration.Pnp.PnpObjectType]::$kind, $props)) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Enumeration.Pnp.PnpObject]])
+        $found = Await ([Windows.Devices.Enumeration.Pnp.PnpObject]::FindAllAsync([Windows.Devices.Enumeration.Pnp.PnpObjectType]::$kind, $props, '')) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Enumeration.Pnp.PnpObject]])
     } catch { Say ($kind + '=failed:' + $_.Exception.Message); continue }
     if (-not $found) { Say ($kind + '=none'); continue }
     $withCharge = 0

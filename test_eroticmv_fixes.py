@@ -12235,5 +12235,25 @@ report('await=timeout' in _log115,
    'like a machine with no Bluetooth at all', repr(_log115[:100]))
 
 
+# -----------------------------------------------------------------------
+# 116. The probe reported nothing at all, on a machine with a headset
+#      connected, because PnpObject.FindAllAsync has no two-argument
+#      overload: the form that takes a property list also takes an AQS
+#      filter. All three scopes failed identically and said so in the
+#      user's own language. Pinned here because nothing in Python can
+#      catch an argument count in a script it only ships as text.
+# -----------------------------------------------------------------------
+report(_script115.count('FindAllAsync(') == 1
+       and "$props, '')" in _script115,
+   'the enumeration call passes the empty AQS filter the properties '
+   'overload requires, since asking for the two-argument form is what '
+   'made every scope fail and the probe report nothing',
+   '%d call(s), filter present: %s' % (_script115.count('FindAllAsync('),
+                                       "$props, '')" in _script115))
+report('OutputEncoding' in _script115,
+   'and the console is put into UTF-8 first, so a failure message written '
+   'in the local language arrives readable instead of as mojibake')
+
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
