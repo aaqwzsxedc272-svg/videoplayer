@@ -31,7 +31,13 @@ function Await($op, $type) {
         $opBase = $op
         try { $opBase = $op.PsObject.BaseObject } catch {}
         $t = $asTask.MakeGenericMethod($type).Invoke($null, @($opBase))
-        if (-not $t.Wait(8000)) { Say 'await=timeout'; return $null }
+        # Windows PowerShell runs this probe on STA. Blocking that STA with
+        # Task.Wait prevents the WinRT completion from being delivered, so
+        # wait from a pool thread instead and only join that waiter here.
+        $waiter = [System.Threading.Tasks.Task]::Run([Action]{ $t.Wait(8000) })
+        if (-not $waiter.Wait(10000) -or -not $t.IsCompleted) {
+            Say 'await=timeout'; return $null
+        }
         return $t.Result
     } catch { Say ('await=failed:' + $_.Exception.Message); return $null }
 }
