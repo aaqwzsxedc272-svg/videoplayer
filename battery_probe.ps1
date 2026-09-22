@@ -95,7 +95,7 @@ function CallFindAll($type, $argValues) {
     return $mi.Invoke($null, $raw)
 }
 
-$BAT = 'System.Devices.Aep.Battery.LevelPercent'
+$BAT = 'System.Devices.BatteryLifePercent'
 
 function TryCombo($label, $api, $kv, [string[]]$propNames) {
     $p = MakeProps $propNames
