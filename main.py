@@ -1144,7 +1144,7 @@ function Emit($m) { [Console]::Out.WriteLine($m) }
 # directly and only use the older WinRT ladder if this returns nothing.
 try {
     $bt = @()
-    foreach ($dev in @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue)) {
+    foreach ($dev in @(Get-PnpDevice -PresentOnly -Class Bluetooth -ErrorAction SilentlyContinue)) {
         try {
             $prop = Get-PnpDeviceProperty -InstanceId $dev.InstanceId -KeyName '{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2' -ErrorAction SilentlyContinue
             if ($prop -and $null -ne $prop.Data) {
@@ -58246,7 +58246,14 @@ try {
                 if not name:
                     continue
                 if name not in current and current not in name:
-                    continue
+                    # Windows exposes separate endpoint names (for example
+                    # 'itel T1Neo Stereo' versus 'itel T1Neo Hands-Free AG').
+                    # Match their stable model tokens when the endpoint
+                    # suffix differs, but require a meaningful shared token.
+                    _a = {x for x in name.lower().replace('-', ' ').replace('_', ' ').split() if len(x) >= 4}
+                    _b = {x for x in current.lower().replace('-', ' ').replace('_', ' ').split() if len(x) >= 4}
+                    if len(_a & _b) < 2:
+                        continue
                 score = (0 if name.strip() in _GENERIC_AUDIO_NAMES else 1,
                          len(name))
                 if score > best_score:
