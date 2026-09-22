@@ -35,7 +35,9 @@ function Await($op, $type) {
         # Task.Wait prevents the WinRT completion from being delivered, so
         # wait from a pool thread instead and only join that waiter here.
         $box = @{ result = $null; error = $null; done = $false }
+        $rs = [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace
         $waiter = [System.Threading.Tasks.Task]::Run([Action]{
+            [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace = $rs
             try { $box.result = $t.GetAwaiter().GetResult() }
             catch { $box.error = $_.Exception; $box.done = $true; return }
             $box.done = $true
