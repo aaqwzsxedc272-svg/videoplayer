@@ -1144,7 +1144,11 @@ if ($asTask) { Say 'astask=ok' } else { Say 'astask=missing' }
 function Await($op, $type) {
     if (-not $asTask) { return $null }
     try {
-        $t = $asTask.MakeGenericMethod($type).Invoke($null, @($op))
+        # MethodInfo.Invoke sees the PSObject wrapper, not the object inside
+        # it, so a plain method call would work here and this one does not.
+        $opBase = $op
+        try { $opBase = $op.PsObject.BaseObject } catch {}
+        $t = $asTask.MakeGenericMethod($type).Invoke($null, @($opBase))
         if (-not $t.Wait(6000)) { Say 'await=timeout'; return $null }
         return $t.Result
     } catch { Say ('await=failed:' + $_.Exception.Message); return $null }
@@ -1207,7 +1211,15 @@ foreach ($kind in $scopes) {
     $enumVal = $null
     try { $enumVal = [Enum]::Parse([Windows.Devices.Enumeration.Pnp.PnpObjectType], $kind) } catch { Say ($kind + '=enum:' + $_.Exception.Message); continue }
     $op = $null
-    try { $op = $mi.Invoke($null, @($enumVal, $props, '')) } catch { Say ($kind + '=invoke:' + $_.Exception.Message); continue }
+    # Same trap, and this is the one the field log reported: a List[string]
+    # reaches the binder as a PSObject and the conversion to
+    # IEnumerable`1[System.String] fails. Hand Invoke the real objects.
+    $enumBase = $enumVal
+    $propsBase = $props
+    try { $enumBase = $enumVal.PsObject.BaseObject } catch {}
+    try { $propsBase = $props.PsObject.BaseObject } catch {}
+    $op = $null
+    try { $op = $mi.Invoke($null, @($enumBase, $propsBase, '')) } catch { Say ($kind + '=invoke:' + $_.Exception.Message); continue }
     $found = Await $op $listType
     if (-not $found) { Say ($kind + '=none'); continue }
     $withCharge = 0

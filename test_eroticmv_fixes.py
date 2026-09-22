@@ -12259,10 +12259,19 @@ report(_script115.count('FindAllAsync(') == 0
    'signature rather than a call PowerShell cannot resolve',
    'direct calls=%d, reflection=%s' % (
        _script115.count('FindAllAsync('), "$mi.Invoke" in _script115))
-report("$props, ''" in _script115
+# Second time an assertion here pinned a literal argument list rather than
+# what the call does. Parse the actual arguments instead, so a rename in
+# the script stops invalidating it.
+_i116 = _script115.find('$mi.Invoke($null, @(')
+_args116 = ''
+if _i116 != -1:
+    _args116 = _script115[_i116 + len('$mi.Invoke($null, @('):_script115.find('))', _i116)]
+_parts116 = [p.strip() for p in _args116.split(',')] if _args116 else []
+report(len(_parts116) == 3 and _parts116[-1] == "''"
        and 'List[string]' in _script115,
    'with the property list and the empty filter it needs, as a type the '
-   'projected signature will actually accept')
+   'projected signature will actually accept',
+   'args=%s' % (_parts116,))
 report("'overloads='" in _script115,
    'and it prints which overloads it can see before trying any of them, '
    'so a binder that disagrees with the API says so on the first run '
@@ -12492,6 +12501,41 @@ report("-ne 'Unknown'" in _script115,
 report("'enumnames='" in _script115,
    'printing every name the enum actually has, so the next disagreement '
    'is answered on the first run rather than the fourth')
+
+
+# -----------------------------------------------------------------------
+# 120. The probe reached the method, and MethodInfo.Invoke refused the
+#      arguments: "Impossible de convertir l'objet de type
+#      'System.Management.Automation.PSObject' en type
+#      'System.Collections.Generic.IEnumerable`1[System.String]'."
+#      Invoke does not unwrap PowerShell's PSObject wrapper the way a
+#      normal method call does, so a List[string] arrives as a PSObject.
+#      The same wrapper is passed at the await site, which had not failed
+#      yet only because nothing had ever produced an operation to await.
+# -----------------------------------------------------------------------
+_invoke120 = [_l.strip() for _l in _script115.splitlines() if '.Invoke(' in _l]
+report(len(_invoke120) == 2,
+   'both reflection call sites are accounted for',
+   '%d site(s): %s' % (len(_invoke120), _invoke120))
+report(all('Base' in _l for _l in _invoke120),
+   'and neither one passes PowerShell a wrapped value',
+   '; '.join(_l[:70] for _l in _invoke120))
+report(_script115.count('.PsObject.BaseObject') == 3
+       and '$props.PsObject.BaseObject' in _script115
+       and '$enumVal.PsObject.BaseObject' in _script115
+       and '$op.PsObject.BaseObject' in _script115,
+   'the property list, the enum value and the awaited operation are all '
+   'unwrapped -- fixing only the line the log complained about would '
+   'have moved the identical failure one call further down',
+   '%d unwrap(s)' % _script115.count('.PsObject.BaseObject'))
+report(_script115.count('try { $propsBase') == 1
+       and _script115.count('try { $opBase') == 1
+       and _script115.count('try { $enumBase') == 1,
+   'each unwrap guarded, so an unexpected wrapper falls back to the '
+   'original value and still reports through the invoke line rather than '
+   'dying quietly')
+report('@($op)' not in _script115 and '@($enumVal, $props,' not in _script115,
+   'with no wrapped form left behind to be picked up again later')
 
 
 print('FAILURES:', FAILS)
