@@ -1209,11 +1209,15 @@ function CallFindAll($type, $argValues) {
         $mi = $type.GetMethods() | Where-Object { $_.Name -eq 'FindAllAsync' -and $_.GetParameters().Count -eq $argValues.Count } | Select-Object -First 1
     } catch {}
     if (-not $mi) { return $null }
-    $raw = @()
-    foreach ($v in $argValues) {
-        $b = $v
-        try { $b = $v.PsObject.BaseObject } catch {}
-        $raw += $b
+    # Built by index, never with +=: appending a List[string] to a
+    # PowerShell array enumerates it, so the property list arrived as one
+    # String per property and the binder was handed a String where it
+    # wanted IEnumerable`1[System.String].
+    $raw = New-Object 'object[]' $argValues.Count
+    for ($i = 0; $i -lt $argValues.Count; $i++) {
+        $b = $argValues[$i]
+        try { $b = $argValues[$i].PsObject.BaseObject } catch {}
+        $raw[$i] = $b
     }
     return $mi.Invoke($null, $raw)
 }
@@ -1228,11 +1232,29 @@ function TryCombo($label, $api, $kv, [string[]]$propNames) {
         else { $op = CallFindAll $pnType @($kv, $p, '') }
     } catch { Say ($label + '=invoke:' + $_.Exception.Message); return $null }
     if (-not $op) { Say ($label + '=no-overload'); return $null }
+    # The operation's generic argument has to be the collection the method
+    # actually returns. AsTask<IReadOnlyList<T>> is not the same interface
+    # as IAsyncOperation<DeviceInformationCollection>, so the cast failed
+    # on a __ComObject even when the call itself had worked.
     $lt = $null
     try {
-        if ($api -eq 'di') { $lt = [System.Collections.Generic.IReadOnlyList`1].MakeGenericType($diType) }
-        else { $lt = [System.Collections.Generic.IReadOnlyList`1].MakeGenericType($pnType) }
-    } catch {}
+        if ($api -eq 'di') { $lt = [Windows.Devices.Enumeration.DeviceInformationCollection] }
+        else { $lt = [Windows.Devices.Enumeration.Pnp.PnpObjectCollection] }
+    } catch { Say ('listtype=failed:' + $_.Exception.Message) }
+    # A directly-called static method comes back properly projected; one
+    # reached through MethodInfo.Invoke is a bare __ComObject, which is
+    # what the await could not convert. So try the plain call first.
+    $direct = $null
+    try {
+        if ($api -eq 'di') { $direct = $diType::FindAllAsync('', $p, $kv) }
+        else { $direct = $pnType::FindAllAsync($kv, $p, '') }
+    } catch { Say ($label + '=direct:' + $_.Exception.Message) }
+    if ($direct) {
+        $found = Await $direct $lt
+        if (-not $found) { Say ($label + '=await-null'); return $null }
+        Say ($label + '=ok count=' + $found.Count)
+        return $found
+    }
     $found = Await $op $lt
     if (-not $found) { Say ($label + '=await-null'); return $null }
     Say ($label + '=ok count=' + $found.Count)
@@ -37623,8 +37645,26 @@ try {
 
         hls_urls, mp4_urls = [], []
 
+        def _unescape_blob(s):
+            """Undo the two layers of escaping a JSON-in-HTML player blob has.
+
+            ok.ru embeds its player config as HTML-entity-encoded JSON with
+            \\uXXXX escapes, so a URL arrives as
+              https://host/?a=1\\u0026b=2&quot;,&quot;next&quot;:...
+            The separators are still escaped and the closing quote is
+            invisible to a URL regex, which then sweeps across the whole
+            blob until it reaches the next .m3u8 several keys later and
+            hands back one enormous URL that is mostly other keys.
+            """
+            s = html_unescape(str(s or ''))
+            return re.sub(r'\\u00([0-9a-fA-F]{2})',
+                          lambda m: chr(int(m.group(1), 16)), s)
+
         def _push(u):
-            u = str(u or '').strip().replace('\\/', '/')
+            u = _unescape_blob(str(u or '').strip()).replace('\\/', '/')
+            # After unescaping, a real quote can still be glued on when the
+            # value came out of a raw scan rather than a parsed structure.
+            u = u.split('"')[0].split("'")[0].strip()
             if not u.lower().startswith(('http://', 'https://')):
                 return
             low = u.lower()
@@ -37661,6 +37701,10 @@ try {
                 for item in data:
                     _collect(item)
             elif isinstance(data, str):
+                # Scan the unescaped form: while the quotes are still
+                # &quot; the character class below has no boundary to
+                # stop at, and one match spans the whole player config.
+                data = _unescape_blob(data)
                 for m in re.finditer(r'(https?://[^\s"\'<>]+?\.m3u8(?:\?[^\s"\'<>]*)?)', data, re.IGNORECASE):
                     _push(m.group(1))
                 for m in re.finditer(
@@ -37772,10 +37816,19 @@ try {
         except Exception:
             pass
 
+        # The raw sweep has to run on the unescaped page. ok.ru keeps its
+        # player config as HTML-entity-encoded JSON, and while the quotes
+        # are still &quot; the class below has no boundary to stop at, so
+        # one match runs from the first CDN link on the page to a .m3u8
+        # several keys later and carries every key in between with it.
         try:
-            for m in re.finditer(r'(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>]*)', html, re.IGNORECASE):
+            _flat = _unescape_blob(html)
+        except Exception:
+            _flat = html
+        try:
+            for m in re.finditer(r'(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>]*)', _flat, re.IGNORECASE):
                 _push(m.group(1))
-            for m in re.finditer(r'(https?://[^\s"\'<>]+?\.mp4[^\s"\'<>]*)', html, re.IGNORECASE):
+            for m in re.finditer(r'(https?://[^\s"\'<>]+?\.mp4[^\s"\'<>]*)', _flat, re.IGNORECASE):
                 _push(m.group(1))
         except Exception:
             pass
@@ -37854,11 +37907,11 @@ try {
                 continue
 
         try:
-            for m in re.finditer(r'direct_access_url["\']\s*[:=]\s*["\']([^"\']+)["\']', html, re.IGNORECASE):
+            for m in re.finditer(r'direct_access_url["\']\s*[:=]\s*["\']([^"\']+)["\']', _flat, re.IGNORECASE):
                 _push(m.group(1))
-            for m in re.finditer(r'"source"\s*:\s*"([^"]+?\.m3u8[^"]*)"', html, re.IGNORECASE):
+            for m in re.finditer(r'"source"\s*:\s*"([^"]+?\.m3u8[^"]*)"', _flat, re.IGNORECASE):
                 _push(m.group(1))
-            for m in re.finditer(r'"file"\s*:\s*"([^"]+?\.mp4[^"]*)"', html, re.IGNORECASE):
+            for m in re.finditer(r'"file"\s*:\s*"([^"]+?\.mp4[^"]*)"', _flat, re.IGNORECASE):
                 _push(m.group(1))
         except Exception:
             pass

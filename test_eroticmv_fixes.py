@@ -12252,14 +12252,14 @@ report('await=timeout' in _log115,
 # binder rejected both the two- and the three-argument form of a method
 # whose three-argument form certainly exists, so the signature is looked
 # up by reflection and invoked directly instead of being left to it.
-report(_script115.count('FindAllAsync(') == 0
+report('::FindAllAsync(' in _script115
        and "$mi.Invoke" in _script115
        and "GetParameters().Count -eq $argValues.Count" in _script115,
-   'the enumeration goes through reflection, choosing the signature by '
-   'parameter count, because PowerShell resolves none of the projected '
-   'overloads by name',
-   'direct calls=%d, reflection=%s' % (
-       _script115.count('FindAllAsync('), "$mi.Invoke" in _script115))
+   'the plain static call is tried first with reflection kept as the '
+   'fallback, because a directly-called method comes back properly '
+   'projected while one reached through Invoke is a bare __ComObject',
+   'direct=%s, reflection=%s' % ('::FindAllAsync(' in _script115,
+                                 "$mi.Invoke" in _script115))
 # Second time an assertion here pinned a literal argument list rather than
 # what the call does. Parse the actual arguments instead, so a rename in
 # the script stops invalidating it.
@@ -12517,12 +12517,12 @@ report(all(('Base' in _l or '$raw' in _l) for _l in _invoke120),
    'and neither one passes PowerShell a wrapped value',
    '; '.join(_l[:70] for _l in _invoke120))
 report('$opBase = $op.PsObject.BaseObject' in _script115
-       and '$b = $v.PsObject.BaseObject' in _script115,
+       and '$b = $argValues[$i].PsObject.BaseObject' in _script115,
    'the awaited operation and every dispatched argument are unwrapped -- '
    'fixing only the line the log complained about would have moved the '
    'identical failure one call further down')
 report(_script115.count('try { $opBase') == 1
-       and _script115.count('try { $b = $v') == 1,
+       and _script115.count('try { $b = $argValues[$i]') == 1,
    'each unwrap guarded, so an unexpected wrapper falls back to the '
    'original value and still reports through the invoke line rather than '
    'dying quietly')
@@ -12572,6 +12572,79 @@ report("'apartment='" in _script115,
    'reporting the thread apartment, since an MTA host fails some WinRT '
    'enumeration paths with the same error as a bad argument and the two '
    'are otherwise indistinguishable')
+
+
+# -----------------------------------------------------------------------
+# 122. ok.ru embeds its player config as HTML-entity-encoded JSON carrying
+#      \uXXXX escapes. The field log shows what that did: the URL handed
+#      to mpv started at the first okcdn link and ran on past five more
+#      quality entries to the .m3u8 inside hlsManifestUrl, because &quot;
+#      is not a quote to a character class, and every separator was still
+#      \u0026. curl refused the result outright -- "unmatched close
+#      brace/bracket in URL position 304". Reproduced here from the exact
+#      fragment the user's log contains.
+# -----------------------------------------------------------------------
+_U122 = chr(92) + 'u0026'
+_frag122 = (
+    '&quot;videos&quot;:[{&quot;name&quot;:&quot;mobile&quot;,&quot;url&quot;:&quot;'
+    'https://vd423.okcdn.ru/?expires=1790195704709{u}srcIp=105.68.184.251{u}pr=10'
+    '{u}type=4{u}sig=mWogbr1ArNI{u}id=7348071762587&quot;,&quot;seekSchema&quot;:3,'
+    '&quot;disallowed&quot;:false},{&quot;name&quot;:&quot;hd&quot;,&quot;url&quot;:&quot;'
+    'https://vd423.okcdn.ru/?expires=1790195704709{u}srcIp=105.68.184.251{u}pr=10'
+    '{u}type=3{u}sig=ko5vMJCwau0{u}id=7348071762587&quot;,&quot;seekSchema&quot;:3,'
+    '&quot;disallowed&quot;:false}],'
+    '&quot;hlsManifestUrl&quot;:&quot;'
+    'https://vd423.okcdn.ru/video.m3u8?cmd=videoPlayerCdn{u}expires=1790195704709'
+    '{u}srcIp=105.68.184.251{u}ch=1676822812{u}ms=178.237.23.39{u}type=2'
+    '{u}sig=SwJmCr_8BhQ{u}ct=8{u}id=7348071762587&quot;,'
+    '&quot;autoplay&quot;:%7B&quot;autoplayEnabled&quot;:true%7D'
+).replace('{u}', _U122)
+
+
+class _Voe122:
+    _is_hls_stream_url = lift('VideoPlayer', '_is_hls_stream_url')
+    _voe_decode_source_candidates = lift(
+        'VideoPlayer', '_voe_decode_source_candidates')
+
+
+_hls122, _mp4122 = _Voe122()._voe_decode_source_candidates(_frag122)
+_u122 = _hls122[0] if _hls122 else ''
+report(len(_hls122) == 1 and _u122.startswith(
+           'https://vd423.okcdn.ru/video.m3u8?cmd=videoPlayerCdn&'),
+   'the ok.ru blob yields the manifest URL starting at its own key',
+   '%d candidate(s): %s' % (len(_hls122), _u122[:90]))
+report(_U122 not in _u122 and '&quot;' not in _u122
+       and '&sig=SwJmCr_8BhQ' in _u122,
+   'with the separators decoded to real ampersands, so the query the CDN '
+   'receives is the one it signed',
+   'escaped=%s' % (_U122 in _u122 or '&quot;' in _u122))
+report(_u122.endswith('ct=8&id=7348071762587')
+       and 'seekSchema' not in _u122 and 'autoplayEnabled' not in _u122,
+   'stopping at the closing quote instead of sweeping on through five '
+   'more quality entries into the keys that follow',
+   '%d char(s)' % len(_u122))
+
+
+# -----------------------------------------------------------------------
+# 123. Two PowerShell traps the field log named, both mine: appending a
+#      List[string] to an array with += enumerates it, so the binder got a
+#      String where it wanted IEnumerable`1[String]; and AsTask was given
+#      IReadOnlyList<T> when the method returns
+#      IAsyncOperation<DeviceInformationCollection>, so the await could
+#      not convert the __ComObject even once the call worked.
+# -----------------------------------------------------------------------
+report("New-Object 'object[]' $argValues.Count" in _script115
+       and '$raw += ' not in _script115,
+   'the reflection argument array is built by index, because += on a '
+   'PowerShell array spreads a collection into its elements')
+report('[Windows.Devices.Enumeration.DeviceInformationCollection]' in _script115
+       and '[Windows.Devices.Enumeration.Pnp.PnpObjectCollection]' in _script115
+       and 'MakeGenericType($diType)' not in _script115,
+   'and the await is given the collection the method actually returns, '
+   'not an interface it merely implements')
+report("$diType::FindAllAsync('', $p, $kv)" in _script115
+       and "$pnType::FindAllAsync($kv, $p, '')" in _script115,
+   'trying both APIs by direct call, each with its own argument order')
 
 
 print('FAILURES:', FAILS)
