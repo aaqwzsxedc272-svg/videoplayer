@@ -1164,27 +1164,21 @@ function Await($op, $type) {
         # Windows PowerShell runs this probe on STA. Blocking that STA with
         # Task.Wait prevents the WinRT completion from being delivered, so
         # wait from a pool thread instead and only join that waiter here.
-        $box = @{ result = $null; error = $null; done = $false }
-        $rs = [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace
-        $waiter = [System.Threading.Tasks.Task]::Run([Action]{
-            [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace = $rs
-            try { $box.result = $t.GetAwaiter().GetResult() }
-            catch { $box.error = $_.Exception; $box.done = $true; return }
-            $box.done = $true
-        })
-        try { $waiter.Wait(10000) | Out-Null } catch {
-            $e = $_.Exception
-            try { if ($e.InnerException) { $e = $e.InnerException } } catch {}
-            Say ('await=failed:' + $e.ToString())
-            return $null
+        # Keep the STA apartment pumping while the WinRT operation completes;
+        # Task.Run cannot execute a PowerShell scriptblock without a runspace.
+        try { Add-Type -AssemblyName System.Windows.Forms } catch {}
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        while (-not $t.IsCompleted -and [DateTime]::UtcNow -lt $deadline) {
+            try { [System.Windows.Forms.Application]::DoEvents() } catch {}
+            Start-Sleep -Milliseconds 50
         }
-        if ($box.error) {
-            $e = $box.error
+        if (-not $t.IsCompleted) { Say 'await=timeout'; return $null }
+        try { return $t.GetAwaiter().GetResult() }
+        catch {
+            $e = $_.Exception
             try { if ($e.InnerException) { $e = $e.InnerException } } catch {}
             Say ('await=failed:' + $e.ToString()); return $null
         }
-        if (-not $box.done) { Say 'await=timeout'; return $null }
-        return $box.result
     } catch { Say ('await=failed:' + $_.Exception.ToString()); return $null }
 }
 
@@ -37726,6 +37720,8 @@ try {
                         if '=' in _pair:
                             _k, _v = _pair.split('=', 1)
                             if _k in {'expires','srcIp','pr','srcAg','ch','ms','type','sig','ct','urls','clientType','zs','id'}:
+                                if _k == 'type': _v = '3'
+                                if _k == 'srcAg': _v = 'CHROME'
                                 _parts.extend((_k, _v))
                     if _parts:
                         _direct = _op.scheme + '://' + _op.netloc + '/' + '/'.join(_parts) + '/video/'
