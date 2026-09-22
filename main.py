@@ -1200,7 +1200,7 @@ function MakeProps([string[]]$wanted) {
     $vals = @($wanted | Where-Object { $_ })
     $out = New-Object 'string[]' $vals.Count
     for ($i = 0; $i -lt $vals.Count; $i++) { $out[$i] = [string]$vals[$i] }
-    return $out
+    return ,$out
 }
 
 # Reflection dispatch, arguments unwrapped. The overload binder cannot see
@@ -37732,7 +37732,7 @@ try {
                 # &quot; the character class below has no boundary to
                 # stop at, and one match spans the whole player config.
                 data = _unescape_blob(data)
-                for m in re.finditer(r'(https?://[^\s"\'<>]+?\.m3u8(?:\?[^\s"\'<>]*)?)', data, re.IGNORECASE):
+                for m in re.finditer(r'(https?://[^\s"\'<>]+?\.(?:m3u8|mpd)(?:\?[^\s"\'<>]*)?)', data, re.IGNORECASE):
                     _push(m.group(1))
                 for m in re.finditer(
                         r'(https?://[^\s"\'<>]+?\.(?:mp4|webm|mkv|mov|m4v)(?:\?[^\s"\'<>]*)?)', data, re.IGNORECASE):
