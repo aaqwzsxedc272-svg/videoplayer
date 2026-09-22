@@ -11865,5 +11865,92 @@ report(_EP112 not in _m112._playlist_url_mirrors,
    repr(_m112._playlist_url_mirrors))
 
 
+# -----------------------------------------------------------------------
+# 113. A video that stops part way through was silent about it. A host
+#      that cuts a transfer off ends the HTTP response, mpv reports a clean
+#      eof, and from the app's side that is exactly what the end of a video
+#      looks like -- so playback stopped at a fifth of the way in with
+#      nothing in the log to say it was not over.
+# -----------------------------------------------------------------------
+_tr113 = [n for n in ast.walk(TREE) if isinstance(n, ast.FunctionDef)
+          and n.name == '_report_truncated_stream']
+report(len(_tr113) == 1, 'a stream that ends early is now named as such')
+
+_g113 = {'print': print, 'urlparse': urlparse}
+if _tr113:
+    exec(compile(ast.Module(body=_tr113, type_ignores=[]), 'trunc113',
+                 'exec'), _g113)
+_report113 = (_g113.get('_report_truncated_stream')
+              or (lambda self, reason: None))
+
+
+class _Src113(object):
+    def __init__(self, url):
+        self._url = url
+
+    def toString(self):
+        return self._url
+
+
+class _TruncStub113(object):
+    _report_truncated_stream = _report113
+
+    def __init__(self, position_ms, duration_ms,
+                 url='https://s15.keep2share.cc/dl/abc123/video.mp4'):
+        self._position_ms = position_ms
+        self._duration_ms = duration_ms
+        self._source = _Src113(url)
+        self._last_truncated_end = None
+
+
+_K2S113 = 'https://s15.keep2share.cc/dl/abc123/video.mp4'
+
+
+def _trunc_run113(position_ms, duration_ms, url=_K2S113):
+    stub = _TruncStub113(position_ms, duration_ms, url)
+    buf = _io105.StringIO()
+    with _ctx105.redirect_stdout(buf):
+        stub._report_truncated_stream('eof')
+    return stub, buf.getvalue()
+
+
+# A 30-minute video that stops at 6 minutes.
+_st113, _log113 = _trunc_run113(360000, 1800000)
+report('TRUNCATED' in _log113 and 'stopped at 20%' in _log113,
+   'a video that stops a fifth of the way in says so, with the percentage',
+   repr(_log113[:110]))
+report('1440s missing' in _log113,
+   'and how much of it never arrived', repr(_log113[:140]))
+report('keep2share.cc' in _log113,
+   'and which host stopped sending, since that is what decides whether a '
+   'data cap, an expiring link or a dropped connection is to blame',
+   repr(_log113[:160]))
+report('not the end of the video' in _log113,
+   'in words that cannot be mistaken for a normal ending')
+report((_st113._last_truncated_end or {}).get('percent') == 20
+       and (_st113._last_truncated_end or {}).get('host')
+       == 's15.keep2share.cc',
+   'with the numbers kept for whatever tries to pick the stream back up',
+   repr(_st113._last_truncated_end))
+
+_st113, _log113 = _trunc_run113(1799000, 1800000)
+report('TRUNCATED' not in _log113,
+   'and a video that actually finished is not accused of being cut short',
+   repr(_log113[:80]))
+_st113, _log113 = _trunc_run113(1795000, 1800000)
+report('TRUNCATED' not in _log113,
+   'nor one that stopped a few seconds early, which is how real endings '
+   'arrive once the last frame is short of the stated duration',
+   repr(_log113[:80]))
+_st113, _log113 = _trunc_run113(360000, 0)
+report('TRUNCATED' not in _log113
+       and _st113._last_truncated_end is None,
+   'and with no duration there is nothing to compare, so nothing is claimed')
+_st113, _log113 = _trunc_run113(0, 1800000)
+report('TRUNCATED' not in _log113,
+   'nor when nothing played at all, which is a load failure with its own '
+   'report rather than a truncation')
+
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

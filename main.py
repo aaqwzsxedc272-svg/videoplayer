@@ -2967,6 +2967,10 @@ class MpvMediaPlayerAdapter(QObject):
         # video from the same CDN does not have to fail all over again to
         # find that out.
         self._tls_untrusted_hosts = set()
+        # Set when a stream ended well short of its duration. Nothing reads
+        # it yet; it is where a resume-through-the-chunked-proxy retry would
+        # pick up the numbers it needs.
+        self._last_truncated_end = None
         self._pending_seek_ms = None
         self._pending_video_state = None
         self._last_filter_chain = None
@@ -3755,6 +3759,7 @@ class MpvMediaPlayerAdapter(QObject):
                 self._file_loaded = False
                 self._set_playback_state(QMediaPlayer.PlaybackState.StoppedState)
                 return
+            self._report_truncated_stream(reason)
             self._emit_end_of_media_once()
 
         @self._mpv.event_callback('shutdown')
@@ -3781,6 +3786,60 @@ class MpvMediaPlayerAdapter(QObject):
         if duration_ms != self._duration_ms:
             self._duration_ms = duration_ms
             self.durationChanged.emit(duration_ms)
+
+    def _report_truncated_stream(self, reason):
+        """Say out loud when a stream ended well short of its own duration.
+
+        A file host that cuts a transfer off is indistinguishable from the
+        end of the video at this layer: mpv reports a clean eof because the
+        HTTP response finished, so playback stops part way through and
+        nothing in the log separates it from a video that ran out. There is
+        no error to catch and no failure to retry -- which is why a report
+        of "it stops at about 20%" had nothing to be diagnosed from.
+
+        The numbers are what tell the causes apart. The same percentage
+        every time means the host is capping how much data it will serve;
+        the same wall-clock time every time means the link itself expires;
+        a different point each time means the connection is being dropped.
+        Each of those needs a different answer, so this says which one it
+        looks like rather than guessing.
+        """
+        try:
+            position = int(self._position_ms or 0)
+            duration = int(self._duration_ms or 0)
+        except Exception:
+            return
+        if position <= 0 or duration <= 0:
+            # No duration means no way to know anything was missing.
+            return
+        remaining = duration - position
+        if remaining < 10000 or position >= int(duration * 0.98):
+            return
+        try:
+            url = self._source.toString()
+        except Exception:
+            url = ''
+        try:
+            host = (urlparse(url).netloc or '').lower()
+        except Exception:
+            host = ''
+        pct = int(position * 100 / duration)
+        try:
+            print(f'[PLAYBACK][TRUNCATED] {str(url)[:120]} stopped at {pct}% '
+                  f'({position // 1000}s of {duration // 1000}s, '
+                  f'{remaining // 1000}s missing) reason={reason or "eof"} '
+                  f'host={host or "?"} -- the server stopped sending, this '
+                  f'is not the end of the video', flush=True)
+        except Exception:
+            pass
+        self._last_truncated_end = {
+            'url': url,
+            'host': host,
+            'position_ms': position,
+            'duration_ms': duration,
+            'percent': pct,
+            'reason': reason or 'eof',
+        }
 
     def _emit_end_of_media_once(self):
         if self._source.isEmpty() or self._stopped_explicitly:
