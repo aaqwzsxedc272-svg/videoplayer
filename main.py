@@ -1225,7 +1225,7 @@ function CallFindAll($type, $argValues) {
     return $mi.Invoke($null, $raw)
 }
 
-$BAT = 'System.Devices.BatteryLifePercent'
+$BAT = '{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2'
 
 function TryCombo($label, $api, $kv, [string[]]$propNames) {
     $p = MakeProps $propNames
