@@ -1195,9 +1195,12 @@ try {
 try { $pnKind = [Windows.Devices.Enumeration.Pnp.PnpObjectType] } catch {}
 
 function MakeProps([string[]]$wanted) {
-    $l = New-Object 'System.Collections.Generic.List[string]'
-    foreach ($n in $wanted) { if ($n) { $l.Add($n) | Out-Null } }
-    return $l
+    # The projected WinRT binder wants String[], not a PSObject wrapping a
+    # generic List[string]. Build the exact array type before FindAllAsync.
+    $vals = @($wanted | Where-Object { $_ })
+    $out = New-Object 'string[]' $vals.Count
+    for ($i = 0; $i -lt $vals.Count; $i++) { $out[$i] = [string]$vals[$i] }
+    return $out
 }
 
 # Reflection dispatch, arguments unwrapped. The overload binder cannot see
@@ -1352,7 +1355,7 @@ def _bluetooth_battery_levels():
         proc = subprocess.run(
             ['powershell', '-NoProfile', '-NonInteractive',
              '-ExecutionPolicy', 'Bypass', '-Command', _BATTERY_POWERSHELL],
-            capture_output=True, text=True, timeout=25,
+            capture_output=True, text=True, timeout=60,
             encoding='utf-8', errors='replace',
             startupinfo=startupinfo, creationflags=creationflags,
         )
