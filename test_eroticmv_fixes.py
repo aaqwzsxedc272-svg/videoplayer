@@ -12182,10 +12182,10 @@ _script115 = str(_g114.get('_BATTERY_POWERSHELL') or '')
 # had made up -- PnpObjectType has no 'AssociatedEndpoints'. What the
 # assertion was actually for is the coverage, so that is what it tests
 # now, and section 119 pins where the names come from.
-report('foreach ($kind in $scopes)' in _script115
-       and '$scopes += ' in _script115,
-   'the probe covers every device scope rather than betting on one, '
-   'since the charge is not exposed the same way in each')
+report(_script115.count('TryCombo ') >= 4,
+   'the probe tries every API and property combination it has rather than '
+   'betting on one, since the charge is not exposed the same way in each',
+   '%d combination(s)' % _script115.count('TryCombo '))
 report(_script115.count('Say ') >= 10 and "'SilentlyContinue'" not in _script115,
    'and it no longer swallows its own errors, which is what left the last '
    'field log with a bare zero and no reason')
@@ -12254,28 +12254,24 @@ report('await=timeout' in _log115,
 # up by reflection and invoked directly instead of being left to it.
 report(_script115.count('FindAllAsync(') == 0
        and "$mi.Invoke" in _script115
-       and "GetParameters().Count -eq 3" in _script115,
-   'the enumeration goes through reflection on the three-argument '
-   'signature rather than a call PowerShell cannot resolve',
+       and "GetParameters().Count -eq $argValues.Count" in _script115,
+   'the enumeration goes through reflection, choosing the signature by '
+   'parameter count, because PowerShell resolves none of the projected '
+   'overloads by name',
    'direct calls=%d, reflection=%s' % (
        _script115.count('FindAllAsync('), "$mi.Invoke" in _script115))
 # Second time an assertion here pinned a literal argument list rather than
 # what the call does. Parse the actual arguments instead, so a rename in
 # the script stops invalidating it.
-_i116 = _script115.find('$mi.Invoke($null, @(')
-_args116 = ''
-if _i116 != -1:
-    _args116 = _script115[_i116 + len('$mi.Invoke($null, @('):_script115.find('))', _i116)]
-_parts116 = [p.strip() for p in _args116.split(',')] if _args116 else []
-report(len(_parts116) == 3 and _parts116[-1] == "''"
-       and 'List[string]' in _script115,
-   'with the property list and the empty filter it needs, as a type the '
-   'projected signature will actually accept',
-   'args=%s' % (_parts116,))
-report("'overloads='" in _script115,
-   'and it prints which overloads it can see before trying any of them, '
-   'so a binder that disagrees with the API says so on the first run '
-   'instead of costing two')
+report("return $mi.Invoke($null, $raw)" in _script115
+       and 'List[string]' in _script115
+       and "@('', $p, $kv)" in _script115
+       and "@($kv, $p, '')" in _script115,
+   'with the property list and the AQS filter in the position each API '
+   'puts them, as types the projected signatures accept')
+report("'=no-overload'" in _script115 and "'=await-null'" in _script115,
+   'and a signature it cannot find, or an await that yields nothing, is '
+   'named rather than quietly producing an empty result')
 report('OutputEncoding' in _script115
        and "encoding='utf-8'" in SRC,
    'with the console set to UTF-8 and read back as UTF-8 -- setting only '
@@ -12486,18 +12482,18 @@ _bad119 = [_w for _w in ("'AssociatedEndpoints'", "'Devices'", "'DeviceInterface
 report(not _bad119,
    'the invented scope names are gone from the script',
    'still present: %s' % (_bad119 or 'none'))
-report('[Enum]::GetNames(' in _script115 and 'foreach ($kind in $scopes)' in _script115,
-   'the scopes are read off PnpObjectType instead of being spelled out, '
-   'so the list cannot drift from the enum it enumerates',
+report('[Enum]::GetNames(' in _script115,
+   'the scope names are still read off the enum rather than written out',
    'GetNames=%s' % ('[Enum]::GetNames(' in _script115))
-_p119 = [_script115.find(_w) for _w in ("'AssociationEndpoint'", "'Device'",
-                                        "'DeviceInterface'")]
-report(-1 not in _p119 and _p119 == sorted(_p119),
-   'and AssociationEndpoint is asked first, that being the scope where a '
+report(_script115.count("'AssociationEndpoint'") == 2,
+   'and AssociationEndpoint is the scope asked for, that being where a '
    'paired peripheral reports System.Devices.Aep.Battery.LevelPercent',
-   'offsets=%s' % _p119)
-report("-ne 'Unknown'" in _script115,
-   'skipping Unknown, which the enum documents as unused')
+   '%d mention(s)' % _script115.count("'AssociationEndpoint'"))
+# The Unknown carve-out went with the walk-every-scope loop; asking one
+# scope means there is nothing left to skip.
+report("[Windows.Devices.Enumeration.DeviceInformationKind]" in _script115,
+   'through DeviceInformationKind, the Pnp namespace being documented as '
+   'superseded by Windows.Devices.Enumeration')
 report("'enumnames='" in _script115,
    'printing every name the enum actually has, so the next disagreement '
    'is answered on the first run rather than the fourth')
@@ -12517,25 +12513,65 @@ _invoke120 = [_l.strip() for _l in _script115.splitlines() if '.Invoke(' in _l]
 report(len(_invoke120) == 2,
    'both reflection call sites are accounted for',
    '%d site(s): %s' % (len(_invoke120), _invoke120))
-report(all('Base' in _l for _l in _invoke120),
+report(all(('Base' in _l or '$raw' in _l) for _l in _invoke120),
    'and neither one passes PowerShell a wrapped value',
    '; '.join(_l[:70] for _l in _invoke120))
-report(_script115.count('.PsObject.BaseObject') == 3
-       and '$props.PsObject.BaseObject' in _script115
-       and '$enumVal.PsObject.BaseObject' in _script115
-       and '$op.PsObject.BaseObject' in _script115,
-   'the property list, the enum value and the awaited operation are all '
-   'unwrapped -- fixing only the line the log complained about would '
-   'have moved the identical failure one call further down',
-   '%d unwrap(s)' % _script115.count('.PsObject.BaseObject'))
-report(_script115.count('try { $propsBase') == 1
-       and _script115.count('try { $opBase') == 1
-       and _script115.count('try { $enumBase') == 1,
+report('$opBase = $op.PsObject.BaseObject' in _script115
+       and '$b = $v.PsObject.BaseObject' in _script115,
+   'the awaited operation and every dispatched argument are unwrapped -- '
+   'fixing only the line the log complained about would have moved the '
+   'identical failure one call further down')
+report(_script115.count('try { $opBase') == 1
+       and _script115.count('try { $b = $v') == 1,
    'each unwrap guarded, so an unexpected wrapper falls back to the '
    'original value and still reports through the invoke line rather than '
    'dying quietly')
 report('@($op)' not in _script115 and '@($enumVal, $props,' not in _script115,
    'with no wrapped form left behind to be picked up again later')
+
+
+# -----------------------------------------------------------------------
+# 121. Eight builds on this probe, and each one changed a single thing
+#      and needed another field run to find the next wall. This build
+#      tries both APIs against both property lists in one pass, so the
+#      next log names the combination that works instead of adding a
+#      ninth entry to the ladder. It also fixes a reason the ladder got
+#      so long: Say wrote through Write-Output, and Await is called as
+#      $found = Await ..., which captures everything a function emits.
+#      Every await failure was being swallowed into the return value.
+# -----------------------------------------------------------------------
+_wo121 = [_l.strip() for _l in _script115.splitlines()
+          if 'Write-Output' in _l and not _l.strip().startswith('#')]
+report(not _wo121 and '[Console]::Out.WriteLine' in _script115,
+   'diagnostics go straight to the console rather than through the '
+   'pipeline, so a function that returns a value can no longer swallow '
+   'the reason it returned nothing',
+   '%s' % (_wo121 or 'none'))
+_combos121 = [_c for _c in ('di+bat', 'di+noprops', 'pnp+bat', 'pnp+noprops')
+              if ("TryCombo '%s'" % _c) in _script115]
+report(len(_combos121) == 4,
+   'both enumeration APIs are tried against both the full property list '
+   'and an empty one, so one run separates a wrong API from a wrong '
+   'property key',
+   '%s' % (_combos121,))
+report("'using='" in _script115,
+   'and it says which combination it settled on, so a working build can '
+   'be reduced later instead of being guessed at again')
+report('diag[:28]' in SRC,
+   'with the log cap raised above the number of steps the probe can now '
+   'take -- truncating from the front would drop the tail, and the tail '
+   'is where the answer is')
+report('Emit (@($nm, $lvl) -join "`t")' in _script115
+       and "rpartition('\\t')" in SRC
+       and "'#diag '" in _script115
+       and "startswith('#diag ')" in SRC,
+   'emitting on the same two shapes the Python side reads back, which is '
+   'the one contract here that a rewrite of the script can break without '
+   'anything failing')
+report("'apartment='" in _script115,
+   'reporting the thread apartment, since an MTA host fails some WinRT '
+   'enumeration paths with the same error as a bad argument and the two '
+   'are otherwise indistinguishable')
 
 
 print('FAILURES:', FAILS)

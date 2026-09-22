@@ -1129,18 +1129,30 @@ SWP_NOOWNERZORDER = 0x0200
 # PowerShell is used because it ships with Windows and can load WinRT types
 # directly, so this stays dependency-free.
 _BATTERY_POWERSHELL = r"""
+
 $ErrorActionPreference = 'Continue'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
-function Say($m) { Write-Output ('#diag ' + $m) }
+# Straight to the console, never through the pipeline: a function whose
+# diagnostics use Write-Output has them captured by whoever assigns its
+# return value, which is exactly how the await failures went missing.
+function Say($m) { [Console]::Out.WriteLine('#diag ' + $m) }
+function Emit($m) { [Console]::Out.WriteLine($m) }
+
+# Some WinRT enumeration paths behave differently off an MTA thread, and
+# that failure looks exactly like a bad argument. Say which one we are on.
+try { Say ('apartment=' + [System.Threading.Thread]::CurrentThread.GetApartmentState()) } catch {}
+
 try {
     Add-Type -AssemblyName System.Runtime.WindowsRuntime
     Say 'winrt=loaded'
 } catch { Say ('winrt=failed:' + $_.Exception.Message) }
+
 $asTask = $null
 try {
     $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
 } catch { Say ('astask=failed:' + $_.Exception.Message) }
 if ($asTask) { Say 'astask=ok' } else { Say 'astask=missing' }
+
 function Await($op, $type) {
     if (-not $asTask) { return $null }
     try {
@@ -1149,97 +1161,134 @@ function Await($op, $type) {
         $opBase = $op
         try { $opBase = $op.PsObject.BaseObject } catch {}
         $t = $asTask.MakeGenericMethod($type).Invoke($null, @($opBase))
-        if (-not $t.Wait(6000)) { Say 'await=timeout'; return $null }
+        if (-not $t.Wait(8000)) { Say 'await=timeout'; return $null }
         return $t.Result
     } catch { Say ('await=failed:' + $_.Exception.Message); return $null }
 }
+
+# Both projections, registered before either type is used: PowerShell 5.1
+# only resolves WinRT bracket syntax once the type has been named in
+# assembly-qualified form.
 $pnType = $null
+$diType = $null
 try {
-    # Registering the projection is a separate act from using the type.
-    # PowerShell 5.1 only resolves WinRT bracket syntax after the type has
-    # been named once in assembly-qualified form; without this line the
-    # lookup below fails with "type not found" no matter how the method is
-    # called, which is what the last three builds kept tripping over.
     $null = [Windows.Devices.Enumeration.Pnp.PnpObject, Windows.Devices.Enumeration, ContentType = WindowsRuntime]
     Say 'projection=registered'
-} catch { Say ('projection=failed:' + $_.Exception.Message) }
-try {
     $pnType = [Windows.Devices.Enumeration.Pnp.PnpObject]
     Say 'pnp=loaded'
 } catch { Say ('pnp=failed:' + $_.Exception.Message) }
-$ov = @()
-if ($pnType) {
-    try { $ov = @($pnType.GetMethods() | Where-Object { $_.Name -eq 'FindAllAsync' }) } catch {}
-    # What is actually callable, printed before anything is attempted. Two
-    # runs were spent on PowerShell rejecting both the two- and the
-    # three-argument form, which says its overload binder cannot see the
-    # projected signatures at all rather than that they are absent.
-    $sigs = @()
-    foreach ($m in $ov) {
-        $ps = @()
-        foreach ($p in $m.GetParameters()) { $ps += $p.ParameterType.Name }
-        $sigs += ($ps -join '+')
-    }
-    Say ('overloads=' + ($sigs -join ' | '))
-}
-$mi = $ov | Where-Object { $_.GetParameters().Count -eq 3 } | Select-Object -First 1
-$props = New-Object 'System.Collections.Generic.List[string]'
-$props.Add('System.ItemNameDisplay') | Out-Null
-$props.Add('System.Devices.Aep.Battery.LevelPercent') | Out-Null
-$listType = $null
-try { $listType = [System.Collections.Generic.IReadOnlyList`1].MakeGenericType($pnType) } catch {}
-# Read the scope names off the enum rather than spelling them out. They are
-# singular -- AssociationEndpoint, Device, DeviceInterface -- and a hand-
-# written list costs a whole field run every time a name is wrong.
-# AssociationEndpoint goes first because that is the scope where a paired
-# peripheral's System.Devices.Aep.Battery.LevelPercent lives; the rest are
-# fallbacks, and Unknown (0) is documented as unused.
-$scopes = @()
 try {
-    $names = @([Enum]::GetNames([Windows.Devices.Enumeration.Pnp.PnpObjectType]))
+    $null = [Windows.Devices.Enumeration.DeviceInformation, Windows.Devices.Enumeration, ContentType = WindowsRuntime]
+    $diType = [Windows.Devices.Enumeration.DeviceInformation]
+    Say 'di=loaded'
+} catch { Say ('di=failed:' + $_.Exception.Message) }
+
+# The Pnp namespace is documented as superseded by Windows.Devices.
+# Enumeration, so both are tried rather than betting on one again.
+$diKind = $null
+$pnKind = $null
+try {
+    $diKind = [Windows.Devices.Enumeration.DeviceInformationKind]
+    $names = @([Enum]::GetNames($diKind))
     Say ('enumnames=' + ($names -join ','))
-    foreach ($want in @('AssociationEndpoint', 'Device', 'DeviceInterface')) {
-        if ($names -contains $want) { $scopes += $want }
-    }
-    foreach ($n in $names) {
-        if ($n -ne 'Unknown' -and $scopes -notcontains $n) { $scopes += $n }
-    }
 } catch { Say ('enumnames=failed:' + $_.Exception.Message) }
-foreach ($kind in $scopes) {
-    if (-not $pnType) { break }
-    if (-not $mi) { Say ($kind + '=no-3-argument-overload'); continue }
-    $enumVal = $null
-    try { $enumVal = [Enum]::Parse([Windows.Devices.Enumeration.Pnp.PnpObjectType], $kind) } catch { Say ($kind + '=enum:' + $_.Exception.Message); continue }
+try { $pnKind = [Windows.Devices.Enumeration.Pnp.PnpObjectType] } catch {}
+
+function MakeProps([string[]]$wanted) {
+    $l = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($n in $wanted) { if ($n) { $l.Add($n) | Out-Null } }
+    return $l
+}
+
+# Reflection dispatch, arguments unwrapped. The overload binder cannot see
+# the projected signatures, so the method is chosen by parameter count.
+function CallFindAll($type, $argValues) {
+    if (-not $type) { return $null }
+    $mi = $null
+    try {
+        $mi = $type.GetMethods() | Where-Object { $_.Name -eq 'FindAllAsync' -and $_.GetParameters().Count -eq $argValues.Count } | Select-Object -First 1
+    } catch {}
+    if (-not $mi) { return $null }
+    $raw = @()
+    foreach ($v in $argValues) {
+        $b = $v
+        try { $b = $v.PsObject.BaseObject } catch {}
+        $raw += $b
+    }
+    return $mi.Invoke($null, $raw)
+}
+
+$BAT = 'System.Devices.Aep.Battery.LevelPercent'
+
+function TryCombo($label, $api, $kv, [string[]]$propNames) {
+    $p = MakeProps $propNames
     $op = $null
-    # Same trap, and this is the one the field log reported: a List[string]
-    # reaches the binder as a PSObject and the conversion to
-    # IEnumerable`1[System.String] fails. Hand Invoke the real objects.
-    $enumBase = $enumVal
-    $propsBase = $props
-    try { $enumBase = $enumVal.PsObject.BaseObject } catch {}
-    try { $propsBase = $props.PsObject.BaseObject } catch {}
-    $op = $null
-    try { $op = $mi.Invoke($null, @($enumBase, $propsBase, '')) } catch { Say ($kind + '=invoke:' + $_.Exception.Message); continue }
-    $found = Await $op $listType
-    if (-not $found) { Say ($kind + '=none'); continue }
-    $withCharge = 0
-    $noCharge = @()
+    try {
+        if ($api -eq 'di') { $op = CallFindAll $diType @('', $p, $kv) }
+        else { $op = CallFindAll $pnType @($kv, $p, '') }
+    } catch { Say ($label + '=invoke:' + $_.Exception.Message); return $null }
+    if (-not $op) { Say ($label + '=no-overload'); return $null }
+    $lt = $null
+    try {
+        if ($api -eq 'di') { $lt = [System.Collections.Generic.IReadOnlyList`1].MakeGenericType($diType) }
+        else { $lt = [System.Collections.Generic.IReadOnlyList`1].MakeGenericType($pnType) }
+    } catch {}
+    $found = Await $op $lt
+    if (-not $found) { Say ($label + '=await-null'); return $null }
+    Say ($label + '=ok count=' + $found.Count)
+    return $found
+}
+
+$aeKv = $null
+$aePnp = $null
+try { if ($diKind) { $aeKv = [Enum]::Parse($diKind, 'AssociationEndpoint') } } catch { Say ('enum=failed:' + $_.Exception.Message) }
+try { if ($pnKind) { $aePnp = [Enum]::Parse($pnKind, 'AssociationEndpoint') } } catch {}
+
+# Four combinations on one scope, so a single run says which API works and
+# whether the property list is what is being rejected. Every previous build
+# changed one thing and needed another field run to find the next wall.
+$found = $null
+$using = ''
+if ($aeKv) {
+    $r = TryCombo 'di+bat' 'di' $aeKv @($BAT)
+    if ($r) { $found = $r; $using = 'di+bat' }
+    if (-not $found) {
+        $r = TryCombo 'di+noprops' 'di' $aeKv @()
+        if ($r) { $found = $r; $using = 'di+noprops' }
+    }
+}
+if (-not $found -and $aePnp) {
+    $r = TryCombo 'pnp+bat' 'pnp' $aePnp @($BAT)
+    if ($r) { $found = $r; $using = 'pnp+bat' }
+    if (-not $found) {
+        $r = TryCombo 'pnp+noprops' 'pnp' $aePnp @()
+        if ($r) { $found = $r; $using = 'pnp+noprops' }
+    }
+}
+Say ('using=' + $using)
+
+# Report every charge found, plus what was seen without one, so an empty
+# result says whether Windows sees the headset at all.
+$noCharge = @()
+$withCharge = 0
+if ($found) {
     foreach ($d in $found) {
         $nm = $null
-        try { $nm = $d.Properties['System.ItemNameDisplay'] } catch {}
-        if (-not $nm) { try { $nm = $d.Name } catch {} }
+        try { $nm = $d.Name } catch {}
+        if (-not $nm) { try { $nm = $d.Properties['System.ItemNameDisplay'] } catch {} }
         $lvl = $null
-        try { $lvl = $d.Properties['System.Devices.Aep.Battery.LevelPercent'] } catch {}
+        try { $lvl = $d.Properties[$BAT] } catch {}
         if ($null -ne $lvl) {
             $withCharge = $withCharge + 1
-            Write-Output (@($nm, $lvl) -join "`t")
-        } elseif ($noCharge.Count -lt 12) {
+            Emit (@($nm, $lvl) -join "`t")
+        } elseif ($noCharge.Count -lt 25) {
             $noCharge += [string]$nm
         }
     }
-    Say ($kind + ' seen=' + $found.Count + ' withCharge=' + $withCharge)
-    if ($noCharge.Count -gt 0) { Say ($kind + ' noCharge=' + ($noCharge -join '; ')) }
 }
+Say ('withCharge=' + $withCharge)
+if ($noCharge.Count -gt 0) { Say ('noCharge=' + ($noCharge -join '; ')) }
+
 """
 
 _BATTERY_PROBE_STATE = {'reported': False}
@@ -1310,8 +1359,10 @@ def _bluetooth_battery_levels():
               f'charge{detail}', flush=True)
         # Every step the probe took, because "0 devices" on its own cannot
         # say whether Windows has no battery to report or the probe never
-        # got as far as asking.
-        for entry in diag[:14]:
+        # got as far as asking. The cap has to stay above the number of
+        # steps the probe can take: truncating from the front drops the
+        # tail, and the tail is where the answer is.
+        for entry in diag[:28]:
             print(f'[BATTERY]   {entry}', flush=True)
     return levels
 
