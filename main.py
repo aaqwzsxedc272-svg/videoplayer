@@ -1138,6 +1138,28 @@ try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 function Say($m) { [Console]::Out.WriteLine('#diag ' + $m) }
 function Emit($m) { [Console]::Out.WriteLine($m) }
 
+# Fast native PowerShell path. Windows Settings exposes many Bluetooth
+# batteries through the PnP property store even when WinRT AssociationEndpoint
+# enumeration never completes. Query the same documented device property key
+# directly and only use the older WinRT ladder if this returns nothing.
+try {
+    $bt = @()
+    foreach ($dev in @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue)) {
+        try {
+            $prop = Get-PnpDeviceProperty -InstanceId $dev.InstanceId -KeyName '{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2' -ErrorAction SilentlyContinue
+            if ($prop -and $null -ne $prop.Data) {
+                $name = [string]$dev.FriendlyName
+                $value = $prop.Data
+                if ($name -and ([double]::TryParse([string]$value, [Globalization.NumberStyles]::Any, [Globalization.CultureInfo]::InvariantCulture, [ref]$null))) {
+                    Emit (@($name, $value) -join "`t")
+                    $bt += $name
+                }
+            }
+        } catch {}
+    }
+    if ($bt.Count -gt 0) { Say ('pnp-direct=' + $bt.Count); exit }
+} catch { Say ('pnp-direct=failed:' + $_.Exception.Message) }
+
 # Some WinRT enumeration paths behave differently off an MTA thread, and
 # that failure looks exactly like a bad argument. Say which one we are on.
 try { Say ('apartment=' + [System.Threading.Thread]::CurrentThread.GetApartmentState()) } catch {}
