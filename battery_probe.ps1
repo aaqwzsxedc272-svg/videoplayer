@@ -34,11 +34,20 @@ function Await($op, $type) {
         # Windows PowerShell runs this probe on STA. Blocking that STA with
         # Task.Wait prevents the WinRT completion from being delivered, so
         # wait from a pool thread instead and only join that waiter here.
-        $waiter = [System.Threading.Tasks.Task]::Run([Action]{ $t.Wait(8000) })
-        if (-not $waiter.Wait(10000) -or -not $t.IsCompleted) {
-            Say 'await=timeout'; return $null
+        $box = @{ result = $null; error = $null; done = $false }
+        $waiter = [System.Threading.Tasks.Task]::Run([Action]{
+            try { $box.result = $t.GetAwaiter().GetResult() }
+            catch { $box.error = $_.Exception; $box.done = $true; return }
+            $box.done = $true
+        })
+        try { $waiter.Wait(10000) | Out-Null } catch {}
+        if ($box.error) {
+            $e = $box.error
+            try { if ($e.InnerException) { $e = $e.InnerException } } catch {}
+            Say ('await=failed:' + $e.Message); return $null
         }
-        return $t.Result
+        if (-not $box.done) { Say 'await=timeout'; return $null }
+        return $box.result
     } catch { Say ('await=failed:' + $_.Exception.Message); return $null }
 }
 
