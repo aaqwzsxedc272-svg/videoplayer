@@ -38220,6 +38220,11 @@ try {
             # renditions and try the rest best-quality first.
             hls_urls = self._rank_real_media_candidates(hls_urls, 'VOE-mirror')
             mp4_urls = self._rank_real_media_candidates(mp4_urls, 'VOE-mirror')
+            # OK.ru's query-style HLS endpoint is rejected by its CDN while
+            # the browser extension's path-style progressive URL works. Do
+            # not trust HLS first on OK.ru; let the generated direct URL win.
+            if 'ok.ru/' in str(page_url or '').lower():
+                hls_urls = []
             referer_hdrs = self._hls_request_headers(page_url)
             for hls_url in hls_urls:
                 probe = self._probe_remote_media_candidate(
