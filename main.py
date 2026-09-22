@@ -1151,6 +1151,15 @@ function Await($op, $type) {
 }
 $pnType = $null
 try {
+    # Registering the projection is a separate act from using the type.
+    # PowerShell 5.1 only resolves WinRT bracket syntax after the type has
+    # been named once in assembly-qualified form; without this line the
+    # lookup below fails with "type not found" no matter how the method is
+    # called, which is what the last three builds kept tripping over.
+    $null = [Windows.Devices.Enumeration.Pnp.PnpObject, Windows.Devices.Enumeration, ContentType = WindowsRuntime]
+    Say 'projection=registered'
+} catch { Say ('projection=failed:' + $_.Exception.Message) }
+try {
     $pnType = [Windows.Devices.Enumeration.Pnp.PnpObject]
     Say 'pnp=loaded'
 } catch { Say ('pnp=failed:' + $_.Exception.Message) }
@@ -28563,6 +28572,20 @@ try {
                 except KeyError:
                     return None
 
+            class _RangeIgnored(Exception):
+                """Upstream answered a ranged request with the whole file.
+
+                Not a failure. It means this CDN does not implement Range on
+                this endpoint, and the honest response is to stream that body
+                through without seek support. Treating it as retryable left
+                the video unplayable for two minutes and the player
+                re-resolving six times over.
+                """
+                def __init__(self, ctype='', total=0):
+                    super().__init__('upstream ignored the Range header')
+                    self.ctype = ctype
+                    self.total = total
+
             class _ChunkEOF(Exception):
                 """Requested chunk lies beyond the end of the file."""
                 def __init__(self, total=0):
@@ -28609,7 +28632,17 @@ try {
                             with urllib.request.urlopen(request, timeout=30, context=context) as response:
                                 status = int(getattr(response, 'status', 206) or 206)
                                 if status == 200:
-                                    raise IOError('range ignored (HTTP 200) for chunk fetch')
+                                    # The CDN answered a ranged request with
+                                    # the whole file. That is an answer, not
+                                    # an error, and twelve retries of it only
+                                    # guaranteed the video never played.
+                                    try:
+                                        _cl = int(response.headers.get('Content-Length') or 0)
+                                    except Exception:
+                                        _cl = 0
+                                    raise _RangeIgnored(
+                                        str(response.headers.get('Content-Type') or '').strip(),
+                                        _cl)
                                 raw = response.read()
                                 ctype = str(response.headers.get('Content-Type') or '').strip()
                                 total = 0
@@ -28621,6 +28654,8 @@ try {
                             raise IOError('empty chunk body')
                         _cache_put(key, raw, total, ctype)
                         return raw, total, ctype
+                    except _RangeIgnored:
+                        raise
                     except Exception as exc:
                         if getattr(exc, 'code', None) == 416:
                             # Out-of-range request: the CDN told us where the
@@ -28656,6 +28691,72 @@ try {
                         time.sleep(wait)
                 raise last_exc or IOError('chunk fetch failed')
 
+            def _stream_passthrough(info, start, client_end):
+                """Serve the upstream's own response when it will not honour
+                Range: one connection, streamed straight through, and the
+                client told plainly that it cannot seek."""
+                try:
+                    rh = dict(request_headers)
+                    rh.pop('Range', None)
+                    request = urllib.request.Request(target_url, headers=rh)
+                    context = (_ssl._create_unverified_context()
+                               if target_url.lower().startswith('https://') else None)
+                    with upstream_lock, urllib.request.urlopen(
+                            request, timeout=30, context=context) as response:
+                        ctype = (str(response.headers.get('Content-Type') or '').strip()
+                                 or info.ctype or 'application/octet-stream')
+                        try:
+                            total = int(response.headers.get('Content-Length') or 0)
+                        except Exception:
+                            total = 0
+                        if not total:
+                            total = info.total
+                        skipped = 0
+                        while skipped < start:
+                            got = response.read(min(CHUNK, start - skipped))
+                            if not got:
+                                break
+                            skipped += len(got)
+                        remaining = (total - skipped) if total else 0
+                        if remaining > 0 and client_end is not None:
+                            remaining = min(remaining, client_end - skipped + 1)
+                        handler.send_response(200)
+                        handler.send_header('Content-Type', ctype)
+                        # No Accept-Ranges. Advertising seek on a CDN that
+                        # ignores Range is what started this whole detour.
+                        handler.send_header('Accept-Ranges', 'none')
+                        if remaining > 0:
+                            handler.send_header('Content-Length', str(remaining))
+                        handler.send_header('Cache-Control', 'no-store')
+                        handler.send_header('Connection', 'close')
+                        handler.end_headers()
+                        sent = 0
+                        while True:
+                            if remaining and sent >= remaining:
+                                break
+                            want = min(CHUNK, remaining - sent) if remaining else CHUNK
+                            got = response.read(want)
+                            if not got:
+                                break
+                            handler.wfile.write(got)
+                            handler.wfile.flush()
+                            sent += len(got)
+                        print(f"[GOFILE_PROXY][PASSTHROUGH] upstream ignores Range; "
+                              f"streamed {sent} byte(s) from offset {skipped}, "
+                              f"total={total or '?'}, type={ctype}", flush=True)
+                        return True
+                except Exception as exc:
+                    try:
+                        print(f"[GOFILE_PROXY][PASSTHROUGH_FAILED] {str(exc)[:120]}",
+                              flush=True)
+                    except Exception:
+                        pass
+                    try:
+                        handler.send_error(502, str(exc)[:170])
+                    except Exception:
+                        pass
+                    return True
+
             client_range = str(handler.headers.get('Range') or '').strip()
 
             def _send_416(total_known):
@@ -28687,6 +28788,14 @@ try {
                     pass
                 _send_416(exc.total)
                 return True
+            except _RangeIgnored as exc:
+                try:
+                    print(f"[GOFILE_PROXY][NO_RANGE] upstream answered HTTP 200 to a "
+                          f"ranged request (type={exc.ctype or '?'}, len={exc.total or '?'}); "
+                          f"streaming it through without seek support", flush=True)
+                except Exception:
+                    pass
+                return _stream_passthrough(exc, start, client_end)
             except Exception as exc:
                 try:
                     print(f"[GOFILE_PROXY][GIVE_UP] initial chunk: {str(exc)[:120]}", flush=True)

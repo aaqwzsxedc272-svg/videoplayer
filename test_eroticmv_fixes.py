@@ -12268,5 +12268,195 @@ report('OutputEncoding' in _script115
    'one of the two is what turned the last message into mojibake')
 
 
+# -----------------------------------------------------------------------
+# 117. PowerShell 5.1 does not resolve WinRT bracket syntax until the
+#      projection has been registered once, in assembly-qualified form.
+#      The field log named the symptom exactly -- "Type [Windows.Devices.
+#      Enumeration.Pnp.PnpObject] introuvable" -- and it arrived only
+#      because the previous build finally printed the reason instead of
+#      swallowing it. Three builds were spent on the method call when the
+#      type itself had never resolved.
+# -----------------------------------------------------------------------
+_reg117 = _script115.find('ContentType = WindowsRuntime')
+_lookup117 = _script115.find('$pnType = [Windows.Devices.Enumeration.Pnp.PnpObject]')
+report(_reg117 != -1 and _lookup117 != -1 and _reg117 < _lookup117,
+   'the WinRT projection is registered in assembly-qualified form before '
+   'the type is looked up, which is the only reason that lookup can '
+   'succeed at all',
+   'register@%d lookup@%d' % (_reg117, _lookup117))
+report("'projection=" in _script115,
+   'and the registration reports its own outcome, so a machine where it '
+   'still fails says so instead of failing the lookup two lines later '
+   'for an unrelated-looking reason')
+
+
+# -----------------------------------------------------------------------
+# 118. GoFile's CDN answers a ranged request with HTTP 200 and the whole
+#      file. The proxy treated that as a retryable error: twelve backoffs
+#      over ~100s, a 502, then the player re-resolved and did it all
+#      again -- six playlist entries and two live proxies in the field
+#      log, and the video never played. A 200 to a Range is an answer,
+#      not a failure; the honest response is to stream it through and
+#      say plainly that seeking is not available.
+# -----------------------------------------------------------------------
+import io as _io118
+import time as _timemod118
+import threading as _threading118
+import urllib.request as _urlreq118
+from urllib.parse import urlparse as _urlparse118
+
+_fn118 = None
+for _node118 in ast.walk(TREE):
+    if isinstance(_node118, ast.FunctionDef) and _node118.name == '_serve_gofile_resilient':
+        _fn118 = _node118
+        break
+_serve118 = ast.get_source_segment(SRC, _fn118) if _fn118 is not None else ''
+report(bool(_serve118), 'the gofile streaming closure was located to run against')
+
+_log118 = []
+
+
+def _print118(*a, **k):
+    _log118.append(' '.join(str(x) for x in a))
+
+
+class _Time118:
+    """Real clock, no waiting: the retry backoff must not slow the suite."""
+    @staticmethod
+    def time():
+        return _timemod118.time()
+
+    @staticmethod
+    def sleep(_s):
+        return None
+
+
+class _Owner118:
+    pass
+
+
+class _Resp118:
+    def __init__(self, body, status=200, headers=None):
+        self._body = body
+        self.status = status
+        self.headers = dict(headers or {})
+
+    def read(self, n=-1):
+        if n is None or n < 0:
+            n = len(self._body)
+        out = self._body[:n]
+        self._body = self._body[n:]
+        return out
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _Handler118:
+    def __init__(self, headers):
+        self.headers = dict(headers)
+        self.code = None
+        self.hdrs = {}
+        self.wfile = _io118.BytesIO()
+        self.error = None
+
+    def send_response(self, code):
+        self.code = code
+
+    def send_header(self, k, v):
+        self.hdrs[k] = v
+
+    def end_headers(self):
+        pass
+
+    def send_error(self, code, msg=''):
+        self.error = (code, str(msg))
+
+
+_body118 = [b'']
+_mode118 = {'mode': 'ignore-range'}
+_calls118 = []
+
+
+def _urlopen118(request, timeout=None, context=None):
+    _calls118.append(dict(getattr(request, 'headers', None) or {}))
+    if _mode118['mode'] == 'boom':
+        raise IOError('upstream gone')
+    return _Resp118(_body118[0], 200,
+                    {'Content-Type': 'video/mp4',
+                     'Content-Length': str(len(_body118[0]))})
+
+
+_ns118 = {'re': re, 'urlparse': _urlparse118, 'time': _Time118,
+          'threading': _threading118, 'print': _print118,
+          'owner': _Owner118()}
+exec(_serve118, _ns118)
+_serve = _ns118.get('_serve_gofile_resilient')
+_real_urlopen118 = _urlreq118.urlopen
+_urlreq118.urlopen = _urlopen118
+try:
+    # --- A: upstream ignores Range -> stream it through, do not retry.
+    _body118[0] = b'X' * 1000
+    _mode118['mode'] = 'ignore-range'
+    del _log118[:]
+    del _calls118[:]
+    _hA = _Handler118({'Range': 'bytes=0-'})
+    _okA = _serve(_hA, 'https://store-eu-par-5.gofile.io/download/web/x.mp4', {})
+    report(_okA is True and _hA.error is None and _hA.code == 200,
+       'a CDN that ignores Range is served rather than refused',
+       'ok=%s code=%s error=%s' % (_okA, _hA.code, _hA.error))
+    report(_hA.wfile.getvalue() == b'X' * 1000,
+       'and the whole body reaches the player, which is what it was '
+       'asking for',
+       '%d byte(s)' % len(_hA.wfile.getvalue()))
+    report(_hA.hdrs.get('Accept-Ranges') == 'none',
+       'without advertising seek -- promising ranges on a CDN that '
+       'ignores them is what started the retry storm',
+       'Accept-Ranges=%s' % _hA.hdrs.get('Accept-Ranges'))
+    report(len(_calls118) == 2,
+       'at the cost of two requests instead of thirteen',
+       '%d upstream call(s)' % len(_calls118))
+    report(not any('CHUNK_RETRY' in _l for _l in _log118),
+       'with no backoff loop behind it',
+       '%d retry line(s)' % sum('CHUNK_RETRY' in _l for _l in _log118))
+    report(any('NO_RANGE' in _l for _l in _log118)
+           and any('PASSTHROUGH' in _l for _l in _log118),
+       'and the log says why it fell back, plus how many bytes came '
+       'through, so a failure here is never silent again')
+
+    # --- B: a mid-file start still has to line up with what is sent.
+    del _log118[:]
+    del _calls118[:]
+    _hB = _Handler118({'Range': 'bytes=100-'})
+    _serve(_hB, 'https://store-eu-par-5.gofile.io/download/web/x.mp4', {})
+    report(_hB.wfile.getvalue() == b'X' * 900
+           and _hB.hdrs.get('Content-Length') == '900',
+       'a start partway into the file skips those bytes upstream and '
+       'reports the length it actually sends',
+       '%d byte(s), Content-Length=%s' % (len(_hB.wfile.getvalue()),
+                                          _hB.hdrs.get('Content-Length')))
+
+    # --- C: a genuine upstream failure must still give up honestly.
+    _mode118['mode'] = 'boom'
+    del _log118[:]
+    del _calls118[:]
+    _hC = _Handler118({'Range': 'bytes=0-'})
+    _serve(_hC, 'https://store-eu-par-5.gofile.io/download/web/x.mp4', {})
+    report(_hC.error is not None and _hC.error[0] == 502
+           and len(_calls118) == 13,
+       'while a real failure still exhausts the retry ladder and returns '
+       '502 -- only the ignored-Range case was reclassified',
+       'error=%s calls=%d' % (_hC.error, len(_calls118)))
+finally:
+    _urlreq118.urlopen = _real_urlopen118
+
+report('range ignored (HTTP 200) for chunk fetch' not in SRC,
+   'the error text that made a working response look like a broken one '
+   'is gone from the source')
+
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
