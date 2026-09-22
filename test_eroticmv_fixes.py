@@ -12170,5 +12170,70 @@ report(not _st114.battery_label.shown,
    'GUI thread')
 
 
+# -----------------------------------------------------------------------
+# 115. The battery probe came back with "Windows reported 0 device(s)" and
+#      nothing else, which cannot distinguish a headset Windows has no
+#      charge for from a probe that never got as far as asking. It now
+#      reports every step it took.
+# -----------------------------------------------------------------------
+_script115 = str(_g114.get('_BATTERY_POWERSHELL') or '')
+report(all(kind in _script115 for kind in
+           ('AssociatedEndpoints', 'Devices', 'DeviceInterfaces')),
+   'the probe asks all three device scopes rather than betting on one, '
+   'since the charge is not exposed the same way in each')
+report(_script115.count('Say ') >= 10 and "'SilentlyContinue'" not in _script115,
+   'and it no longer swallows its own errors, which is what left the last '
+   'field log with a bare zero and no reason')
+
+_out115, _ = _probe_run114(
+    '#diag winrt=loaded\n'
+    '#diag AssociatedEndpoints seen=7 withCharge=1\n'
+    'itel T1Neo\t64\n')
+report(_out115 == {'itel t1neo': 64},
+   "the probe's own progress lines are kept out of the device list",
+   repr(_out115))
+
+
+def _probe_loud115(stdout):
+    def _run(cmd, **kwargs):
+        return _Proc114(stdout, '')
+
+    mod = _types114.ModuleType('subprocess')
+    mod.run = _run
+    mod.CREATE_NO_WINDOW = 0x08000000
+    saved = _sys114.modules.get('subprocess')
+    saved_name = _os114.name
+    _sys114.modules['subprocess'] = mod
+    _g114['_BATTERY_PROBE_STATE']['reported'] = False
+    _os114.name = 'nt'
+    buf = _io105.StringIO()
+    try:
+        with _ctx105.redirect_stdout(buf):
+            _probe114()
+    finally:
+        _os114.name = saved_name
+        _g114['_BATTERY_PROBE_STATE']['reported'] = True
+        if saved is None:
+            _sys114.modules.pop('subprocess', None)
+        else:
+            _sys114.modules['subprocess'] = saved
+    return buf.getvalue()
+
+
+_log115 = _probe_loud115(
+    '#diag winrt=loaded\n'
+    '#diag astask=ok\n'
+    '#diag AssociatedEndpoints seen=7 withCharge=0\n'
+    '#diag AssociatedEndpoints noCharge=itel T1Neo Stereo; Speakers\n')
+report('withCharge=0' in _log115 and 'itel T1Neo Stereo' in _log115,
+   'and the first probe prints how far it got and what it saw, so a headset '
+   'Windows has no charge for is told apart from a probe that never asked',
+   repr(_log115[:170]))
+_log115 = _probe_loud115('#diag await=timeout\n')
+report('await=timeout' in _log115,
+   'including a WinRT call that hung, which would otherwise look exactly '
+   'like a machine with no Bluetooth at all', repr(_log115[:100]))
+
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)

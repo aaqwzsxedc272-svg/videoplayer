@@ -1128,30 +1128,56 @@ SWP_NOOWNERZORDER = 0x0200
 # only -- there is no Win32 call for a Bluetooth peripheral's battery.
 # PowerShell is used because it ships with Windows and can load WinRT types
 # directly, so this stays dependency-free.
-_BATTERY_POWERSHELL = r'''
-$ErrorActionPreference = 'SilentlyContinue'
-Add-Type -AssemblyName System.Runtime.WindowsRuntime
-$asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
+_BATTERY_POWERSHELL = r"""
+$ErrorActionPreference = 'Continue'
+function Say($m) { Write-Output ('#diag ' + $m) }
+try {
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
+    Say 'winrt=loaded'
+} catch { Say ('winrt=failed:' + $_.Exception.Message) }
+$asTask = $null
+try {
+    $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
+} catch { Say ('astask=failed:' + $_.Exception.Message) }
+if ($asTask) { Say 'astask=ok' } else { Say 'astask=missing' }
 function Await($op, $type) {
     if (-not $asTask) { return $null }
-    $t = $asTask.MakeGenericMethod($type).Invoke($null, @($op))
-    if (-not $t.Wait(5000)) { return $null }
-    return $t.Result
+    try {
+        $t = $asTask.MakeGenericMethod($type).Invoke($null, @($op))
+        if (-not $t.Wait(6000)) { Say 'await=timeout'; return $null }
+        return $t.Result
+    } catch { Say ('await=failed:' + $_.Exception.Message); return $null }
 }
-[Windows.Devices.Enumeration.Pnp.PnpObject,Windows.Devices.Enumeration,ContentType=WindowsRuntime] | Out-Null
+try {
+    [Windows.Devices.Enumeration.Pnp.PnpObject,Windows.Devices.Enumeration,ContentType=WindowsRuntime] | Out-Null
+    Say 'pnp=loaded'
+} catch { Say ('pnp=failed:' + $_.Exception.Message) }
 $props = [string[]]@('System.ItemNameDisplay', 'System.Devices.Aep.Battery.LevelPercent')
-$found = Await ([Windows.Devices.Enumeration.Pnp.PnpObject]::FindAllAsync([Windows.Devices.Enumeration.Pnp.PnpObjectType]::AssociatedEndpoints, $props)) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Enumeration.Pnp.PnpObject]])
-if ($found) {
+foreach ($kind in @('AssociatedEndpoints', 'Devices', 'DeviceInterfaces')) {
+    $found = $null
+    try {
+        $found = Await ([Windows.Devices.Enumeration.Pnp.PnpObject]::FindAllAsync([Windows.Devices.Enumeration.Pnp.PnpObjectType]::$kind, $props)) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.Enumeration.Pnp.PnpObject]])
+    } catch { Say ($kind + '=failed:' + $_.Exception.Message); continue }
+    if (-not $found) { Say ($kind + '=none'); continue }
+    $withCharge = 0
+    $noCharge = @()
     foreach ($d in $found) {
-        $lvl = $d.Properties['System.Devices.Aep.Battery.LevelPercent']
+        $nm = $null
+        try { $nm = $d.Properties['System.ItemNameDisplay'] } catch {}
+        if (-not $nm) { try { $nm = $d.Name } catch {} }
+        $lvl = $null
+        try { $lvl = $d.Properties['System.Devices.Aep.Battery.LevelPercent'] } catch {}
         if ($null -ne $lvl) {
-            $nm = $d.Properties['System.ItemNameDisplay']
-            if (-not $nm) { $nm = $d.Name }
+            $withCharge = $withCharge + 1
             Write-Output (@($nm, $lvl) -join "`t")
+        } elseif ($noCharge.Count -lt 12) {
+            $noCharge += [string]$nm
         }
     }
+    Say ($kind + ' seen=' + $found.Count + ' withCharge=' + $withCharge)
+    if ($noCharge.Count -gt 0) { Say ($kind + ' noCharge=' + ($noCharge -join '; ')) }
 }
-'''
+"""
 
 _BATTERY_PROBE_STATE = {'reported': False}
 
@@ -1197,8 +1223,12 @@ def _bluetooth_battery_levels():
                   f'{type(exc).__name__}: {exc}', flush=True)
         return {}
     levels = {}
+    diag = []
     for line in str(getattr(proc, 'stdout', '') or '').splitlines():
         line = line.strip()
+        if line.startswith('#diag '):
+            diag.append(line[6:].strip())
+            continue
         if '\t' not in line:
             continue
         name, _, value = line.rpartition('\t')
@@ -1214,6 +1244,11 @@ def _bluetooth_battery_levels():
             detail = f'{detail} -- {err[:200]}'
         print(f'[BATTERY] Windows reported {len(levels)} device(s) with a '
               f'charge{detail}', flush=True)
+        # Every step the probe took, because "0 devices" on its own cannot
+        # say whether Windows has no battery to report or the probe never
+        # got as far as asking.
+        for entry in diag[:14]:
+            print(f'[BATTERY]   {entry}', flush=True)
     return levels
 
 
