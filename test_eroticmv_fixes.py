@@ -12264,9 +12264,8 @@ report('::FindAllAsync(' in _script115
 # what the call does. Parse the actual arguments instead, so a rename in
 # the script stops invalidating it.
 report("return $mi.Invoke($null, $raw)" in _script115
-       and 'List[string]' in _script115
-       and "@('', $p, $kv)" in _script115
-       and "@($kv, $p, '')" in _script115,
+       and "New-Object 'string[]'" in _script115
+       and "$callArgs[1] = $p" in _script115,
    'with the property list and the AQS filter in the position each API '
    'puts them, as types the projected signatures accept')
 report("'=no-overload'" in _script115 and "'=await-null'" in _script115,
@@ -12642,8 +12641,8 @@ report('[Windows.Devices.Enumeration.DeviceInformationCollection]' in _script115
        and 'MakeGenericType($diType)' not in _script115,
    'and the await is given the collection the method actually returns, '
    'not an interface it merely implements')
-report("$diType::FindAllAsync('', $p, $kv)" in _script115
-       and "$pnType::FindAllAsync($kv, $p, '')" in _script115,
+report("$diType::FindAllAsync($directArgs[0], $directArgs[1], $directArgs[2])" in _script115
+       and "$pnType::FindAllAsync($directArgs[0], $directArgs[1], $directArgs[2])" in _script115,
    'trying both APIs by direct call, each with its own argument order')
 
 

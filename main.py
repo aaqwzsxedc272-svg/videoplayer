@@ -1235,8 +1235,21 @@ function TryCombo($label, $api, $kv, [string[]]$propNames) {
     # succeeded. The direct call preserves the projection.
     $direct = $null
     try {
-        if ($api -eq 'di') { $direct = $diType::FindAllAsync('', $p, $kv) }
-        else { $direct = $pnType::FindAllAsync($kv, $p, '') }
+        # Do not use @('', $p, $kv): PowerShell flattens the String[] and
+        # shifts the projected overload arguments. Build an object[] by
+        # index, just as CallFindAll does.
+        $directArgs = New-Object 'object[]' 3
+        if ($api -eq 'di') {
+            $directArgs[0] = ''
+            $directArgs[1] = $p
+            $directArgs[2] = $kv
+            $direct = $diType::FindAllAsync($directArgs[0], $directArgs[1], $directArgs[2])
+        } else {
+            $directArgs[0] = $kv
+            $directArgs[1] = $p
+            $directArgs[2] = ''
+            $direct = $pnType::FindAllAsync($directArgs[0], $directArgs[1], $directArgs[2])
+        }
     } catch { Say ($label + '=direct:' + $_.Exception.Message) }
     if ($direct) {
         $lt = $null
@@ -1250,8 +1263,14 @@ function TryCombo($label, $api, $kv, [string[]]$propNames) {
     }
     $op = $null
     try {
-        if ($api -eq 'di') { $op = CallFindAll $diType @('', $p, $kv) }
-        else { $op = CallFindAll $pnType @($kv, $p, '') }
+        $callArgs = New-Object 'object[]' 3
+        if ($api -eq 'di') {
+            $callArgs[0] = ''; $callArgs[1] = $p; $callArgs[2] = $kv
+            $op = CallFindAll $diType $callArgs
+        } else {
+            $callArgs[0] = $kv; $callArgs[1] = $p; $callArgs[2] = ''
+            $op = CallFindAll $pnType $callArgs
+        }
     } catch { Say ($label + '=invoke:' + $_.Exception.Message); return $null }
     if (-not $op) { Say ($label + '=no-overload'); return $null }
     # The operation's generic argument has to be the collection the method
