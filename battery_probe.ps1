@@ -40,7 +40,12 @@ function Await($op, $type) {
             catch { $box.error = $_.Exception; $box.done = $true; return }
             $box.done = $true
         })
-        try { $waiter.Wait(10000) | Out-Null } catch {}
+        try { $waiter.Wait(10000) | Out-Null } catch {
+            $e = $_.Exception
+            try { if ($e.InnerException) { $e = $e.InnerException } } catch {}
+            Say ('await=failed:' + $e.Message)
+            return $null
+        }
         if ($box.error) {
             $e = $box.error
             try { if ($e.InnerException) { $e = $e.InnerException } } catch {}

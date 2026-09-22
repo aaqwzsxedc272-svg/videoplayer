@@ -1170,7 +1170,12 @@ function Await($op, $type) {
             catch { $box.error = $_.Exception; $box.done = $true; return }
             $box.done = $true
         })
-        try { $waiter.Wait(10000) | Out-Null } catch {}
+        try { $waiter.Wait(10000) | Out-Null } catch {
+            $e = $_.Exception
+            try { if ($e.InnerException) { $e = $e.InnerException } } catch {}
+            Say ('await=failed:' + $e.Message)
+            return $null
+        }
         if ($box.error) {
             $e = $box.error
             try { if ($e.InnerException) { $e = $e.InnerException } } catch {}
@@ -37709,6 +37714,23 @@ try {
             u = u.split('"')[0].split("'")[0].strip()
             if not u.lower().startswith(('http://', 'https://')):
                 return
+            # Video Download Helper shows OK.ru's working progressive form:
+            # convert the signed query URL to the /expires/.../video/ path.
+            try:
+                _op = urlparse(u)
+                if 'okcdn.ru' in (_op.netloc or '').lower() and _op.query:
+                    _parts = []
+                    for _pair in _op.query.split('&'):
+                        if '=' in _pair:
+                            _k, _v = _pair.split('=', 1)
+                            if _k in {'expires','srcIp','pr','srcAg','ch','ms','type','sig','ct','urls','clientType','zs','id'}:
+                                _parts.extend((_k, _v))
+                    if _parts:
+                        _direct = _op.scheme + '://' + _op.netloc + '/' + '/'.join(_parts) + '/video/'
+                        if _direct not in mp4_urls:
+                            mp4_urls.append(_direct)
+            except Exception:
+                pass
             low = u.lower()
             if any(d in low for d in (
                     'commondatastorage.googleapis.com', 'gtv-videos-bucket',
