@@ -13095,6 +13095,105 @@ report(_t132._okru_page_title(
    'an anti-bot challenge title is still refused')
 
 
+# 133. A field log showed ~59 PowerShell probes in one session. Qt
+#      re-announces the audio endpoint on every playback start and stop,
+#      and each announcement scheduled its own probe: nearly all of them
+#      came from the same burst and returned the same numbers.
+class _Clock133(object):
+    def __init__(self):
+        self.now = 1000.0
+
+    def time(self):
+        return self.now
+
+
+class _Timers133(object):
+    def __init__(self):
+        self.queued = []
+
+    def singleShot(self, delay, fn):
+        self.queued.append((delay, fn))
+
+    def fire(self, clock, index=-1):
+        delay, fn = self.queued.pop(index)
+        clock.now += delay / 1000.0
+        fn()
+
+
+class _Pool133(object):
+    def __init__(self, log):
+        self.log = log
+
+    def submit(self, fn):
+        self.log.append('probe')
+        fn()
+
+
+class _Bat133(object):
+    _refresh_audio_battery = lift('VideoPlayer', '_refresh_audio_battery')
+    _start_battery_probe = lift('VideoPlayer', '_start_battery_probe')
+    _BATTERY_PROBE_MIN_INTERVAL_MS = lift_attr(
+        'VideoPlayer', '_BATTERY_PROBE_MIN_INTERVAL_MS')
+
+    def __init__(self, clock, timers, log):
+        self.clock = clock
+        self.timers = timers
+        self.log = log
+        self.emitted = []
+        self._battery_probe_pending = False
+        self._battery_probe_last_ms = 0.0
+        self.thread_pool = _Pool133(log)
+
+    def battery_ready_emit(self, payload):
+        self.emitted.append(payload)
+
+
+_clock133 = _Clock133()
+_timers133 = _Timers133()
+_real_time = G.get('time')
+_real_qtimer = G.get('QTimer')
+G['time'] = _clock133
+G['QTimer'] = _timers133
+G['_bluetooth_battery_levels'] = lambda: {'roseland tws re-500 hands-free ag': 90}
+G['json'] = json
+
+_b133 = _Bat133(_clock133, _timers133, [])
+_b133.battery_ready = _b133
+
+_b133._refresh_audio_battery()
+report(_b133.log == ['probe'],
+   'the first battery probe runs straight away',
+   repr(_b133.log))
+
+# A burst: nine more device-change announcements in the same instant.
+for _ in range(9):
+    _b133._refresh_audio_battery()
+report(_b133.log == ['probe'],
+   'a burst of device-change events collapses into the one probe -- '
+   'not one PowerShell launch each',
+   repr(_b133.log))
+report(len(_timers133.queued) == 1,
+   'and it queues exactly one deferred probe, however many arrive',
+   repr(len(_timers133.queued)))
+
+_timers133.fire(_clock133)
+report(_b133.log == ['probe', 'probe'],
+   'the deferred probe then runs once the interval has passed',
+   repr(_b133.log))
+
+# Long after the last probe, a fresh request must not be held back.
+_clock133.now += 60
+_b133._refresh_audio_battery()
+report(_b133.log == ['probe', 'probe', 'probe'],
+   'a request well after the previous probe is not throttled',
+   repr(_b133.log))
+
+if _real_time is not None:
+    G['time'] = _real_time
+if _real_qtimer is not None:
+    G['QTimer'] = _real_qtimer
+
+
 for _h128, _want128 in [('ok.ru', True), ('m.ok.ru', True), ('www.ok.ru', True),
                         ('video.ok.ru', True),
                         ('book.ru', False), ('look.ru', False),

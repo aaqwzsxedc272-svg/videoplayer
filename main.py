@@ -58852,17 +58852,47 @@ try {
             self.mp3_progress.hide()
         self._reposition_mp3_btn()
 
+    _BATTERY_PROBE_MIN_INTERVAL_MS = 5000
+
     def _refresh_audio_battery(self):
         """Read the audio device's charge, off the GUI thread.
 
         The probe shells out to PowerShell, which is far too slow to run
         here, so it goes to the thread pool and the answer comes back
         through a queued slot.
+
+        Requests are coalesced. Qt re-announces the audio endpoint on
+        every playback start and stop, and every announcement used to
+        schedule its own probe 200ms later: one field log showed ~59
+        PowerShell launches in a single session, nearly all from the
+        same burst and all returning the same three numbers. One probe
+        answers the whole burst, so a request that arrives while one is
+        outstanding -- or within _BATTERY_PROBE_MIN_INTERVAL_MS of the
+        last one -- waits for the next slot instead of adding another.
         """
+        now_ms = time.time() * 1000
+        if getattr(self, '_battery_probe_pending', False):
+            return
+        delay = int(self._BATTERY_PROBE_MIN_INTERVAL_MS - (
+            now_ms - float(getattr(self, '_battery_probe_last_ms', 0) or 0)))
+        if delay <= 0:
+            self._start_battery_probe()
+            return
+        self._battery_probe_pending = True
+        try:
+            QTimer.singleShot(delay, self._start_battery_probe)
+        except Exception:
+            self._battery_probe_pending = False
+            self._start_battery_probe()
+
+    def _start_battery_probe(self):
+        self._battery_probe_pending = False
+        self._battery_probe_last_ms = time.time() * 1000
+
         def _work():
             levels = _bluetooth_battery_levels()
             try:
-                # A queued signal is reliable across the worker/GUІ thread
+                # A queued signal is reliable across the worker/GUI thread
                 # boundary.  The previous invokeMethod path could silently
                 # fail on Windows PyQt, leaving discovery successful but the
                 # label permanently hidden.
