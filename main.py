@@ -1157,8 +1157,9 @@ try {
             }
         } catch {}
     }
-    if ($bt.Count -gt 0) { Say ('pnp-direct=' + $bt.Count); exit }
-} catch { Say ('pnp-direct=failed:' + $_.Exception.Message) }
+    Say ('pnp-direct=' + $bt.Count)
+    exit
+} catch { Say ('pnp-direct=failed:' + $_.Exception.Message); exit }
 
 # Some WinRT enumeration paths behave differently off an MTA thread, and
 # that failure looks exactly like a bad argument. Say which one we are on.

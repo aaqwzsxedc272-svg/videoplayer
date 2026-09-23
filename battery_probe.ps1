@@ -14,7 +14,7 @@ function Emit($m) { [Console]::Out.WriteLine($m) }
 # directly and only use the older WinRT ladder if this returns nothing.
 try {
     $bt = @()
-    foreach ($dev in @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue)) {
+    foreach ($dev in @(Get-PnpDevice -PresentOnly -Class Bluetooth -ErrorAction SilentlyContinue)) {
         try {
             $prop = Get-PnpDeviceProperty -InstanceId $dev.InstanceId -KeyName '{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2' -ErrorAction SilentlyContinue
             if ($prop -and $null -ne $prop.Data) {
@@ -27,8 +27,9 @@ try {
             }
         } catch {}
     }
-    if ($bt.Count -gt 0) { Say ('pnp-direct=' + $bt.Count); exit }
-} catch { Say ('pnp-direct=failed:' + $_.Exception.Message) }
+    Say ('pnp-direct=' + $bt.Count)
+    exit
+} catch { Say ('pnp-direct=failed:' + $_.Exception.Message); exit }
 
 # Some WinRT enumeration paths behave differently off an MTA thread, and
 # that failure looks exactly like a bad argument. Say which one we are on.
