@@ -1150,8 +1150,8 @@ try {
             if ($prop -and $null -ne $prop.Data) {
                 $name = [string]$dev.FriendlyName
                 $value = $prop.Data
-                $number = 0.0
-                if ($name -and [double]::TryParse([string]$value, [Globalization.NumberStyles]::Any, [Globalization.CultureInfo]::InvariantCulture, [ref]$number)) {
+                try { $number = [double]$value } catch { $number = -1 }
+                if ($name -and $number -ge 0 -and $number -le 100) {
                     Emit (@($name, $number) -join "`t")
                     $bt += $name
                 }
