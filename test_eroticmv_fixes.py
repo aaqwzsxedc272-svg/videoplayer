@@ -13037,6 +13037,64 @@ class _OkHost128(object):
 
 
 _okh128 = _OkHost128()._is_ok_host
+# 132. An ok.ru video played but the playlist row was labelled with the
+#      bare numeric id from the url -- "a long number". ok.ru renders its
+#      player with JavaScript, so the served HTML has no <title> and
+#      _html_page_title finds nothing; the name is in the player config.
+class _OkTitle132(object):
+    _okru_page_title = lift('VideoPlayer', '_okru_page_title')
+    _clean_remote_title = lift('VideoPlayer', '_clean_remote_title')
+    _is_banned_stream_title = lift('VideoPlayer', '_is_banned_stream_title')
+    _OKRU_TITLE_NOISE = lift_attr('VideoPlayer', '_OKRU_TITLE_NOISE')
+    _BANNED_STREAM_TITLES = lift_attr('VideoPlayer', '_BANNED_STREAM_TITLES')
+
+
+_t132 = _OkTitle132()
+_NAME132 = 'Deep End (1970) | Eng Subs'
+
+# Attribute order must not matter -- _html_page_title requires
+# property= before content=, which is the reason this was missed.
+report(_t132._okru_page_title(
+    '<meta content="Deep End (1970) | Eng Subs" property="og:title"/>',
+    'fallback') == _NAME132,
+   'the video name is found in og:title when content= comes first',
+   repr(_t132._okru_page_title(
+       '<meta content="Deep End (1970) | Eng Subs" property="og:title"/>', 'fb')))
+report(_t132._okru_page_title(
+    '<meta property="og:title" content="Deep End (1970) | Eng Subs"/>',
+    'fallback') == _NAME132,
+   'and when property= comes first -- neither order is privileged')
+
+# The player config, plain and re-escaped inside an HTML attribute.
+report(_t132._okru_page_title(
+    '<div data-options=\'{"title":"Deep End (1970) | Eng Subs"}\'>',
+    'fallback') == _NAME132,
+   'the video name is read out of the player config',
+   repr(_t132._okru_page_title(
+       '<div data-options=\'{"title":"Deep End (1970) | Eng Subs"}\'>', 'fb')))
+report(_t132._okru_page_title(
+    '<div data-options="{\\"title\\":\\"Deep End (1970) | Eng Subs\\"}">',
+    'fallback') == _NAME132,
+   'including the config escaped inside an HTML attribute',
+   repr(_t132._okru_page_title(
+       '<div data-options="{\\"title\\":\\"Deep End (1970) | Eng Subs\\"}">', 'fb')))
+
+# A bare id is the thing being replaced, and the site's own name is not a
+# video name -- both must fall through to the caller's fallback.
+report(_t132._okru_page_title(
+    '<div data-options=\'{"title":"8588430609051"}\'>', 'fallback') == 'fallback',
+   'a bare numeric id is not offered as a video name')
+report(_t132._okru_page_title(
+    '<meta property="og:title" content="OK.RU"/>', 'fallback') == 'fallback',
+   'and neither is the site\'s own name')
+report(_t132._okru_page_title('', 'fallback') == 'fallback'
+       and _t132._okru_page_title(None, 'fallback') == 'fallback',
+   'a page with nothing in it yields the fallback rather than raising')
+report(_t132._okru_page_title(
+    '<div data-options=\'{"title":"Just a moment"}\'>', 'fallback') == 'fallback',
+   'an anti-bot challenge title is still refused')
+
+
 for _h128, _want128 in [('ok.ru', True), ('m.ok.ru', True), ('www.ok.ru', True),
                         ('video.ok.ru', True),
                         ('book.ru', False), ('look.ru', False),

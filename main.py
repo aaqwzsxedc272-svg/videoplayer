@@ -38432,6 +38432,66 @@ try {
         hdrs.setdefault('Accept-Language', 'en-US,en;q=0.9')
         return hdrs
 
+    _OKRU_TITLE_NOISE = frozenset({'ok', 'ok.ru', 'okru', 'одноклассники'})
+
+    def _okru_page_title(self, html, fallback=''):
+        """The video's name out of an ok.ru page.
+
+        ok.ru renders its player with JavaScript, so the HTML it serves
+        carries no <title> and no og:title in the order _html_page_title
+        looks for them. The name is missing from both, the title falls
+        back to the url, and the playlist row ends up labelled with the
+        bare numeric video id -- "a long number" -- even though the video
+        plays fine.
+
+        The name is in the page regardless: it sits in the player config
+        the same decoder already reads the renditions out of. Look there.
+
+        Returns *fallback* when nothing in the page names the video.
+        """
+        text = str(html or '')
+        if not text:
+            return fallback
+        # Ordered most reliable first. The meta pattern captures the whole
+        # tag and the content is pulled out of it, so attribute order does
+        # not matter -- which is the thing _html_page_title gets wrong here.
+        patterns = (
+            r'<meta[^>]*og:title[^>]*>',
+            r'<meta[^>]+name=["\']title["\'][^>]*>',
+            r'data-title=["\']([^"\']{2,200})["\']',
+            r'"title"\s*:\s*"((?:[^"\\]|\\.){2,200})"',
+            r'\\"title\\"\s*:\s*\\"((?:[^"\\]|\\.){2,200})\\"',
+        )
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                value = match.group(1) if match.groups() else ''
+                if not value:
+                    content = re.search(
+                        r'content=["\']([^"\']+)["\']', match.group(0))
+                    value = content.group(1) if content else ''
+                if not value:
+                    continue
+                if '\\u' in value or '\\x' in value:
+                    try:
+                        value = value.encode('latin-1', 'ignore').decode(
+                            'unicode_escape')
+                    except Exception:
+                        pass
+                value = re.sub(r'\\(.)', r'\1', value)
+                title = self._clean_remote_title(html_unescape(value))
+                if not title:
+                    continue
+                # A bare id is what we are here to replace, and the site's
+                # own name is not a video name either.
+                if title.strip().isdigit():
+                    continue
+                if title.strip().lower().strip('.') in self._OKRU_TITLE_NOISE:
+                    continue
+                if self._is_banned_stream_title(title):
+                    continue
+                return title
+        return fallback
+
     def _voe_probe_candidates(self, urls, page_url, page_title, source_url,
                               hls=False, require_probe=False,
                               headers_for=None):
@@ -38696,6 +38756,16 @@ try {
                     page_title = _html_title
         except Exception:
             pass
+        # ok.ru serves no <title>, so the block above leaves page_title as
+        # the numeric id out of the url and the row gets labelled with it.
+        # The name is in the player config -- ask for it before settling.
+        try:
+            if self._is_ok_host(host):
+                _okru_title = self._okru_page_title(html, page_title)
+                if _okru_title and not str(_okru_title).strip().isdigit():
+                    page_title = _okru_title
+        except Exception:
+            pass
 
         # ── Decode every known VOE sources format (R46) ───────────────────
         hls_urls, mp4_urls = self._voe_decode_source_candidates(html)
@@ -38784,14 +38854,13 @@ try {
                 print('[VOE-mirror] OK.ru: nothing on the page answered -- '
                       f'{len(mp4_urls) + len(hls_urls)} signed url(s), '
                       f'HTTP {"/".join(_codes) or "?"} from every one. '
-                      'This is not a decoding mistake and not the video\'s '
-                      'licence: ok.ru answers an anonymous request with a '
-                      'config that holds no playable rendition at all, so '
-                      'there was never anything here to play. The same '
-                      'video does play in a browser that is logged in. '
-                      'Send the session -- export ok.ru_cookies.txt, or let '
-                      'the app read the browser profile -- and check the '
-                      '[COOKIES] lines above for whether it found one.',
+                      'Other ok.ru videos resolve from a page shaped '
+                      'exactly like this one, so this is the video rather '
+                      'than the player: it offered no rendition on a real '
+                      'video host, only a preview-host url and a manifest '
+                      'okcdn refused. If it plays in a browser, what that '
+                      'browser has and this request does not is the '
+                      'session -- see the [COOKIES] lines above.',
                       flush=True)
                 return None
             for hls_url in hls_urls:
@@ -58310,6 +58379,15 @@ try {
             
             # Show menu bar
             self.menuBar().show()
+            # ...and put the charge back, from the levels already in
+            # memory. Re-probing would shell out to PowerShell just to
+            # redraw a number we already know.
+            try:
+                if getattr(self, '_battery_levels', None):
+                    import json as _json
+                    self.apply_audio_battery(_json.dumps(self._battery_levels))
+            except Exception:
+                pass
             self.controls_layout.setContentsMargins(5, 5, 5, 5)
             
             self.controls_widget.setParent(self.central_widget)
@@ -58412,6 +58490,16 @@ try {
             
             # Hide menu bar in fullscreen
             self.menuBar().hide()
+            # The battery indicator is a plain child of the main window
+            # parked where the menubar sits, so hiding the menubar leaves
+            # it floating over the video. apply_audio_battery would hide
+            # it on its next tick, but that poll is 30s out, and a number
+            # sitting on the picture for half a minute reads as a bug.
+            # Hide it with the rest of the chrome, here, now.
+            try:
+                self.battery_label.setVisible(False)
+            except Exception:
+                pass
             
             # Remove controls from layout if present
             if self.controls_widget.parent() == self.central_widget:
