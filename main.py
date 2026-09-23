@@ -58260,20 +58260,24 @@ try {
             # order would otherwise decide which one the number came from.
             # A generic label carries less identifying information than a
             # model name, so it loses; length settles everything else.
-            best_score = (-1, -1)
+            best_score = (-1, -1, -1)
             for name, value in levels.items():
                 if not name:
                     continue
+                _a = {x for x in name.lower().replace('-', ' ').replace('_', ' ').split() if len(x) >= 4}
+                _b = {x for x in current.lower().replace('-', ' ').replace('_', ' ').split() if len(x) >= 4}
+                shared = len(_a & _b)
                 if name not in current and current not in name:
                     # Windows exposes separate endpoint names (for example
                     # 'itel T1Neo Stereo' versus 'itel T1Neo Hands-Free AG').
-                    # Match their stable model tokens when the endpoint
-                    # suffix differs, but require a meaningful shared token.
-                    _a = {x for x in name.lower().replace('-', ' ').replace('_', ' ').split() if len(x) >= 4}
-                    _b = {x for x in current.lower().replace('-', ' ').replace('_', ' ').split() if len(x) >= 4}
-                    if len(_a & _b) < 2:
+                    # Prefer the candidate with the most model tokens in
+                    # common.  The old length-first score let a longer,
+                    # unrelated headset win because all endpoints shared
+                    # generic suffix tokens such as hands-free and ag.
+                    if shared < 2:
                         continue
                 score = (0 if name.strip() in _GENERIC_AUDIO_NAMES else 1,
+                         shared,
                          len(name))
                 if score > best_score:
                     best_score = score
