@@ -13209,6 +13209,122 @@ if _real_qtimer is not None:
     G['QTimer'] = _real_qtimer
 
 
+# 135. Pasting an ok.ru url resolved it, then double-click resolved it
+#      again. The second pass renamed the row to the file id out of
+#      Content-Disposition, and applying the newly minted url stopped
+#      the load that had just started (mpv reason=stop). A still-valid
+#      signed url has to be played, not thrown away, and a number is
+#      not a title.
+class _Id135(object):
+    _title_is_numeric_id = staticmethod(lift('VideoPlayer', '_title_is_numeric_id'))
+
+
+_id135 = _Id135()
+for _raw135, _want135 in (
+    ('7198362569276.mp4', True),
+    ('7940510190235', True),
+    ('Запределье (2006)', False),
+    ('Luna (1979) | Eng Subs', False),
+    ('', False),
+    (None, False),
+):
+    report(_id135._title_is_numeric_id(_raw135) is _want135,
+           f'numeric id? { _raw135!r} -> {_want135}')
+
+
+class _Merge135(object):
+    _merge_stream_info = lift('VideoPlayer', '_merge_stream_info')
+    _title_is_numeric_id = staticmethod(lift('VideoPlayer', '_title_is_numeric_id'))
+    _clean_remote_title = clean
+    _BANNED_STREAM_TITLES = lift_attr('VideoPlayer', '_BANNED_STREAM_TITLES')
+
+    @classmethod
+    def _is_banned_stream_title(cls, title):
+        return banned_fn(cls, title)
+
+    def __init__(self):
+        self._stream_resolution_cache = {}
+
+
+_m135 = _Merge135()
+_m135._merge_stream_info(
+    'https://ok.ru/video/1', {'title': 'Запределье (2006)'})
+_m135._merge_stream_info(
+    'https://ok.ru/video/1', {'title': '7198362569276.mp4'})
+report(
+    _m135._stream_resolution_cache['https://ok.ru/video/1'].get('title')
+    == 'Запределье (2006)',
+    'a file id from the probe does not replace the page title',
+    repr(_m135._stream_resolution_cache['https://ok.ru/video/1'].get('title')))
+_m135._merge_stream_info(
+    'https://ok.ru/video/2', {'title': '7198362569276.mp4'})
+_m135._merge_stream_info(
+    'https://ok.ru/video/2', {'title': 'Запределье (2006)'})
+report(
+    _m135._stream_resolution_cache['https://ok.ru/video/2'].get('title')
+    == 'Запределье (2006)',
+    'a real title still replaces a file id that arrived first',
+    repr(_m135._stream_resolution_cache['https://ok.ru/video/2'].get('title')))
+
+
+class _Dur135(object):
+    _okru_page_duration_ms = lift('VideoPlayer', '_okru_page_duration_ms')
+
+
+_dur135 = _Dur135()
+_html135 = (
+    '<div data-options="{&quot;movie&quot;:{&quot;title&quot;:&quot;Luna&quot;,'
+    '&quot;duration&quot;:&quot;5432&quot;}}"></div>'
+)
+report(_dur135._okru_page_duration_ms(_html135) == 5432 * 1000,
+       'ok.ru movie.duration is taken from the page, in milliseconds',
+       repr(_dur135._okru_page_duration_ms(_html135)))
+report(_dur135._okru_page_duration_ms('<div>"duration":"3"</div>') == 0,
+       'a duration that is not inside movie, or too short to be a film, is ignored')
+report(_dur135._okru_page_duration_ms('') == 0
+       and _dur135._okru_page_duration_ms(None) == 0,
+       'no page, no duration')
+
+
+_T135_WANT = ['_signed_url_expiry_epoch', '_signed_playback_url_is_expired',
+              '_cached_signed_playback_is_trustworthy']
+_t135_cls = next(n for n in ast.walk(ast.parse(open('main.py', encoding='utf-8').read()))
+                 if isinstance(n, ast.ClassDef) and n.name == 'VideoPlayer')
+_t135_m = {x.name: x for x in _t135_cls.body
+           if isinstance(x, ast.FunctionDef) and x.name in _T135_WANT}
+_t135_stub = ast.ClassDef(name='_T135Stub', bases=[], keywords=[],
+                          body=[_t135_m[w] for w in _T135_WANT], decorator_list=[])
+_t135_mod = ast.Module(body=[_t135_stub], type_ignores=[])
+ast.fix_missing_locations(_t135_mod)
+_t135_ns = {'re': re, 'time': time, 'urlparse': urlparse, 'parse_qs': parse_qs}
+exec(compile(_t135_mod, '<main.py>', 'exec'), _t135_ns)
+_t135 = _t135_ns['_T135Stub']()
+_NOW135 = int(time.time())
+for _label135, _url135, _want135 in (
+    ('fresh okcdn',
+     f'https://vd1.okcdn.ru/?expires={(_NOW135 + 3600) * 1000}&type=0&id=1', True),
+    ('fresh vkuser manifest',
+     f'https://ok6-30.vkuser.net/video.m3u8?expires={_NOW135 + 7200}&type=2', True),
+    ('okcdn inside the grace window',
+     f'https://vd1.okcdn.ru/?expires={(_NOW135 + 30) * 1000}', False),
+    ('expired okcdn',
+     f'https://vd1.okcdn.ru/?expires={(_NOW135 - 600) * 1000}', False),
+    ('foreign host with a future expires',
+     f'https://cdn.example.net/x.mp4?expires={_NOW135 + 3600}', False),
+):
+    report(_t135._cached_signed_playback_is_trustworthy(_url135) is _want135,
+           f'trustworthy? {_label135} -> {_want135}')
+
+_src135 = open('main.py', encoding='utf-8').read()
+report('[OKRU] playing the stream already ' in _src135,
+       'a still-valid ok.ru stream is played instead of resolved again')
+report('def _keep_in_flight_remote_playback' in _src135,
+       'a second double-click does not stop a row that is already playing')
+report('[VOE-mirror] OK.ru: probing the best ' in _src135
+       and 'let yt-dlp, which has a real Odnoklassniki' not in _src135,
+       'ok.ru no longer probes every rendition with the headers that never work')
+
+
 for _h128, _want128 in [('ok.ru', True), ('m.ok.ru', True), ('www.ok.ru', True),
                         ('video.ok.ru', True),
                         ('book.ru', False), ('look.ru', False),

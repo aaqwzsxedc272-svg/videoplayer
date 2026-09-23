@@ -30033,15 +30033,27 @@ try {
         the playback resolve) while another re-captured 75 s later, minting
         exp=1789504158 to replace an exp=1789504083 that was still valid.
 
-        Scoped to the turbo.cr CDN deliberately. The blanket rule also covers
-        hosters whose URLs expire without saying so, and that cannot be checked
-        for them from here — widening this needs field evidence per host.
+        Scoped to CDNs whose URLs state their own expiry and whose field
+        logs showed a still-valid url being thrown away. turbo.cr was the
+        first. ok.ru is the second: every double-click stripped the
+        vd*.okcdn.ru / vkuser.net url resolved on paste — expires= days
+        out — and minted a new one, which is the wait, and which stopped
+        the load that had just started (mpv reason=stop). Hosts whose
+        URLs expire without saying so stay on the old blanket rule.
         """
         try:
             url = str(playback_url or '')
             if not url:
                 return False
-            if 'turbocdn' not in (urlparse(url).netloc or '').lower():
+            host = (urlparse(url).netloc or '').lower()
+            trusted = (
+                'turbocdn' in host
+                or 'okcdn.ru' in host
+                or host.endswith('.okcdn.ru')
+                or 'mycdn.me' in host
+                or 'vkuser.net' in host
+            )
+            if not trusted:
                 return False
             if self._signed_url_expiry_epoch(url) <= 0:
                 return False
@@ -30820,22 +30832,29 @@ try {
         loader, self._profile_cookie_origin = self._profile_cookie_loader()
         if loader is None:
             return []
-        # Only successes are cached. Reading a cookie store means
-        # decrypting it, which is slow enough to notice when it happens
-        # for every video; but a transient failure -- a browser holding
-        # its lock, most often -- must not be remembered, or logging in
-        # mid-session would never be picked up.
+        # A hit is remembered for 10 minutes. An empty read -- we opened
+        # a store and it had nothing -- is remembered for 3 minutes:
+        # decrypting these stores is slow enough to notice on every
+        # video, and the field log shows that decrypt happening twice
+        # per ok.ru url. A transient failure (a browser holding its
+        # lock) is NOT remembered, or a login mid-session would never
+        # be picked up.
         cache = getattr(self, '_profile_cookie_cache', None)
         if cache is None:
             cache = self._profile_cookie_cache = {}
         hit = cache.get(wanted)
-        if hit and time.time() - hit[0] < 600:
-            return list(hit[1])
+        if hit:
+            _age = time.time() - hit[0]
+            _limit = 600 if hit[1] else 180
+            if _age < _limit:
+                return list(hit[1])
 
         found, seen = [], set()
+        loaded_any = False
         for browser in self._COOKIE_BROWSERS:
             try:
                 jar = loader(browser)
+                loaded_any = True
             except Exception:
                 continue
             try:
@@ -30862,6 +30881,11 @@ try {
                 break
         if found:
             cache[wanted] = (time.time(), list(found))
+        elif loaded_any:
+            # Opened a store and it had nothing. Remember that briefly
+            # so the next video does not decrypt the same stores again.
+            # A lock (loaded_any stays false) is not remembered.
+            cache[wanted] = (time.time(), [])
         return found
 
     def _get_browser_cookies_session(self, domains=None):
@@ -30986,6 +31010,15 @@ try {
             return self._clean_remote_title(fallback)
         return title
 
+    @staticmethod
+    def _title_is_numeric_id(title):
+        """True for a bare file id wearing an optional media extension.
+
+        '7198362569276.mp4' and '7940510190235' are what okcdn puts in
+        Content-Disposition and in ?id=. They are not titles.
+        """
+        stem = os.path.splitext(str(title or '').strip())[0]
+        return bool(stem) and stem.isdigit()
 
     def _merge_stream_info(self, source_url, stream_info):
         if not stream_info:
@@ -31052,9 +31085,21 @@ try {
                     pass
                 # Never let a banned/challenge-page title overwrite an existing good title.
                 existing_title = self._clean_remote_title(merged.get('title'))
+                # Nor a bare id. okcdn's Content-Disposition is the file
+                # id, so a movie called 'Запределье (2006)' was being
+                # renamed '7198362569276.mp4' the moment the probe
+                # returned -- the row flipping between a name and a
+                # number. A number is not a name, and must not displace
+                # one that is already there.
+                _new_is_id = self._title_is_numeric_id(clean_title)
+                _old_is_id = self._title_is_numeric_id(existing_title)
                 if clean_title and not self._is_banned_stream_title(clean_title):
-                    # New title is good — use it (legitimate update).
-                    merged[key] = clean_title
+                    if _new_is_id and existing_title and not _old_is_id:
+                        # A number wearing a real title's boots — keep the title.
+                        merged[key] = existing_title
+                    else:
+                        # New title is good — use it (legitimate update).
+                        merged[key] = clean_title
                 elif existing_title and not self._is_banned_stream_title(existing_title):
                     # New title is banned/empty but we already have a good title — keep it.
                     merged[key] = existing_title
@@ -31535,6 +31580,17 @@ try {
             or query_name
             or unquote(os.path.basename(urlparse(final_url).path or '')).strip()
         )
+        # okcdn's Content-Disposition is the file id, "7198362569276.mp4",
+        # not the movie's name. Preferring it over the page title the
+        # caller already passed is what flipped the row from
+        # 'Запределье (2006)' to that number the moment the probe returned.
+        _page_title = self._clean_remote_title(title)
+        if (
+            self._title_is_numeric_id(media_name)
+            and _page_title
+            and not self._title_is_numeric_id(_page_title)
+        ):
+            media_name = _page_title
         media_name_lower = str(media_name or '').lower()
         size_bytes = None
         try:
@@ -32167,6 +32223,15 @@ try {
         import subprocess
         import json
         host = (urlparse(source_url).netloc or '').lower()
+        if self._is_ok_host(host) and getattr(self, '_okru_ytdlp_broken', False):
+            # Set the first time the extractor raises "JSON object must be
+            # str". Every later call would download the page and die the
+            # same way, so don't. A restarted app tries once more, which
+            # is how a `pip install -U yt-dlp` gets picked up.
+            print(f'[OKRU] {str(source_url)[:80]} -> skipping yt-dlp '
+                  '(its Odnoklassniki extractor crashed earlier this '
+                  'session)', flush=True)
+            return None
         headers = self._stream_request_headers(source_url)
         startupinfo = None
         if os.name == 'nt':
@@ -32260,12 +32325,16 @@ try {
                 # not this machine, not the video's licence -- so say so,
                 # or the log reads as if we failed to fetch the page.
                 if self._is_ok_host(host) and 'JSON object must be str' in last_error:
+                    # Remember it. The next ok.ru url must not pay for
+                    # this subprocess again -- the crash is in yt-dlp,
+                    # and it is the same crash for every video.
+                    self._okru_ytdlp_broken = True
                     print('[YTDLP] ok.ru: that is yt-dlp\'s own '
                           'Odnoklassniki extractor failing on the page it '
                           'just downloaded, not this player and not the '
                           'video. Nothing here can route around it -- run '
                           '"pip install -U yt-dlp" once upstream lands a '
-                          'fix and ok.ru will start working again.',
+                          'fix and ok.ru will start working again. Not asking yt-dlp again this session.',
                           flush=True)
             return None
         if isinstance(info, dict) and info.get('_type') == 'playlist':
@@ -38502,6 +38571,34 @@ try {
                 return title
         return fallback
 
+    def _okru_page_duration_ms(self, html):
+        """Duration in ms from the ok.ru player metadata, or 0.
+
+        The page carries movie.duration in seconds. ffprobe of the signed
+        CDN url comes back empty (the field log's duration stays
+        'Stream' until playback), so the row should take the number the
+        page already gave us instead of waiting for a probe that fails.
+        """
+        text = str(html or '')
+        if not text:
+            return 0
+        flat = (text.replace('\\/', '/')
+                    .replace('&quot;', '"')
+                    .replace('\\"', '"'))
+        match = re.search(
+            r'"movie"\s*:\s*\{[^{}]{0,800}?"duration"\s*:\s*"?(\d{1,6})"?',
+            flat,
+        )
+        if not match:
+            return 0
+        try:
+            seconds = int(match.group(1))
+        except Exception:
+            return 0
+        if seconds < 10 or seconds > 12 * 3600:
+            return 0
+        return seconds * 1000
+
     def _voe_probe_candidates(self, urls, page_url, page_title, source_url,
                               hls=False, require_probe=False,
                               headers_for=None):
@@ -38779,6 +38876,14 @@ try {
                 # the name lookup has failed and the page needs a closer
                 # look -- otherwise the row just silently says "858843...".
                 print(f'[OKRU] page title: {page_title!r}', flush=True)
+                _okru_duration_ms = 0
+                try:
+                    _okru_duration_ms = int(self._okru_page_duration_ms(html) or 0)
+                except Exception:
+                    _okru_duration_ms = 0
+                if _okru_duration_ms:
+                    print(f'[OKRU] page duration: {_okru_duration_ms} ms',
+                          flush=True)
                 # Name the row now, not when playback starts. The title is
                 # known whether or not the stream ever loads, and a row
                 # that is only named on success keeps the numeric id out
@@ -38791,8 +38896,19 @@ try {
                     if isinstance(_cache, dict) and page_title:
                         entry = dict(_cache.get(source_url) or {})
                         entry['title'] = page_title
+                        if _okru_duration_ms:
+                            entry['duration_ms'] = _okru_duration_ms
                         _cache[source_url] = entry
                         self._stream_resolution_cache = _cache
+                        if _okru_duration_ms:
+                            # The duration column reads video_durations,
+                            # not the cache. Set both before the refresh,
+                            # or the row stays on 'Stream' until a probe
+                            # that, for okcdn, comes back empty.
+                            try:
+                                self.video_durations[source_url] = _okru_duration_ms
+                            except Exception:
+                                pass
                         # Queued: the resolver is not the GUI thread.
                         self.row_metadata_refresh_requested.emit(source_url)
                 except Exception:
@@ -38843,27 +38959,15 @@ try {
                 mp4_urls = sorted(mp4_urls, key=_okru_type)
             referer_hdrs = self._hls_request_headers(page_url)
             if _okru:
-                # Probe-only, both shapes. The field run had all six
-                # progressive renditions refused and the HLS manifest
-                # answering 400, and the ladder still handed mpv the
-                # manifest -- "CDN blocks HEAD probes, trust the
-                # structurally valid URL" -- which is how a page with
-                # candidates ended in 'loading failed'. A URL okcdn has
-                # already refused is not worth replaying: return None and
-                # let yt-dlp, which has a real Odnoklassniki extractor,
-                # take the page instead.
-                _progressive = self._voe_probe_candidates(
-                    mp4_urls, page_url, page_title, source_url,
-                    hls=False, require_probe=True)
-                if _progressive:
-                    return _progressive
-                # Second pass, browser-shaped headers. The bare
-                # User-Agent + Referer above is not what a browser sends,
-                # and ok.ru signs the client it minted the url for. Only
-                # the best few: this is a hypothesis under test, and it is
-                # not worth a dozen more requests to prove.
+                # Probe-only, both shapes. A URL okcdn has already refused
+                # is not worth replaying. The generic User-Agent pass that
+                # used to run first never answered: every field log printed
+                # the browser-header retry, which only runs when that pass
+                # returned nothing. Those dozen refused requests were pure
+                # delay before the headers that actually work, so they are
+                # gone. Browser-shaped headers, best few only.
                 if mp4_urls:
-                    print('[VOE-mirror] OK.ru: retrying the best '
+                    print('[VOE-mirror] OK.ru: probing the best '
                           f'{min(3, len(mp4_urls))} rendition(s) with '
                           'browser-shaped headers')
                     _progressive = self._voe_probe_candidates(
@@ -44562,18 +44666,18 @@ try {
             elif self._is_lulustream_host(host):
                 resolved = self._resolve_lulustream_source(source_url)
             elif self._is_ok_host(host):
-                # Odnoklassniki. It is not a VOE host at all -- it only
-                # reached _detect_voe_and_resolve because /video/<digits>
-                # happens to look like an embed slug, and that decoder has
-                # no idea what to do with okcdn's signed URLs. yt-dlp ships
-                # a maintained Odnoklassniki extractor, so ask it first
-                # instead of letting a content-sniffing heuristic guess.
-                print(f'[OKRU] {source_url[:80]} -> yt-dlp')
-                resolved = self._resolve_stream_with_ytdlp(
-                    source_url, allow_mpv_ytdl=not force_direct_ytdlp)
-                if not resolved:
-                    print('[OKRU] yt-dlp found nothing; letting the rest '
-                          'of the ladder try')
+                # Odnoklassniki. The page ladder below is what actually
+                # plays these: it reads the signed renditions out of the
+                # player config and probes them. yt-dlp's Odnoklassniki
+                # extractor currently raises TypeError on every video
+                # (upstream 17585 / 17698) after downloading the whole
+                # page, and asking it FIRST made every paste and every
+                # double-click wait on a subprocess that was guaranteed
+                # to die. Fall through and let the ladder try. The
+                # generic yt-dlp fallback still runs if the ladder finds
+                # nothing, and it stops running once that crash has been
+                # seen this session.
+                resolved = None
             elif self._is_voe_host(host):
                 # Primary path: VOE URLs are captured via playwright in
                 # _launch_voe_playwright (called from _apply_prepared_url_addition).
@@ -47564,7 +47668,7 @@ try {
             if quality_item:
                 quality_item.setText(quality_text)
 
-        print(f"[PLAYLIST][INFO] path='{file_path}' rows={rows} duration='{duration_text}' quality='{quality_text}'")
+        print(f"[PLAYLIST][INFO] path='{file_path}' rows={rows} duration='{duration_text}' size='{size_text}' quality='{quality_text}'")
         if self._is_remote_url(file_path):
             self._collapse_duplicate_url_mirrors()
     
@@ -48190,6 +48294,28 @@ try {
         self.show_osd(f"Opened folder: {len(insert_paths)} item(s)", duration=1800)
         return True
     
+    def _keep_in_flight_remote_playback(self, file_path):
+        """True when a second double-click should not restart this row.
+
+        Double-click is how a row plays. A second one, while the first is
+        still resolving or the file is already playing, used to call
+        stop() and then resolve the page again. The load that had just
+        started ended with mpv reason=stop, which is the click that
+        seemed to do nothing. A stopped row is not kept: that click is
+        a real retry.
+        """
+        try:
+            if not self._is_remote_url(file_path):
+                return False
+            if getattr(self, 'current_file', None) != file_path:
+                return False
+            if file_path in getattr(self, '_remote_stream_resolve_pending', set()):
+                return True
+            state = self.media_player.playbackState()
+            return state != QMediaPlayer.PlaybackState.StoppedState
+        except Exception:
+            return False
+
     def play_selected_row(self, row, column):
         """Play video from table row, or toggle mark if clicking duration/size"""
         if row < len(self.playlist):
@@ -48203,6 +48329,13 @@ try {
                 
             if column in (1, 2):  # Duration or Size columns
                 self.toggle_mark_video(row)
+            elif self._keep_in_flight_remote_playback(file_path):
+                # This row is already resolving or already playing. A second
+                # double-click used to stop mpv and resolve the page all
+                # over again; the load that had just started then ended
+                # with reason=stop, and it looked like the click did
+                # nothing. Leave it alone.
+                self._start_current_media_playback()
             else:
                 try:
                     self.media_player.stop()
@@ -49865,7 +49998,6 @@ try {
                     target_source = QUrl(self._ftp_playback_proxy_url(file_path))
                     self._apply_media_request_headers({})
                 elif is_remote_url:
-                    self.show_osd("Resolving stream URL...", duration=1500)
                     _cache = getattr(self, '_stream_resolution_cache', {})
                     _cached_entry = _cache.get(file_path, {})
                     _family_capture_stale = self._familypornhd_capture_needs_refresh(
@@ -49881,6 +50013,45 @@ try {
                     # use_mpv_ytdl nor pre_resolved_playback_url.
                     _signed_still_fresh = self._cached_signed_playback_is_trustworthy(
                         _cached_entry.get('playback_url'))
+                    # A load failure already recorded for this row means the
+                    # cached url did not play. Don't hand mpv the same one
+                    # again; fall through and resolve a fresh signature.
+                    _retry_state = getattr(self, '_remote_playback_retry_state', {})
+                    _had_load_failure = (
+                        isinstance(_retry_state, dict)
+                        and bool(_retry_state.get(file_path))
+                    )
+                    if (
+                        _cached_entry.get('playback_url')
+                        and _signed_still_fresh
+                        and not _family_capture_stale
+                        and not _had_load_failure
+                    ):
+                        # Paste already resolved this, and the CDN url says
+                        # it is still good. Re-resolving mints a new
+                        # signature, and applying that new url stops the
+                        # load that just started -- mpv reports reason=stop
+                        # and the row looks like it needs another click.
+                        try:
+                            if self._is_ok_host(urlparse(file_path).netloc or ''):
+                                print('[OKRU] playing the stream already '
+                                      f'resolved for {file_path[:80]}',
+                                      flush=True)
+                        except Exception:
+                            pass
+                        try:
+                            _last_apply = getattr(self, '_last_stream_apply', None)
+                            if isinstance(_last_apply, dict):
+                                # The caller just stopped playback in order
+                                # to start it again. The 4s duplicate-apply
+                                # guard would otherwise skip this re-apply
+                                # and leave the row stopped.
+                                _last_apply.pop(file_path, None)
+                        except Exception:
+                            pass
+                        self._apply_resolved_remote_stream(
+                            file_path, dict(_cached_entry), autoplay=True)
+                        return
                     if (
                         _family_capture_stale
                         or (
@@ -49913,6 +50084,7 @@ try {
                                                    'origin_page')}
                         _cache[file_path] = _preserved
                         self._stream_resolution_cache = _cache
+                    self.show_osd("Resolving stream URL...", duration=1500)
                     # Clear any previous failure record so double-clicking a
                     # previously-failed URL immediately retries instead of
                     # silently doing nothing for 5 minutes.
