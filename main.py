@@ -1410,9 +1410,14 @@ def _bluetooth_battery_levels():
         startupinfo = None
         creationflags = 0
     try:
+        _probe_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'battery_probe.ps1') if '__file__' in globals() else ''
+        _probe_cmd = (['powershell', '-NoProfile', '-NonInteractive',
+                       '-ExecutionPolicy', 'Bypass', '-File', _probe_file]
+                      if os.path.isfile(_probe_file) else
+                      ['powershell', '-NoProfile', '-NonInteractive',
+                       '-ExecutionPolicy', 'Bypass', '-Command', _BATTERY_POWERSHELL])
         proc = subprocess.run(
-            ['powershell', '-NoProfile', '-NonInteractive',
-             '-ExecutionPolicy', 'Bypass', '-Command', _BATTERY_POWERSHELL],
+            _probe_cmd,
             capture_output=True, text=True, timeout=60,
             encoding='utf-8', errors='replace',
             startupinfo=startupinfo, creationflags=creationflags,
