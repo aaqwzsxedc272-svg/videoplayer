@@ -1122,6 +1122,345 @@ SWP_NOACTIVATE = 0x0010
 SWP_SHOWWINDOW = 0x0040
 SWP_NOOWNERZORDER = 0x0200
 
+# Bluetooth audio devices report their charge, but not through anything Qt
+# can see: QMediaDevices enumerates outputs and knows nothing about power.
+# Windows keeps the level in its device-enumeration store, which is WinRT
+# only -- there is no Win32 call for a Bluetooth peripheral's battery.
+# PowerShell is used because it ships with Windows and can load WinRT types
+# directly, so this stays dependency-free.
+_BATTERY_POWERSHELL = r"""
+
+$ErrorActionPreference = 'Continue'
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+# Straight to the console, never through the pipeline: a function whose
+# diagnostics use Write-Output has them captured by whoever assigns its
+# return value, which is exactly how the await failures went missing.
+function Say($m) { [Console]::Out.WriteLine('#diag ' + $m) }
+function Emit($m) { [Console]::Out.WriteLine($m) }
+
+# Fast native PowerShell path. Windows Settings exposes many Bluetooth
+# batteries through the PnP property store even when WinRT AssociationEndpoint
+# enumeration never completes. Query the same documented device property key
+# directly and only use the older WinRT ladder if this returns nothing.
+try {
+    $bt = @()
+    foreach ($dev in @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -match 'Headset|Headphone|Hands-Free|Ear|TWS|Speaker|Buds|AirPod' })) {
+        try {
+            $prop = Get-PnpDeviceProperty -InstanceId $dev.InstanceId -KeyName '{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2' -ErrorAction Stop
+            if ($prop -and $null -ne $prop.Data) {
+                $name = [string]$dev.FriendlyName
+                $value = $prop.Data
+                try { $number = [double]$value } catch { $number = -1 }
+                if ($name -and $number -ge 0 -and $number -le 100) {
+                    Emit (@($name, $number) -join "`t")
+                    $bt += $name
+                }
+            }
+        } catch {}
+    }
+    Say ('pnp-direct=' + $bt.Count)
+    exit
+} catch { Say ('pnp-direct=failed:' + $_.Exception.Message); exit }
+
+# Some WinRT enumeration paths behave differently off an MTA thread, and
+# that failure looks exactly like a bad argument. Say which one we are on.
+try { Say ('apartment=' + [System.Threading.Thread]::CurrentThread.GetApartmentState()) } catch {}
+
+try {
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
+    Say 'winrt=loaded'
+} catch { Say ('winrt=failed:' + $_.Exception.Message) }
+
+$asTask = $null
+try {
+    $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
+} catch { Say ('astask=failed:' + $_.Exception.Message) }
+if ($asTask) { Say 'astask=ok' } else { Say 'astask=missing' }
+
+function Await($op, $type) {
+    if (-not $asTask) { return $null }
+    try {
+        # MethodInfo.Invoke sees the PSObject wrapper, not the object inside
+        # it, so a plain method call would work here and this one does not.
+        $opBase = $op
+        try { $opBase = $op.PsObject.BaseObject } catch {}
+        $t = $asTask.MakeGenericMethod($type).Invoke($null, @($opBase))
+        # Windows PowerShell runs this probe on STA. Blocking that STA with
+        # Task.Wait prevents the WinRT completion from being delivered, so
+        # wait from a pool thread instead and only join that waiter here.
+        # Keep the STA apartment pumping while the WinRT operation completes;
+        # Task.Run cannot execute a PowerShell scriptblock without a runspace.
+        try { Add-Type -AssemblyName System.Windows.Forms } catch {}
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        while (-not $t.IsCompleted -and [DateTime]::UtcNow -lt $deadline) {
+            try { [System.Windows.Forms.Application]::DoEvents() } catch {}
+            Start-Sleep -Milliseconds 50
+        }
+        if (-not $t.IsCompleted) { Say 'await=timeout'; return $null }
+        try { return $t.GetAwaiter().GetResult() }
+        catch {
+            $e = $_.Exception
+            try { if ($e.InnerException) { $e = $e.InnerException } } catch {}
+            Say ('await=failed:' + $e.ToString()); return $null
+        }
+    } catch { Say ('await=failed:' + $_.Exception.ToString()); return $null }
+}
+
+# Both projections, registered before either type is used: PowerShell 5.1
+# only resolves WinRT bracket syntax once the type has been named in
+# assembly-qualified form.
+$pnType = $null
+$diType = $null
+try {
+    $null = [Windows.Devices.Enumeration.Pnp.PnpObject, Windows.Devices.Enumeration, ContentType = WindowsRuntime]
+    Say 'projection=registered'
+    $pnType = [Windows.Devices.Enumeration.Pnp.PnpObject]
+    Say 'pnp=loaded'
+} catch { Say ('pnp=failed:' + $_.Exception.Message) }
+try {
+    $null = [Windows.Devices.Enumeration.DeviceInformation, Windows.Devices.Enumeration, ContentType = WindowsRuntime]
+    $diType = [Windows.Devices.Enumeration.DeviceInformation]
+    Say 'di=loaded'
+} catch { Say ('di=failed:' + $_.Exception.Message) }
+
+# The Pnp namespace is documented as superseded by Windows.Devices.
+# Enumeration, so both are tried rather than betting on one again.
+$diKind = $null
+$pnKind = $null
+try {
+    $diKind = [Windows.Devices.Enumeration.DeviceInformationKind]
+    $names = @([Enum]::GetNames($diKind))
+    Say ('enumnames=' + ($names -join ','))
+} catch { Say ('enumnames=failed:' + $_.Exception.Message) }
+try { $pnKind = [Windows.Devices.Enumeration.Pnp.PnpObjectType] } catch {}
+
+function MakeProps([string[]]$wanted) {
+    # The projected WinRT binder wants String[], not a PSObject wrapping a
+    # generic List[string]. Build the exact array type before FindAllAsync.
+    $vals = @($wanted | Where-Object { $_ })
+    $out = New-Object 'string[]' $vals.Count
+    for ($i = 0; $i -lt $vals.Count; $i++) { $out[$i] = [string]$vals[$i] }
+    return ,$out
+}
+
+# Reflection dispatch, arguments unwrapped. The overload binder cannot see
+# the projected signatures, so the method is chosen by parameter count.
+function CallFindAll($type, $argValues) {
+    if (-not $type) { return $null }
+    $mi = $null
+    try {
+        $mi = $type.GetMethods() | Where-Object { $_.Name -eq 'FindAllAsync' -and $_.GetParameters().Count -eq $argValues.Count } | Select-Object -First 1
+    } catch {}
+    if (-not $mi) { return $null }
+    # Built by index, never with +=: appending a List[string] to a
+    # PowerShell array enumerates it, so the property list arrived as one
+    # String per property and the binder was handed a String where it
+    # wanted IEnumerable`1[System.String].
+    $raw = New-Object 'object[]' $argValues.Count
+    for ($i = 0; $i -lt $argValues.Count; $i++) {
+        $b = $argValues[$i]
+        try { $b = $argValues[$i].PsObject.BaseObject } catch {}
+        $raw[$i] = $b
+    }
+    return $mi.Invoke($null, $raw)
+}
+
+$BAT = '{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2'
+
+function TryCombo($label, $api, $kv, [string[]]$propNames) {
+    $p = MakeProps $propNames
+    # Try the projected static method first. MethodInfo.Invoke returns a
+    # bare __ComObject on Windows PowerShell, which cannot be handed to
+    # AsTask as the projected IAsyncOperation even when the invocation itself
+    # succeeded. The direct call preserves the projection.
+    $direct = $null
+    try {
+        # Do not use @('', $p, $kv): PowerShell flattens the String[] and
+        # shifts the projected overload arguments. Build an object[] by
+        # index, just as CallFindAll does.
+        $directArgs = New-Object 'object[]' 3
+        if ($api -eq 'di') {
+            $directArgs[0] = ''
+            $directArgs[1] = $p
+            $directArgs[2] = $kv
+            $direct = $diType::FindAllAsync($directArgs[0], $directArgs[1], $directArgs[2])
+        } else {
+            $directArgs[0] = $kv
+            $directArgs[1] = $p
+            $directArgs[2] = ''
+            $direct = $pnType::FindAllAsync($directArgs[0], $directArgs[1], $directArgs[2])
+        }
+    } catch { Say ($label + '=direct:' + $_.Exception.Message) }
+    if ($direct) {
+        $lt = $null
+        try {
+            if ($api -eq 'di') { $lt = [Windows.Devices.Enumeration.DeviceInformationCollection] }
+            else { $lt = [Windows.Devices.Enumeration.Pnp.PnpObjectCollection] }
+        } catch { Say ('listtype=failed:' + $_.Exception.Message) }
+        $found = Await $direct $lt
+        if ($found) { Say ($label + '=ok count=' + $found.Count); return $found }
+        Say ($label + '=await-null')
+    }
+    $op = $null
+    try {
+        $callArgs = New-Object 'object[]' 3
+        if ($api -eq 'di') {
+            $callArgs[0] = ''; $callArgs[1] = $p; $callArgs[2] = $kv
+            $op = CallFindAll $diType $callArgs
+        } else {
+            $callArgs[0] = $kv; $callArgs[1] = $p; $callArgs[2] = ''
+            $op = CallFindAll $pnType $callArgs
+        }
+    } catch { Say ($label + '=invoke:' + $_.Exception.Message); return $null }
+    if (-not $op) { Say ($label + '=no-overload'); return $null }
+    # The operation's generic argument has to be the collection the method
+    # actually returns. AsTask<IReadOnlyList<T>> is not the same interface
+    # as IAsyncOperation<DeviceInformationCollection>, so the cast failed
+    # on a __ComObject even when the call itself had worked.
+    $lt = $null
+    try {
+        if ($api -eq 'di') { $lt = [Windows.Devices.Enumeration.DeviceInformationCollection] }
+        else { $lt = [Windows.Devices.Enumeration.Pnp.PnpObjectCollection] }
+    } catch { Say ('listtype=failed:' + $_.Exception.Message) }
+    $found = Await $op $lt
+    if (-not $found) { Say ($label + '=await-null'); return $null }
+    Say ($label + '=ok count=' + $found.Count)
+    return $found
+}
+
+$aeKv = $null
+$aePnp = $null
+try { if ($diKind) { $aeKv = [Enum]::Parse($diKind, 'AssociationEndpoint') } } catch { Say ('enum=failed:' + $_.Exception.Message) }
+try { if ($pnKind) { $aePnp = [Enum]::Parse($pnKind, 'AssociationEndpoint') } } catch {}
+
+# Four combinations on one scope, so a single run says which API works and
+# whether the property list is what is being rejected. Every previous build
+# changed one thing and needed another field run to find the next wall.
+$found = $null
+$using = ''
+if ($aeKv) {
+    $r = TryCombo 'di+bat' 'di' $aeKv @($BAT)
+    if ($r) { $found = $r; $using = 'di+bat' }
+    if (-not $found) {
+        $r = TryCombo 'di+noprops' 'di' $aeKv @()
+        if ($r) { $found = $r; $using = 'di+noprops' }
+    }
+}
+if (-not $found -and $aePnp) {
+    $r = TryCombo 'pnp+bat' 'pnp' $aePnp @($BAT)
+    if ($r) { $found = $r; $using = 'pnp+bat' }
+    if (-not $found) {
+        $r = TryCombo 'pnp+noprops' 'pnp' $aePnp @()
+        if ($r) { $found = $r; $using = 'pnp+noprops' }
+    }
+}
+Say ('using=' + $using)
+
+# Report every charge found, plus what was seen without one, so an empty
+# result says whether Windows sees the headset at all.
+$noCharge = @()
+$withCharge = 0
+if ($found) {
+    foreach ($d in $found) {
+        $nm = $null
+        try { $nm = $d.Name } catch {}
+        if (-not $nm) { try { $nm = $d.Properties['System.ItemNameDisplay'] } catch {} }
+        $lvl = $null
+        try { $lvl = $d.Properties[$BAT] } catch {}
+        if ($null -ne $lvl) {
+            $withCharge = $withCharge + 1
+            Emit (@($nm, $lvl) -join "`t")
+        } elseif ($noCharge.Count -lt 25) {
+            $noCharge += [string]$nm
+        }
+    }
+}
+Say ('withCharge=' + $withCharge)
+if ($noCharge.Count -gt 0) { Say ('noCharge=' + ($noCharge -join '; ')) }
+
+"""
+
+_BATTERY_PROBE_STATE = {'reported': False}
+
+# Labels Windows uses when it has no model name for an audio device. They
+# match almost anything, so they are the weakest possible identification.
+_GENERIC_AUDIO_NAMES = frozenset((
+    'headphones', 'headphone', 'headset', 'earphones', 'earphone',
+    'earbuds', 'buds', 'airpods', 'speaker', 'speakers', 'audio',
+))
+
+
+def _bluetooth_battery_levels():
+    """{lowercase device name: charge percent}, empty when there is nothing.
+
+    Returns {} rather than raising on every failure path: a battery reading
+    is decoration, and it must never be able to cost the player anything.
+    The first probe always logs what came back, so a top bar with no battery
+    in it says why instead of leaving it to guesswork.
+    """
+    if os.name != 'nt':
+        return {}
+    import subprocess
+    startupinfo = None
+    creationflags = 0
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    except Exception:
+        startupinfo = None
+        creationflags = 0
+    try:
+        _probe_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'battery_probe.ps1') if '__file__' in globals() else ''
+        _probe_cmd = (['powershell', '-NoProfile',
+                       '-ExecutionPolicy', 'Bypass', '-File', _probe_file]
+                      if os.path.isfile(_probe_file) else
+                      ['powershell', '-NoProfile', '-NonInteractive',
+                       '-ExecutionPolicy', 'Bypass', '-Command', _BATTERY_POWERSHELL])
+        proc = subprocess.run(
+            _probe_cmd,
+            capture_output=True, text=True, timeout=60,
+            encoding='utf-8', errors='replace',
+            startupinfo=startupinfo, creationflags=creationflags,
+        )
+    except Exception as exc:
+        if not _BATTERY_PROBE_STATE['reported']:
+            _BATTERY_PROBE_STATE['reported'] = True
+            print(f'[BATTERY] probe could not run: '
+                  f'{type(exc).__name__}: {exc}', flush=True)
+        return {}
+    levels = {}
+    diag = []
+    for line in str(getattr(proc, 'stdout', '') or '').splitlines():
+        line = line.strip()
+        if line.startswith('#diag '):
+            diag.append(line[6:].strip())
+            continue
+        if '\t' not in line:
+            continue
+        name, _, value = line.rpartition('\t')
+        try:
+            levels[name.strip().lower()] = int(float(value.strip()))
+        except Exception:
+            continue
+    if not _BATTERY_PROBE_STATE['reported']:
+        _BATTERY_PROBE_STATE['reported'] = True
+        detail = f': {sorted(levels.items())}' if levels else ''
+        err = str(getattr(proc, 'stderr', '') or '').strip()
+        if err:
+            detail = f'{detail} -- {err[:200]}'
+        print(f'[BATTERY] Windows reported {len(levels)} device(s) with a '
+              f'charge{detail}', flush=True)
+        # Every step the probe took, because "0 devices" on its own cannot
+        # say whether Windows has no battery to report or the probe never
+        # got as far as asking. The cap has to stay above the number of
+        # steps the probe can take: truncating from the front drops the
+        # tail, and the tail is where the answer is.
+        for entry in diag[:28]:
+            print(f'[BATTERY]   {entry}', flush=True)
+    return levels
+
+
 # Windows taskbar/appbar constants
 ABM_GETSTATE = 0x00000004
 ABM_GETTASKBARPOS = 0x00000005
@@ -2962,6 +3301,15 @@ class MpvMediaPlayerAdapter(QObject):
         self._duration_ms = 0
         self._network_headers = {}
         self._tls_verify = True
+        # Hosts whose certificate mpv has already rejected this session and
+        # which then played fine with the check off. Remembered so the next
+        # video from the same CDN does not have to fail all over again to
+        # find that out.
+        self._tls_untrusted_hosts = set()
+        # Set when a stream ended well short of its duration. Nothing reads
+        # it yet; it is where a resume-through-the-chunked-proxy retry would
+        # pick up the numbers it needs.
+        self._last_truncated_end = None
         self._pending_seek_ms = None
         self._pending_video_state = None
         self._last_filter_chain = None
@@ -3639,6 +3987,28 @@ class MpvMediaPlayerAdapter(QObject):
             except Exception:
                 pass
 
+    def note_tls_untrusted_host(self, url):
+        """Remember that this URL's host failed certificate verification.
+
+        Called when a load failed on a TLS certificate error and the retry
+        with the check disabled is about to run. Returns True if a host was
+        recorded, so a caller can tell a real URL from something that had no
+        host in it at all.
+        """
+        try:
+            host = (urlparse(str(url or '')).netloc or '').lower().split('@')[-1]
+        except Exception:
+            return False
+        host = host.split(':')[0]
+        if not host:
+            return False
+        hosts = getattr(self, '_tls_untrusted_hosts', None)
+        if not isinstance(hosts, set):
+            hosts = set()
+            self._tls_untrusted_hosts = hosts
+        hosts.add(host)
+        return True
+
     def setTlsVerify(self, enabled=True):
         self._tls_verify = bool(True if enabled is None else enabled)
         self._apply_tls_verify_option()
@@ -3728,6 +4098,7 @@ class MpvMediaPlayerAdapter(QObject):
                 self._file_loaded = False
                 self._set_playback_state(QMediaPlayer.PlaybackState.StoppedState)
                 return
+            self._report_truncated_stream(reason)
             self._emit_end_of_media_once()
 
         @self._mpv.event_callback('shutdown')
@@ -3754,6 +4125,60 @@ class MpvMediaPlayerAdapter(QObject):
         if duration_ms != self._duration_ms:
             self._duration_ms = duration_ms
             self.durationChanged.emit(duration_ms)
+
+    def _report_truncated_stream(self, reason):
+        """Say out loud when a stream ended well short of its own duration.
+
+        A file host that cuts a transfer off is indistinguishable from the
+        end of the video at this layer: mpv reports a clean eof because the
+        HTTP response finished, so playback stops part way through and
+        nothing in the log separates it from a video that ran out. There is
+        no error to catch and no failure to retry -- which is why a report
+        of "it stops at about 20%" had nothing to be diagnosed from.
+
+        The numbers are what tell the causes apart. The same percentage
+        every time means the host is capping how much data it will serve;
+        the same wall-clock time every time means the link itself expires;
+        a different point each time means the connection is being dropped.
+        Each of those needs a different answer, so this says which one it
+        looks like rather than guessing.
+        """
+        try:
+            position = int(self._position_ms or 0)
+            duration = int(self._duration_ms or 0)
+        except Exception:
+            return
+        if position <= 0 or duration <= 0:
+            # No duration means no way to know anything was missing.
+            return
+        remaining = duration - position
+        if remaining < 10000 or position >= int(duration * 0.98):
+            return
+        try:
+            url = self._source.toString()
+        except Exception:
+            url = ''
+        try:
+            host = (urlparse(url).netloc or '').lower()
+        except Exception:
+            host = ''
+        pct = int(position * 100 / duration)
+        try:
+            print(f'[PLAYBACK][TRUNCATED] {str(url)[:120]} stopped at {pct}% '
+                  f'({position // 1000}s of {duration // 1000}s, '
+                  f'{remaining // 1000}s missing) reason={reason or "eof"} '
+                  f'host={host or "?"} -- the server stopped sending, this '
+                  f'is not the end of the video', flush=True)
+        except Exception:
+            pass
+        self._last_truncated_end = {
+            'url': url,
+            'host': host,
+            'position_ms': position,
+            'duration_ms': duration,
+            'percent': pct,
+            'reason': reason or 'eof',
+        }
 
     def _emit_end_of_media_once(self):
         if self._source.isEmpty() or self._stopped_explicitly:
@@ -3915,13 +4340,32 @@ class MpvMediaPlayerAdapter(QObject):
                 # page-URL format selector, yt-dlp fails on the CDN manifest, and
                 # mpv enters a dead state that survives until the next video load.
                 _target_path = _target_parsed.path.lower().rstrip('/')
-                _is_direct_stream = _target_path.endswith(('.m3u8', '.m3u', '.mpd'))
+                _is_direct_stream = (_target_path.endswith(('.m3u8', '.m3u', '.mpd')) or ('okcdn.ru' in _target_parsed.netloc.lower()) and _target_path.endswith('/video'))
                 _target_host = _target_parsed.netloc.lower()
-                if 'eporner' in _target_host:
+                if 'okcdn.ru' in _target_host:
+                    # OK.ru's CDN presents a certificate mpv/FFmpeg rejects
+                    # before it can use the browser-equivalent progressive URL.
+                    self._tls_verify = False
+                    self._apply_tls_verify_option()
+                elif 'eporner' in _target_host:
                     # ffmpeg/mpv rejects Eporner's cert chain (tls 0A000086)
                     # even though Python urllib fetched the same host fine.
                     self._tls_verify = False
                     self._apply_tls_verify_option()
+                elif _target_host in getattr(self, '_tls_untrusted_hosts', ()):
+                    # This CDN has already failed certificate verification
+                    # once this session and played fine with the check off.
+                    # Every new video from it was paying a full failed load
+                    # plus a retry to rediscover that -- three in a row in
+                    # one field log, on three different CDNs.
+                    self._tls_verify = False
+                    self._apply_tls_verify_option()
+                    try:
+                        print(f'[PLAYBACK] certificate check off for '
+                              f'{_target_host} (already refused it this '
+                              f'session)')
+                    except Exception:
+                        pass
                 _is_fileditch_page = 'fileditch' in _target_host and 'freakingfileditch' not in _target_host
                 _query_media_name = _query_media_name_hint(target)
                 _query_points_to_stream = _query_media_name.endswith(('.m3u8', '.m3u', '.mpd'))
@@ -7123,6 +7567,7 @@ class RemoteDownloadWorker(QThread):
 
 
 class VideoPlayer(QMainWindow):
+    battery_ready = pyqtSignal(str)
     # How long the scene cover stays on screen in the hover card before the
     # clip takes over. Buffering runs during the hold, so this is purely how
     # long the cover is visible, not added latency before the clip.
@@ -8587,6 +9032,23 @@ class VideoPlayer(QMainWindow):
         self.download_progress = QProgressBar(self)
         self.download_progress.setRange(0, 100)
         self.download_progress.setValue(0)
+
+        # Charge of the current audio device, in the top bar beside the
+        # subtitle sync tool. Stays hidden until a device actually reports
+        # a level, so a wired headset or a machine with no Bluetooth shows
+        # nothing rather than an empty box.
+        self.battery_label = QLabel('', self)
+        self.battery_label.setVisible(False)
+        self.battery_label.setStyleSheet(
+            'QLabel { background:transparent; color:#3a8ee6; '
+            'padding:2px 6px; font-size:11px; font-weight:bold; }')
+        self._battery_levels = {}
+        self.battery_ready.connect(self.apply_audio_battery)
+        self._battery_refresh_timer = QTimer(self)
+        self._battery_refresh_timer.setInterval(60000)
+        self._battery_refresh_timer.timeout.connect(self._refresh_audio_battery)
+        self._battery_refresh_timer.start()
+        QTimer.singleShot(2500, self._refresh_audio_battery)
         
         # Subtitle Sync Tool
         self.sub_sync_container = QWidget(self)
@@ -25158,6 +25620,75 @@ try {
                 insert_at += 1
         return changed
 
+    def _quality_variant_stem(self, path):
+        """The identity a URL's bitrate variants share, or '' if it has none.
+
+        '.../16974704-1080p.mp4' and '.../16974704-720p.mp4' are one video
+        at two bitrates. The stem is the filename with the resolution suffix
+        taken out, tied to the site rather than the CDN host, because the
+        same scene is served from a different subdomain per quality and the
+        path can differ too -- eporner hands the 1080p out from under
+        /v3/<token>/<expiry>/ and the rest from the root, so only the
+        '16974704.mp4' part is actually common to all of them.
+        """
+        try:
+            parsed = urlparse(str(path or ''))
+        except Exception:
+            return ''
+        name = (parsed.path or '').rsplit('/', 1)[-1]
+        match = re.search(r'[_-]\d{3,4}p(?=\.[A-Za-z0-9]{2,4}$|$)',
+                          name, re.IGNORECASE)
+        if not match:
+            return ''
+        stem_name = name[:match.start()] + name[match.end():]
+        if not stem_name:
+            return ''
+        host = (parsed.netloc or '').lower().split('@')[-1].split(':')[0]
+        parts = [part for part in host.split('.') if part]
+        domain = '.'.join(parts[-2:]) if len(parts) >= 2 else host
+        return f'{stem_name}@{domain}'
+
+    def _drop_quality_variants(self, primary, paths):
+        """Take the bitrates of one video out of a list of mirrors.
+
+        eporner answers with 1080p/720p/480p/360p/240p of a single scene and
+        all of them were offered as mirrors of it. They are not alternates:
+        choosing one changes nothing but the resolution, and a mirror menu
+        that lists them is offering the same video five times. The
+        primary's own variants go entirely -- the video is already reachable
+        at that quality -- and if the primary carries no resolution suffix,
+        the best of each remaining set survives so the video is not lost.
+        """
+        paths = list(paths or [])
+        primary_stem = self._quality_variant_stem(primary)
+        best = {}
+        for path in paths:
+            stem = self._quality_variant_stem(path)
+            if not stem or (primary_stem and stem == primary_stem):
+                continue
+            rank = self._eporner_quality_rank(path)
+            current = best.get(stem)
+            if current is None or rank > current[0]:
+                best[stem] = (rank, path)
+        winners = {
+            self._mirror_path_key(path) for _, path in best.values()
+        }
+        kept = []
+        for path in paths:
+            if not self._quality_variant_stem(path):
+                kept.append(path)
+            elif self._mirror_path_key(path) in winners:
+                kept.append(path)
+        if len(kept) != len(paths):
+            try:
+                print(f'[MIRRORS] {len(paths) - len(kept)} of {len(paths)} '
+                      f'link(s) were other bitrates of the same video rather '
+                      f'than mirrors, so they are not offered as alternates',
+                      flush=True)
+            except Exception:
+                pass
+        return kept
+
     def _set_mirrors_for_primary(self, primary, mirrors):
         if not hasattr(self, '_playlist_url_mirrors') or not isinstance(self._playlist_url_mirrors, dict):
             self._playlist_url_mirrors = {}
@@ -25183,12 +25714,60 @@ try {
             pass
         group_keys = {primary_key} | {self._mirror_path_key(path) for path in cleaned}
         group_keys.discard("")
+
+        # Fold in whatever an overlapping group already knew instead of
+        # dropping it. Writing only the new list is what lost mirrors: the
+        # old entry was deleted and replaced wholesale, so renaming a third
+        # link onto a video that already had two left that video with the
+        # one being played and the newest link and nothing else -- and
+        # joining two videos that each had two mirrors produced three, not
+        # four. An empty list still means "clear this group", which is how
+        # mirrors are promoted into playlist rows of their own.
+        absorbed = []
+        if mirrors:
+            for old_primary in list(self._playlist_url_mirrors):
+                old_values = list(self._playlist_url_mirrors.get(old_primary) or [])
+                old_keys = {self._mirror_path_key(old_primary)}
+                old_keys.update(self._mirror_path_key(path) for path in old_values)
+                old_keys.discard("")
+                if not (old_keys & group_keys):
+                    continue
+                absorbed.append(old_primary)
+                absorbed.extend(old_values)
         for old_primary in list(self._playlist_url_mirrors):
             old_keys = {self._mirror_path_key(old_primary)}
             old_keys.update(self._mirror_path_key(path) for path in self._playlist_url_mirrors.get(old_primary, []))
             old_keys.discard("")
             if old_keys & group_keys:
                 self._playlist_url_mirrors.pop(old_primary, None)
+        if absorbed:
+            # A URL that is its own visible playlist row is not a mirror.
+            # That is exactly how "split mirrors into playlist" and "promote
+            # this mirror to a row" take one away, and folding it straight
+            # back in would undo both.
+            visible_keys = {
+                self._mirror_path_key(path)
+                for path in getattr(self, 'playlist', []) or []
+            }
+            visible_keys.discard("")
+            merged = list(cleaned) + [
+                path for path in absorbed
+                if self._mirror_path_key(path) not in visible_keys
+            ]
+            cleaned = [
+                path for path in self._unique_paths(merged)
+                if self._mirror_path_key(path) != primary_key
+            ]
+            try:
+                cleaned = [
+                    path for path in cleaned
+                    if not self._is_jav_site_host(
+                        (urlparse(str(path)).netloc or '').lower()
+                    )
+                ]
+            except Exception:
+                pass
+        cleaned = self._drop_quality_variants(primary, cleaned)
         if cleaned:
             self._playlist_url_mirrors[primary] = cleaned
 
@@ -28174,6 +28753,20 @@ try {
                 except KeyError:
                     return None
 
+            class _RangeIgnored(Exception):
+                """Upstream answered a ranged request with the whole file.
+
+                Not a failure. It means this CDN does not implement Range on
+                this endpoint, and the honest response is to stream that body
+                through without seek support. Treating it as retryable left
+                the video unplayable for two minutes and the player
+                re-resolving six times over.
+                """
+                def __init__(self, ctype='', total=0):
+                    super().__init__('upstream ignored the Range header')
+                    self.ctype = ctype
+                    self.total = total
+
             class _ChunkEOF(Exception):
                 """Requested chunk lies beyond the end of the file."""
                 def __init__(self, total=0):
@@ -28220,7 +28813,17 @@ try {
                             with urllib.request.urlopen(request, timeout=30, context=context) as response:
                                 status = int(getattr(response, 'status', 206) or 206)
                                 if status == 200:
-                                    raise IOError('range ignored (HTTP 200) for chunk fetch')
+                                    # The CDN answered a ranged request with
+                                    # the whole file. That is an answer, not
+                                    # an error, and twelve retries of it only
+                                    # guaranteed the video never played.
+                                    try:
+                                        _cl = int(response.headers.get('Content-Length') or 0)
+                                    except Exception:
+                                        _cl = 0
+                                    raise _RangeIgnored(
+                                        str(response.headers.get('Content-Type') or '').strip(),
+                                        _cl)
                                 raw = response.read()
                                 ctype = str(response.headers.get('Content-Type') or '').strip()
                                 total = 0
@@ -28232,6 +28835,8 @@ try {
                             raise IOError('empty chunk body')
                         _cache_put(key, raw, total, ctype)
                         return raw, total, ctype
+                    except _RangeIgnored:
+                        raise
                     except Exception as exc:
                         if getattr(exc, 'code', None) == 416:
                             # Out-of-range request: the CDN told us where the
@@ -28267,6 +28872,72 @@ try {
                         time.sleep(wait)
                 raise last_exc or IOError('chunk fetch failed')
 
+            def _stream_passthrough(info, start, client_end):
+                """Serve the upstream's own response when it will not honour
+                Range: one connection, streamed straight through, and the
+                client told plainly that it cannot seek."""
+                try:
+                    rh = dict(request_headers)
+                    rh.pop('Range', None)
+                    request = urllib.request.Request(target_url, headers=rh)
+                    context = (_ssl._create_unverified_context()
+                               if target_url.lower().startswith('https://') else None)
+                    with upstream_lock, urllib.request.urlopen(
+                            request, timeout=30, context=context) as response:
+                        ctype = (str(response.headers.get('Content-Type') or '').strip()
+                                 or info.ctype or 'application/octet-stream')
+                        try:
+                            total = int(response.headers.get('Content-Length') or 0)
+                        except Exception:
+                            total = 0
+                        if not total:
+                            total = info.total
+                        skipped = 0
+                        while skipped < start:
+                            got = response.read(min(CHUNK, start - skipped))
+                            if not got:
+                                break
+                            skipped += len(got)
+                        remaining = (total - skipped) if total else 0
+                        if remaining > 0 and client_end is not None:
+                            remaining = min(remaining, client_end - skipped + 1)
+                        handler.send_response(200)
+                        handler.send_header('Content-Type', ctype)
+                        # No Accept-Ranges. Advertising seek on a CDN that
+                        # ignores Range is what started this whole detour.
+                        handler.send_header('Accept-Ranges', 'none')
+                        if remaining > 0:
+                            handler.send_header('Content-Length', str(remaining))
+                        handler.send_header('Cache-Control', 'no-store')
+                        handler.send_header('Connection', 'close')
+                        handler.end_headers()
+                        sent = 0
+                        while True:
+                            if remaining and sent >= remaining:
+                                break
+                            want = min(CHUNK, remaining - sent) if remaining else CHUNK
+                            got = response.read(want)
+                            if not got:
+                                break
+                            handler.wfile.write(got)
+                            handler.wfile.flush()
+                            sent += len(got)
+                        print(f"[GOFILE_PROXY][PASSTHROUGH] upstream ignores Range; "
+                              f"streamed {sent} byte(s) from offset {skipped}, "
+                              f"total={total or '?'}, type={ctype}", flush=True)
+                        return True
+                except Exception as exc:
+                    try:
+                        print(f"[GOFILE_PROXY][PASSTHROUGH_FAILED] {str(exc)[:120]}",
+                              flush=True)
+                    except Exception:
+                        pass
+                    try:
+                        handler.send_error(502, str(exc)[:170])
+                    except Exception:
+                        pass
+                    return True
+
             client_range = str(handler.headers.get('Range') or '').strip()
 
             def _send_416(total_known):
@@ -28298,6 +28969,14 @@ try {
                     pass
                 _send_416(exc.total)
                 return True
+            except _RangeIgnored as exc:
+                try:
+                    print(f"[GOFILE_PROXY][NO_RANGE] upstream answered HTTP 200 to a "
+                          f"ranged request (type={exc.ctype or '?'}, len={exc.total or '?'}); "
+                          f"streaming it through without seek support", flush=True)
+                except Exception:
+                    pass
+                return _stream_passthrough(exc, start, client_end)
             except Exception as exc:
                 try:
                     print(f"[GOFILE_PROXY][GIVE_UP] initial chunk: {str(exc)[:120]}", flush=True)
@@ -29114,6 +29793,10 @@ try {
     def _remote_playback_proxy_url(self, playback_url, headers=None, label='REMOTE_PROXY'):
         playback_url = self._canonicalize_remote_source_url(self._sanitize_url(playback_url))
         if not playback_url or not self._is_remote_url(playback_url):
+            return playback_url
+        _pu = urlparse(playback_url)
+        if ('okcdn.ru' in (_pu.netloc or '').lower()
+                and (_pu.path or '').lower().rstrip('/').endswith('/video')):
             return playback_url
         if not self._ensure_local_hls_proxy_server():
             return playback_url
@@ -37045,10 +37728,47 @@ try {
 
         hls_urls, mp4_urls = [], []
 
+        def _unescape_blob(s):
+            """Undo the two layers of escaping a JSON-in-HTML player blob has.
+
+            ok.ru embeds its player config as HTML-entity-encoded JSON with
+            \\uXXXX escapes, so a URL arrives as
+              https://host/?a=1\\u0026b=2&quot;,&quot;next&quot;:...
+            The separators are still escaped and the closing quote is
+            invisible to a URL regex, which then sweeps across the whole
+            blob until it reaches the next .m3u8 several keys later and
+            hands back one enormous URL that is mostly other keys.
+            """
+            s = html_unescape(str(s or ''))
+            return re.sub(r'\\u00([0-9a-fA-F]{2})',
+                          lambda m: chr(int(m.group(1), 16)), s)
+
         def _push(u):
-            u = str(u or '').strip().replace('\\/', '/')
+            u = _unescape_blob(str(u or '').strip()).replace('\\/', '/')
+            # After unescaping, a real quote can still be glued on when the
+            # value came out of a raw scan rather than a parsed structure.
+            u = u.split('"')[0].split("'")[0].strip()
             if not u.lower().startswith(('http://', 'https://')):
                 return
+            # Video Download Helper shows OK.ru's working progressive form:
+            # convert the signed query URL to the /expires/.../video/ path.
+            try:
+                _op = urlparse(u)
+                if 'okcdn.ru' in (_op.netloc or '').lower() and _op.query:
+                    _parts = []
+                    for _pair in _op.query.split('&'):
+                        if '=' in _pair:
+                            _k, _v = _pair.split('=', 1)
+                            if _k in {'expires','srcIp','pr','srcAg','ch','ms','type','sig','ct','urls','clientType','zs','id'}:
+                                if _k == 'type': _v = '3'
+                                if _k == 'srcAg': _v = 'CHROME'
+                                _parts.extend((_k, _v))
+                    if _parts:
+                        _direct = _op.scheme + '://' + _op.netloc + '/' + '/'.join(_parts) + '/video/'
+                        if _direct not in mp4_urls:
+                            mp4_urls.append(_direct)
+            except Exception:
+                pass
             low = u.lower()
             if any(d in low for d in (
                     'commondatastorage.googleapis.com', 'gtv-videos-bucket',
@@ -37083,7 +37803,11 @@ try {
                 for item in data:
                     _collect(item)
             elif isinstance(data, str):
-                for m in re.finditer(r'(https?://[^\s"\'<>]+?\.m3u8(?:\?[^\s"\'<>]*)?)', data, re.IGNORECASE):
+                # Scan the unescaped form: while the quotes are still
+                # &quot; the character class below has no boundary to
+                # stop at, and one match spans the whole player config.
+                data = _unescape_blob(data)
+                for m in re.finditer(r'(https?://[^\s"\'<>]+?\.(?:m3u8|mpd)(?:\?[^\s"\'<>]*)?)', data, re.IGNORECASE):
                     _push(m.group(1))
                 for m in re.finditer(
                         r'(https?://[^\s"\'<>]+?\.(?:mp4|webm|mkv|mov|m4v)(?:\?[^\s"\'<>]*)?)', data, re.IGNORECASE):
@@ -37194,10 +37918,19 @@ try {
         except Exception:
             pass
 
+        # The raw sweep has to run on the unescaped page. ok.ru keeps its
+        # player config as HTML-entity-encoded JSON, and while the quotes
+        # are still &quot; the class below has no boundary to stop at, so
+        # one match runs from the first CDN link on the page to a .m3u8
+        # several keys later and carries every key in between with it.
         try:
-            for m in re.finditer(r'(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>]*)', html, re.IGNORECASE):
+            _flat = _unescape_blob(html)
+        except Exception:
+            _flat = html
+        try:
+            for m in re.finditer(r'(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>]*)', _flat, re.IGNORECASE):
                 _push(m.group(1))
-            for m in re.finditer(r'(https?://[^\s"\'<>]+?\.mp4[^\s"\'<>]*)', html, re.IGNORECASE):
+            for m in re.finditer(r'(https?://[^\s"\'<>]+?\.mp4[^\s"\'<>]*)', _flat, re.IGNORECASE):
                 _push(m.group(1))
         except Exception:
             pass
@@ -37276,11 +38009,11 @@ try {
                 continue
 
         try:
-            for m in re.finditer(r'direct_access_url["\']\s*[:=]\s*["\']([^"\']+)["\']', html, re.IGNORECASE):
+            for m in re.finditer(r'direct_access_url["\']\s*[:=]\s*["\']([^"\']+)["\']', _flat, re.IGNORECASE):
                 _push(m.group(1))
-            for m in re.finditer(r'"source"\s*:\s*"([^"]+?\.m3u8[^"]*)"', html, re.IGNORECASE):
+            for m in re.finditer(r'"source"\s*:\s*"([^"]+?\.m3u8[^"]*)"', _flat, re.IGNORECASE):
                 _push(m.group(1))
-            for m in re.finditer(r'"file"\s*:\s*"([^"]+?\.mp4[^"]*)"', html, re.IGNORECASE):
+            for m in re.finditer(r'"file"\s*:\s*"([^"]+?\.mp4[^"]*)"', _flat, re.IGNORECASE):
                 _push(m.group(1))
         except Exception:
             pass
@@ -37525,6 +38258,11 @@ try {
             # renditions and try the rest best-quality first.
             hls_urls = self._rank_real_media_candidates(hls_urls, 'VOE-mirror')
             mp4_urls = self._rank_real_media_candidates(mp4_urls, 'VOE-mirror')
+            # OK.ru's query-style HLS endpoint is rejected by its CDN while
+            # the browser extension's path-style progressive URL works. Do
+            # not trust HLS first on OK.ru; let the generated direct URL win.
+            if 'ok.ru/' in str(page_url or '').lower():
+                hls_urls = []
             referer_hdrs = self._hls_request_headers(page_url)
             for hls_url in hls_urls:
                 probe = self._probe_remote_media_candidate(
@@ -53174,6 +53912,10 @@ try {
         if should_retry_tls_disabled:
             state = dict(state)
             state['tls_retry_tried'] = True
+            try:
+                self.media_player.note_tls_untrusted_host(cached_url)
+            except Exception:
+                pass
             retry_state[current] = {
                 **state,
                 'window_start': window_start,
@@ -53200,6 +53942,8 @@ try {
             and self._is_remote_url(cached_url)
             and not cached.get('use_mpv_ytdl')
             and not state.get('local_proxy_tried')
+            and not ('okcdn.ru' in str(urlparse(cached_url).netloc or '').lower()
+                     and str(urlparse(cached_url).path or '').lower().endswith('/video'))
             and (
                 cached_url != current
                 or self._is_hls_stream_url(cached_url, cached.get('content_type'))
@@ -57403,6 +58147,16 @@ try {
                 self.sub_sync_container.raise_()
                 right_offset += self.sub_sync_container.width() + margin
 
+        # 2.6 Audio device battery -- beside the subtitle sync tool, which
+        # is what the rest of the row is measured from.
+        if hasattr(self, 'battery_label') and self.battery_label.isVisible():
+            self.battery_label.adjustSize()
+            bat_x = self.width() - self.battery_label.width() - right_offset
+            bat_y = max(2, (menubar_h - self.battery_label.height()) // 2)
+            self.battery_label.move(bat_x, bat_y)
+            self.battery_label.raise_()
+            right_offset += self.battery_label.width() + margin
+
         # 3. Download Button
         if hasattr(self, 'download_btn') and self.download_btn.isVisible():
             self.download_btn.adjustSize()
@@ -57446,6 +58200,121 @@ try {
         else:
             self.mp3_progress.hide()
         self._reposition_mp3_btn()
+
+    def _refresh_audio_battery(self):
+        """Read the audio device's charge, off the GUI thread.
+
+        The probe shells out to PowerShell, which is far too slow to run
+        here, so it goes to the thread pool and the answer comes back
+        through a queued slot.
+        """
+        def _work():
+            levels = _bluetooth_battery_levels()
+            try:
+                # A queued signal is reliable across the worker/GUІ thread
+                # boundary.  The previous invokeMethod path could silently
+                # fail on Windows PyQt, leaving discovery successful but the
+                # label permanently hidden.
+                self.battery_ready.emit(json.dumps(levels))
+            except Exception as exc:
+                print(f'[BATTERY] UI dispatch failed: {exc}', flush=True)
+
+        try:
+            self.thread_pool.submit(_work)
+        except Exception:
+            pass
+
+    def _current_audio_device_name(self):
+        try:
+            return str(self.audio_output.device().description() or '')
+        except Exception:
+            return ''
+
+    @pyqtSlot(str)
+    def apply_audio_battery(self, payload):
+        """Show the charge of whatever audio device is currently selected.
+
+        Windows reports every paired Bluetooth device that has a level, so
+        the one that matters is picked by name: the selected output first,
+        then any headphone-like device, so the number follows the audio
+        rather than showing some earbuds sitting in their case.
+        """
+        try:
+            levels = json.loads(payload or '{}')
+        except Exception:
+            levels = {}
+        if not isinstance(levels, dict):
+            levels = {}
+        self._battery_levels = levels
+        if not levels:
+            self.battery_label.setVisible(False)
+            self._reposition_hb_overlay()
+            return
+
+        current = self._current_audio_device_name().strip().lower()
+        percent = None
+        device = ''
+        if current:
+            # Best match wins, not first: Windows can report a bare
+            # 'Headphones' alongside the specific 'WH-1000XM4', and dict
+            # order would otherwise decide which one the number came from.
+            # A generic label carries less identifying information than a
+            # model name, so it loses; length settles everything else.
+            best_score = (-1, -1, -1)
+            for name, value in levels.items():
+                if not name:
+                    continue
+                _a = {x for x in name.lower().replace('-', ' ').replace('_', ' ').split() if len(x) >= 4}
+                _b = {x for x in current.lower().replace('-', ' ').replace('_', ' ').split() if len(x) >= 4}
+                shared = len(_a & _b)
+                if name not in current and current not in name:
+                    # Windows exposes separate endpoint names (for example
+                    # 'itel T1Neo Stereo' versus 'itel T1Neo Hands-Free AG').
+                    # Prefer the candidate with the most model tokens in
+                    # common.  The old length-first score let a longer,
+                    # unrelated headset win because all endpoints shared
+                    # generic suffix tokens such as hands-free and ag.
+                    if shared < 2:
+                        continue
+                score = (0 if name.strip() in _GENERIC_AUDIO_NAMES else 1,
+                         shared,
+                         len(name))
+                if score > best_score:
+                    best_score = score
+                    percent = value
+                    device = name
+        if percent is None and levels:
+            # Never use a different paired headset as a fallback.  Qt can
+            # report the old endpoint briefly while it switches outputs; the
+            # only safe action is to wait and match again after it settles.
+            try: QTimer.singleShot(1500, self._refresh_audio_battery)
+            except Exception: pass
+        if percent is None:
+            self.battery_label.setVisible(False)
+            self._reposition_hb_overlay()
+            return
+
+        try:
+            percent = max(0, min(100, int(percent)))
+        except Exception:
+            self.battery_label.setVisible(False)
+            self._reposition_hb_overlay()
+            return
+        color = '#e05252' if percent <= 15 else (
+            '#e0a63a' if percent <= 35 else '#4caf7d')
+        self.battery_label.setText(f'\U0001F50B {percent}%')
+        self.battery_label.setToolTip(
+            f'{device or "Audio device"} battery: {percent}%')
+        print(f'[BATTERY][UI] selected={current or "<unknown>"} '
+              f'matched={device or "<unknown>"} value={percent}%', flush=True)
+        self.battery_label.setStyleSheet(
+            'QLabel { background:transparent; color:' + color + '; '
+            'padding:2px 6px; font-size:11px; font-weight:bold; }')
+        if self._is_app_fullscreen():
+            self.battery_label.setVisible(False)
+        else:
+            self.battery_label.setVisible(True)
+        self._reposition_hb_overlay()
 
     def _update_download_topbar_ui(self):
         if not hasattr(self, 'download_dlg') or not hasattr(self, 'download_btn'):

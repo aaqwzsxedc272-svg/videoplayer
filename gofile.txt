@@ -1,0 +1,60 @@
+this is my videoplayer app i have a problem with gofile links they dont work i tested many approaches and none worked if it does i get temporarly banned
+
+
+Exécuté 4 commandes, a consulté 3 fichiers, web recherché
+Exécuté 4 commandes, a consulté 3 fichiers, web recherché
+Good, that's fine to reuse. Now let me check the top-level imports (need requests, time, os already presumably imported) and view _gofile_token_from_file, _gofile_playback_headers, and _gofile_media_entries/dispatch to make sure I don't break signatures.
+
+
+Exécuté 6 commandes, a consulté 2 fichiers, 2 fichiers modifiés · 4 notes
+Exécuté 6 commandes, a consulté 2 fichiers, 2 fichiers modifiés · 4 notes
+Here's what changed in _fetch_gofile_contents:
+
+Uses plain requests — no curl_cffi, no browser impersonation.
+Sends only Authorization: Bearer <token> from gofile_token.txt — no forged/computed X-Website-Token, no wt.obf.js scraping.
+If the token is missing, it says so clearly instead of falling back to guest-token generation.
+On 401, it stops and tells you to double-check the token instead of retrying with alternate tokens.
+On 429, it reads GoFile's own Retry-After/X-RateLimit-Reset header to set the cooldown (capped 30s–15min) instead of a blind guess.
+Existing 24h folder-listing cache and request pacing (_gofile_polite_delay) are untouched, so repeat plays of the same folder don't re-hit the API at all.
+Everything else (dispatch, _gofile_media_entries, entry caching, _resolve_gofile_source) was left alone since none of it depended on WT/impersonation — it just calls this function.
+
+A couple of things worth testing on your end:
+
+Confirm /contents/{id} actually returns data for your account tier with just Bearer auth (some GoFile features are premium-gated — see the 401 message if it fails).
+If you still get 429s even at low volume, that's likely IP-level throttling independent of the token, and the honest fix is longer client-side caching/spacing, not a workaround.
+
+Main
+PY 
+
+Message réduit
+
+A réfléchi pendant 5 s
+A réfléchi pendant 5 s
+That 401 is useful signal — let's see exactly what GoFile is saying back, since "Unauthorized" from them can mean a few different things (bad token, wrong header format, or a premium-gated endpoint). Let me add response-body logging so we can see the real reason instead of guessing.
+
+
+Exécuté 2 commandes, consulté un fichier, fichier modifié
+Exécuté 2 commandes, consulté un fichier, fichier modifié
+I added a line that prints GoFile's actual response body when it returns 401, since a bare status code doesn't tell us much. A couple of likely causes based on GoFile's own docs:
+
+Free accounts can't read folder contents via API. Their docs note that getting file/folder details via /contents/{id} requires a premium account — free-tier tokens are only good for uploads, renames, and deletes. If your account isn't premium, this will 401/error regardless of how correct the token is.
+Stale or regenerated token — if you reset your token on the GoFile site at some point, the old one in gofile_token.txt would be dead.
+A copy-paste issue (extra whitespace/newline in the txt file, though _gofile_token_from_file already strips it).
+Run it again and paste back the new [GOFILE] Response body: ... line — that'll tell us definitively which of these it is instead of guessing further.
+
+
+Main
+PY 
+
+Message réduit
+That confirms it: error-notPremium. This has nothing to do with the token being wrong or the request being malformed — GoFile's /contents/{id} endpoint (reading a folder's file listing/links via API) is a premium-only feature. Your token is valid, it's just tied to a free account, and free accounts are restricted from this specific endpoint by GoFile itself, not by anything in the code.
+
+That matches what a couple of third-party GoFile API wrappers note explicitly: free accounts can upload, rename, and delete via the API, but reading folder/file details is gated behind premium.
+
+So the honest options here are:
+
+Get GoFile premium on the account tied to that token — then this exact code will work as-is, no further changes needed.
+Don't try to read the folder via the API at all, and instead just open the GoFile page in a real browser (or hand off to the system browser) when a GoFile link is encountered, since that's what the free tier is meant for.
+Some players fall back to letting yt-dlp handle GoFile links — but yt-dlp doesn't bypass this restriction either; it hits the same premium wall for API-based folder resolution, and any of the "workarounds" that do work will loop back into the scraping/bot-evasion territory that gets accounts banned. That's why I don't want to build that path.
+Given that, I'd lean toward option 2: make GoFile links open externally rather than resolve in-app. Want me to wire that up? It'd replace the whole resolver chain with something like "detect GoFile URL → open in default browser" and remove the now-dead API/browser-automation code paths.
+

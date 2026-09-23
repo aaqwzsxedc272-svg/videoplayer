@@ -1,0 +1,1411 @@
+  --            COPY_FREE_VARS           1
+                MAKE_CELL                0 (self)
+
+ 430            RESUME                   0
+
+ 431            LOAD_GLOBAL              0 (super)
+                LOAD_DEREF              15 (__class__)
+                LOAD_DEREF               0 (self)
+                LOAD_SUPER_ATTR          5 (__init__ + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 432            LOAD_DEREF               0 (self)
+                LOAD_ATTR                5 (setWindowTitle + NULL|self)
+                LOAD_CONST               0 ('Antigravity Video Player')
+                CALL                     1
+                POP_TOP
+
+ 433            LOAD_DEREF               0 (self)
+                LOAD_ATTR                7 (resize + NULL|self)
+                LOAD_CONST               1 (800)
+                LOAD_CONST               2 (600)
+                CALL                     2
+                POP_TOP
+
+ 434            LOAD_DEREF               0 (self)
+                LOAD_ATTR                9 (setAcceptDrops + NULL|self)
+                LOAD_CONST               3 (True)
+                CALL                     1
+                POP_TOP
+
+ 435            LOAD_DEREF               0 (self)
+                LOAD_ATTR               11 (setMouseTracking + NULL|self)
+                LOAD_CONST               3 (True)
+                CALL                     1
+                POP_TOP
+
+ 436            LOAD_DEREF               0 (self)
+                LOAD_ATTR               13 (setFocusPolicy + NULL|self)
+                LOAD_GLOBAL             14 (Qt)
+                LOAD_ATTR               16 (FocusPolicy)
+                LOAD_ATTR               18 (StrongFocus)
+                CALL                     1
+                POP_TOP
+
+ 439            LOAD_DEREF               0 (self)
+                LOAD_ATTR               21 (setWindowFlags + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR               23 (windowFlags + NULL|self)
+                CALL                     0
+                LOAD_GLOBAL             14 (Qt)
+                LOAD_ATTR               24 (WindowType)
+                LOAD_ATTR               26 (Window)
+                BINARY_OP                7 (|)
+                CALL                     1
+                POP_TOP
+
+ 442            LOAD_DEREF               0 (self)
+                LOAD_ATTR               29 (showMaximized + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 445            LOAD_GLOBAL             31 (getattr + NULL)
+                LOAD_GLOBAL             32 (sys)
+                LOAD_CONST               4 ('frozen')
+                LOAD_CONST               5 (False)
+                CALL                     3
+                TO_BOOL
+                POP_JUMP_IF_FALSE       56 (to L1)
+                NOT_TAKEN
+
+ 447            LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               36 (getenv)
+                PUSH_NULL
+                LOAD_CONST               6 ('APPDATA')
+                CALL                     1
+                STORE_FAST               1 (app_data)
+
+ 448            LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               38 (path)
+                LOAD_ATTR               41 (join + NULL|self)
+                LOAD_FAST_BORROW         1 (app_data)
+                LOAD_CONST               7 ('AntigravityVideoPlayer')
+                CALL                     2
+                STORE_FAST               2 (app_dir)
+                JUMP_FORWARD            35 (to L2)
+
+ 451    L1:     LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               38 (path)
+                LOAD_ATTR               43 (dirname + NULL|self)
+                LOAD_GLOBAL             44 (__file__)
+                CALL                     1
+                STORE_FAST               2 (app_dir)
+
+ 454    L2:     LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               46 (makedirs)
+                PUSH_NULL
+                LOAD_FAST_BORROW         2 (app_dir)
+                LOAD_CONST               3 (True)
+                LOAD_CONST               8 (('exist_ok',))
+                CALL_KW                  2
+                POP_TOP
+
+ 456            LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               38 (path)
+                LOAD_ATTR               41 (join + NULL|self)
+                LOAD_FAST_BORROW         2 (app_dir)
+                LOAD_CONST               9 ('playback_history.json')
+                CALL                     2
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              24 (history_file)
+
+ 457            LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               38 (path)
+                LOAD_ATTR               41 (join + NULL|self)
+                LOAD_FAST_BORROW         2 (app_dir)
+                LOAD_CONST              10 ('recent_files.json')
+                CALL                     2
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              25 (recent_files_file)
+
+ 458            LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               38 (path)
+                LOAD_ATTR               41 (join + NULL|self)
+                LOAD_FAST_BORROW         2 (app_dir)
+                LOAD_CONST              11 ('recent_playlists.json')
+                CALL                     2
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              26 (recent_playlists_file)
+
+ 459            LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               38 (path)
+                LOAD_ATTR               41 (join + NULL|self)
+                LOAD_FAST_BORROW         2 (app_dir)
+                LOAD_CONST              12 ('subtitle_mappings.json')
+                CALL                     2
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              27 (subtitle_mappings_file)
+
+ 460            LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               38 (path)
+                LOAD_ATTR               41 (join + NULL|self)
+                LOAD_FAST_BORROW         2 (app_dir)
+                LOAD_CONST              13 ('settings.json')
+                CALL                     2
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              28 (settings_file)
+
+ 461            LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               38 (path)
+                LOAD_ATTR               41 (join + NULL|self)
+                LOAD_FAST_BORROW         2 (app_dir)
+                LOAD_CONST              14 ('playlist_positions.json')
+                CALL                     2
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              29 (playlist_positions_file)
+
+ 464            LOAD_DEREF               0 (self)
+                LOAD_ATTR               61 (load_settings + NULL|self)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              31 (settings)
+
+ 467            LOAD_CONST              15 (None)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              32 (current_playlist_file)
+
+ 468            LOAD_DEREF               0 (self)
+                LOAD_ATTR               67 (load_playlist_positions + NULL|self)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              34 (playlist_positions)
+
+ 470            LOAD_GLOBAL             71 (print + NULL)
+                LOAD_CONST              16 ('DEBUG: Data files will be saved in: ')
+                LOAD_FAST_BORROW         2 (app_dir)
+                FORMAT_SIMPLE
+                BUILD_STRING             2
+                CALL                     1
+                POP_TOP
+
+ 474            LOAD_GLOBAL             73 (ThreadPoolExecutor + NULL)
+                LOAD_SMALL_INT           3
+                LOAD_CONST              17 (('max_workers',))
+                CALL_KW                  1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              37 (thread_pool)
+
+ 477            BUILD_LIST               0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              38 (subtitles)
+
+ 478            LOAD_CONST              18 ('')
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              39 (current_subtitle)
+
+ 479            LOAD_CONST               3 (True)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              40 (subtitle_enabled)
+
+ 480            LOAD_CONST               5 (False)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              41 (subtitle_edit_mode)
+
+ 481            LOAD_CONST               5 (False)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              42 (was_playing_before_edit)
+
+ 484            LOAD_CONST              15 (None)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              43 (taskbar_list)
+
+ 485            LOAD_CONST              15 (None)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              44 (hwnd)
+
+ 492            LOAD_DEREF               0 (self)
+                LOAD_ATTR               91 (setStyleSheet + NULL|self)
+                LOAD_CONST              19 ('\n            QMainWindow {\n                background-color: #2b2b2b;\n                color: #ffffff;\n            }\n            QWidget {\n                background-color: #2b2b2b;\n                color: #ffffff;\n            }\n            QPushButton {\n                background-color: #3c3f41;\n                color: #ffffff;\n                border: 1px solid #555555;\n                padding: 5px;\n                border-radius: 3px;\n            }\n            QPushButton:hover {\n                background-color: #4c5052;\n            }\n            QPushButton:pressed {\n                background-color: #5c6062;\n            }\n            QSlider::groove:horizontal {\n                border: 1px solid #999999;\n                height: 8px;\n                background: #424242;\n                margin: 2px 0;\n                border-radius: 4px;\n            }\n            QSlider::handle:horizontal {\n                background: #3a8ee6;\n                border: 1px solid #3a8ee6;\n                width: 18px;\n                height: 18px;\n                margin: -7px 0;\n                border-radius: 9px;\n            }\n            QListWidget {\n                background-color: #3c3f41;\n                border: 1px solid #555555;\n                color: #ffffff;\n            }\n            QListWidget::item:selected {\n                background-color: #3a8ee6;\n            }\n            QMenu {\n                background-color: #3c3f41;\n                color: #ffffff;\n                border: 1px solid #555555;\n            }\n            QMenu::item:selected {\n                background-color: #3a8ee6;\n            }\n            QMenuBar {\n                background-color: #2b2b2b;\n                color: #ffffff;\n            }\n            QMenuBar::item:selected {\n                background-color: #3c3f41;\n            }\n            QTableWidget {\n                background-color: #3c3f41;\n                border: 1px solid #555555;\n                color: #ffffff;\n                gridline-color: #555555;\n                alternate-background-color: #353535;\n            }\n            QTableWidget::item {\n                background-color: #3c3f41;\n                color: #ffffff;\n            }\n            QTableWidget::item:selected {\n                background-color: #3a8ee6;\n                color: #ffffff;\n            }\n            QHeaderView::section {\n                background-color: #4a4a4a;\n                color: #ffffff;\n                padding: 5px;\n                border: 1px solid #555555;\n                font-weight: bold;\n            }\n            QHeaderView::section:hover {\n                background-color: #3a8ee6;\n                cursor: pointer;\n            }\n            QTableCornerButton::section {\n                background-color: #3c3f41;\n                border: 1px solid #555555;\n            }\n        ')
+                CALL                     1
+                POP_TOP
+
+ 585            LOAD_FAST_BORROW         2 (app_dir)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              46 (data_dir)
+
+ 588            LOAD_DEREF               0 (self)
+                LOAD_ATTR               95 (load_playback_history + NULL|self)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              48 (playback_history)
+
+ 589            LOAD_DEREF               0 (self)
+                LOAD_ATTR               99 (load_recent_files + NULL|self)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              50 (recent_files)
+
+ 590            LOAD_DEREF               0 (self)
+                LOAD_ATTR              103 (load_recent_playlists + NULL|self)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              52 (recent_playlists)
+
+ 591            LOAD_DEREF               0 (self)
+                LOAD_ATTR              107 (load_subtitle_mappings + NULL|self)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              54 (subtitle_mappings)
+
+ 594            LOAD_CONST              20 (1.0)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              55 (zoom_level)
+
+ 597            LOAD_CONST               5 (False)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              56 (screen_is_off)
+
+ 600            LOAD_CONST               5 (False)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              57 (image_fit_expanded)
+
+ 603            LOAD_CONST              15 (None)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              58 (loop_point_a)
+
+ 604            LOAD_CONST              15 (None)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              59 (loop_point_b)
+
+ 605            LOAD_CONST               5 (False)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              60 (ab_loop_enabled)
+
+ 608            LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               38 (path)
+                LOAD_ATTR               41 (join + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR               92 (data_dir)
+                LOAD_CONST              21 ('keybindings.json')
+                CALL                     2
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              61 (keybindings_file)
+
+ 609            LOAD_DEREF               0 (self)
+                LOAD_ATTR              125 (load_keybindings + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 612            LOAD_DEREF               0 (self)
+                LOAD_ATTR              126 (video_info_updated)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              130 (update_video_info)
+                CALL                     1
+                POP_TOP
+
+ 615            LOAD_GLOBAL            133 (QMediaPlayer + NULL)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              67 (media_player)
+
+ 616            LOAD_GLOBAL            137 (QAudioOutput + NULL)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              69 (audio_output)
+
+ 617            LOAD_DEREF               0 (self)
+                LOAD_ATTR              134 (media_player)
+                LOAD_ATTR              141 (setAudioOutput + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              138 (audio_output)
+                CALL                     1
+                POP_TOP
+
+ 620            LOAD_GLOBAL            143 (QTimer + NULL)
+                LOAD_DEREF               0 (self)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              72 (audio_device_check_timer)
+
+ 621            LOAD_DEREF               0 (self)
+                LOAD_ATTR              144 (audio_device_check_timer)
+                LOAD_ATTR              146 (timeout)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              148 (check_audio_devices)
+                CALL                     1
+                POP_TOP
+
+ 622            LOAD_DEREF               0 (self)
+                LOAD_ATTR              144 (audio_device_check_timer)
+                LOAD_ATTR              151 (start + NULL|self)
+                LOAD_CONST              22 (5000)
+                CALL                     1
+                POP_TOP
+
+ 623            LOAD_GLOBAL            152 (QMediaDevices)
+                LOAD_ATTR              154 (audioOutputs)
+                PUSH_NULL
+                CALL                     0
+                GET_ITER
+                LOAD_FAST_AND_CLEAR      3 (d)
+                SWAP                     2
+        L3:     BUILD_LIST               0
+                SWAP                     2
+        L4:     FOR_ITER                18 (to L5)
+                STORE_FAST_LOAD_FAST    51 (d, d)
+                LOAD_ATTR              157 (id + NULL|self)
+                CALL                     0
+                LIST_APPEND              2
+                JUMP_BACKWARD           20 (to L4)
+        L5:     END_FOR
+                POP_ITER
+        L6:     SWAP                     2
+                STORE_FAST               3 (d)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              79 (last_audio_devices)
+
+ 626            LOAD_GLOBAL            161 (set + NULL)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              81 (marked_videos)
+
+ 627            LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               38 (path)
+                LOAD_ATTR               41 (join + NULL|self)
+                LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               38 (path)
+                LOAD_ATTR               43 (dirname + NULL|self)
+                LOAD_GLOBAL             34 (os)
+                LOAD_ATTR               38 (path)
+                LOAD_ATTR              165 (abspath + NULL|self)
+                LOAD_GLOBAL             44 (__file__)
+                CALL                     1
+                CALL                     1
+                LOAD_CONST              23 ('marked_videos.json')
+                CALL                     2
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              83 (marked_videos_file)
+
+ 628            LOAD_DEREF               0 (self)
+                LOAD_ATTR              169 (load_marked_videos + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 629            LOAD_CONST               5 (False)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              85 (filtering_marked)
+
+ 632            LOAD_GLOBAL            142 (QTimer)
+                LOAD_ATTR              172 (singleShot)
+                PUSH_NULL
+                LOAD_CONST              24 (500)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              174 (auto_select_headphones)
+                CALL                     2
+                POP_TOP
+
+ 635            LOAD_DEREF               0 (self)
+                LOAD_ATTR              177 (create_menu_bar + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 638            LOAD_GLOBAL            179 (QWidget + NULL)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              90 (central_widget)
+
+ 639            LOAD_DEREF               0 (self)
+                LOAD_ATTR              183 (setCentralWidget + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              180 (central_widget)
+                CALL                     1
+                POP_TOP
+
+ 642            LOAD_DEREF               0 (self)
+                LOAD_ATTR                9 (setAcceptDrops + NULL|self)
+                LOAD_CONST               3 (True)
+                CALL                     1
+                POP_TOP
+
+ 644            LOAD_GLOBAL            185 (QVBoxLayout + NULL)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              180 (central_widget)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              93 (layout)
+
+ 645            LOAD_DEREF               0 (self)
+                LOAD_ATTR              186 (layout)
+                LOAD_ATTR              189 (setContentsMargins + NULL|self)
+                LOAD_SMALL_INT           0
+                LOAD_SMALL_INT           0
+                LOAD_SMALL_INT           0
+                LOAD_SMALL_INT           0
+                CALL                     4
+                POP_TOP
+
+ 646            LOAD_DEREF               0 (self)
+                LOAD_ATTR              186 (layout)
+                LOAD_ATTR              191 (setSpacing + NULL|self)
+                LOAD_SMALL_INT           0
+                CALL                     1
+                POP_TOP
+
+ 649            LOAD_GLOBAL            193 (QGraphicsScene + NULL)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              97 (scene)
+
+ 650            LOAD_GLOBAL            197 (ClickableGraphicsView + NULL)
+                LOAD_DEREF               0 (self)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR              99 (video_view)
+
+ 651            LOAD_DEREF               0 (self)
+                LOAD_ATTR              198 (video_view)
+                LOAD_ATTR              201 (setScene + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              194 (scene)
+                CALL                     1
+                POP_TOP
+
+ 652            LOAD_DEREF               0 (self)
+                LOAD_ATTR              198 (video_view)
+                LOAD_ATTR              203 (setHorizontalScrollBarPolicy + NULL|self)
+                LOAD_GLOBAL             14 (Qt)
+                LOAD_ATTR              204 (ScrollBarPolicy)
+                LOAD_ATTR              206 (ScrollBarAlwaysOff)
+                CALL                     1
+                POP_TOP
+
+ 653            LOAD_DEREF               0 (self)
+                LOAD_ATTR              198 (video_view)
+                LOAD_ATTR              209 (setVerticalScrollBarPolicy + NULL|self)
+                LOAD_GLOBAL             14 (Qt)
+                LOAD_ATTR              204 (ScrollBarPolicy)
+                LOAD_ATTR              206 (ScrollBarAlwaysOff)
+                CALL                     1
+                POP_TOP
+
+ 654            LOAD_DEREF               0 (self)
+                LOAD_ATTR              198 (video_view)
+                LOAD_ATTR               91 (setStyleSheet + NULL|self)
+                LOAD_CONST              25 ('background-color: black; border: none;')
+                CALL                     1
+                POP_TOP
+
+ 657            LOAD_DEREF               0 (self)
+                LOAD_ATTR              198 (video_view)
+                LOAD_ATTR                9 (setAcceptDrops + NULL|self)
+                LOAD_CONST               3 (True)
+                CALL                     1
+                POP_TOP
+
+ 658            LOAD_DEREF               0 (self)
+                LOAD_ATTR              198 (video_view)
+                LOAD_ATTR              211 (viewport + NULL|self)
+                CALL                     0
+                LOAD_ATTR                9 (setAcceptDrops + NULL|self)
+                LOAD_CONST               3 (True)
+                CALL                     1
+                POP_TOP
+
+ 661            LOAD_DEREF               0 (self)
+                LOAD_ATTR              198 (video_view)
+                LOAD_ATTR              213 (grabGesture + NULL|self)
+                LOAD_GLOBAL             14 (Qt)
+                LOAD_ATTR              214 (GestureType)
+                LOAD_ATTR              216 (PanGesture)
+                CALL                     1
+                POP_TOP
+
+ 663            LOAD_GLOBAL            219 (QGraphicsVideoItem + NULL)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             110 (video_item)
+
+ 664            LOAD_DEREF               0 (self)
+                LOAD_ATTR              220 (video_item)
+                LOAD_ATTR              222 (nativeSizeChanged)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              224 (video_native_size_changed)
+                CALL                     1
+                POP_TOP
+
+ 665            LOAD_DEREF               0 (self)
+                LOAD_ATTR              194 (scene)
+                LOAD_ATTR              227 (addItem + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              220 (video_item)
+                CALL                     1
+                POP_TOP
+
+ 668            LOAD_SMALL_INT           0
+                LOAD_CONST              26 (('QGraphicsPixmapItem',))
+                IMPORT_NAME            114 (PyQt6.QtWidgets)
+                IMPORT_FROM            115 (QGraphicsPixmapItem)
+                STORE_FAST               4 (QGraphicsPixmapItem)
+                POP_TOP
+
+ 669            LOAD_FAST_BORROW         4 (QGraphicsPixmapItem)
+                PUSH_NULL
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             116 (image_item)
+
+ 670            LOAD_DEREF               0 (self)
+                LOAD_ATTR              194 (scene)
+                LOAD_ATTR              227 (addItem + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              232 (image_item)
+                CALL                     1
+                POP_TOP
+
+ 671            LOAD_DEREF               0 (self)
+                LOAD_ATTR              232 (image_item)
+                LOAD_ATTR              235 (setVisible + NULL|self)
+                LOAD_CONST               5 (False)
+                CALL                     1
+                POP_TOP
+
+ 674            LOAD_GLOBAL            143 (QTimer + NULL)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             118 (image_timer)
+
+ 675            LOAD_DEREF               0 (self)
+                LOAD_ATTR              236 (image_timer)
+                LOAD_ATTR              146 (timeout)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              238 (image_display_finished)
+                CALL                     1
+                POP_TOP
+
+ 677            LOAD_DEREF               0 (self)
+                LOAD_ATTR              186 (layout)
+                LOAD_ATTR              241 (addWidget + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              198 (video_view)
+                LOAD_SMALL_INT           1
+                LOAD_CONST              27 (('stretch',))
+                CALL_KW                  2
+                POP_TOP
+
+ 678            LOAD_DEREF               0 (self)
+                LOAD_ATTR              134 (media_player)
+                LOAD_ATTR              243 (setVideoOutput + NULL|self)
+                LOAD_DEREF               0 (self)
+                LOAD_ATTR              220 (video_item)
+                CALL                     1
+                POP_TOP
+
+ 681            LOAD_GLOBAL            245 (QLabel + NULL)
+                LOAD_DEREF               0 (self)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             123 (osd_label)
+
+ 682            LOAD_DEREF               0 (self)
+                LOAD_ATTR              246 (osd_label)
+                LOAD_ATTR               91 (setStyleSheet + NULL|self)
+                LOAD_CONST              28 ('\n            QLabel {\n                background-color: rgba(0, 0, 0, 180);\n                color: white;\n                padding: 10px 20px;\n                border-radius: 5px;\n                font-size: 16px;\n            }\n        ')
+                CALL                     1
+                POP_TOP
+
+ 691            LOAD_DEREF               0 (self)
+                LOAD_ATTR              246 (osd_label)
+                LOAD_ATTR              249 (setAlignment + NULL|self)
+                LOAD_GLOBAL             14 (Qt)
+                LOAD_ATTR              250 (AlignmentFlag)
+                LOAD_ATTR              252 (AlignCenter)
+                CALL                     1
+                POP_TOP
+
+ 692            LOAD_DEREF               0 (self)
+                LOAD_ATTR              246 (osd_label)
+                LOAD_ATTR              255 (hide + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 694            LOAD_GLOBAL            143 (QTimer + NULL)
+                LOAD_DEREF               0 (self)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             128 (osd_timer)
+
+ 695            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              256 (osd_timer)
+                LOAD_ATTR              146 (timeout)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              258 (hide_osd)
+                CALL                     1
+                POP_TOP
+
+ 696            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              256 (osd_timer)
+                EXTENDED_ARG             1
+                LOAD_ATTR              261 (setSingleShot + NULL|self)
+                LOAD_CONST               3 (True)
+                CALL                     1
+                POP_TOP
+
+ 700            LOAD_GLOBAL            179 (QWidget + NULL)
+                LOAD_DEREF               0 (self)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             131 (nocturnal_overlay)
+
+ 701            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              262 (nocturnal_overlay)
+                LOAD_ATTR               91 (setStyleSheet + NULL|self)
+                LOAD_CONST              29 ('background-color: rgba(0, 0, 0, 0.5);')
+                CALL                     1
+                POP_TOP
+
+ 702            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              262 (nocturnal_overlay)
+                EXTENDED_ARG             1
+                LOAD_ATTR              265 (setAttribute + NULL|self)
+                LOAD_GLOBAL             14 (Qt)
+                EXTENDED_ARG             1
+                LOAD_ATTR              266 (WidgetAttribute)
+                EXTENDED_ARG             1
+                LOAD_ATTR              268 (WA_TransparentForMouseEvents)
+                CALL                     1
+                POP_TOP
+
+ 703            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              262 (nocturnal_overlay)
+                LOAD_ATTR              255 (hide + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 704            LOAD_CONST               5 (False)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             135 (nocturnal_mode)
+
+ 705            LOAD_CONST              30 (0.5)
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             136 (nocturnal_intensity)
+
+ 708            LOAD_GLOBAL            245 (QLabel + NULL)
+                LOAD_DEREF               0 (self)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             137 (subtitle_placeholder)
+
+ 709            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              274 (subtitle_placeholder)
+                LOAD_ATTR               91 (setStyleSheet + NULL|self)
+                LOAD_CONST              31 ('background-color: black;')
+                CALL                     1
+                POP_TOP
+
+ 710            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              274 (subtitle_placeholder)
+                LOAD_ATTR              249 (setAlignment + NULL|self)
+                LOAD_GLOBAL             14 (Qt)
+                LOAD_ATTR              250 (AlignmentFlag)
+                LOAD_ATTR              252 (AlignCenter)
+                CALL                     1
+                POP_TOP
+
+ 711            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              274 (subtitle_placeholder)
+                EXTENDED_ARG             1
+                LOAD_ATTR              277 (setText + NULL|self)
+                LOAD_CONST              32 ('Subtitles Edit Mode\n\nDrag to reposition\nUse +/- for size\nSelect Color below')
+                CALL                     1
+                POP_TOP
+
+ 712            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              274 (subtitle_placeholder)
+                LOAD_ATTR               91 (setStyleSheet + NULL|self)
+                LOAD_CONST              33 ('\n            QLabel {\n                background-color: black;\n                color: gray;\n                font-size: 24px;\n            }\n        ')
+                CALL                     1
+                POP_TOP
+
+ 719            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              274 (subtitle_placeholder)
+                LOAD_ATTR              255 (hide + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 722            EXTENDED_ARG             1
+                LOAD_GLOBAL            279 (QPushButton + NULL)
+                LOAD_CONST              34 ('Done')
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              274 (subtitle_placeholder)
+                CALL                     2
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             140 (exit_edit_mode_btn)
+
+ 723            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              280 (exit_edit_mode_btn)
+                EXTENDED_ARG             1
+                LOAD_ATTR              283 (setFixedSize + NULL|self)
+                LOAD_SMALL_INT         100
+                LOAD_SMALL_INT          40
+                CALL                     2
+                POP_TOP
+
+ 724            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              280 (exit_edit_mode_btn)
+                LOAD_ATTR               91 (setStyleSheet + NULL|self)
+                LOAD_CONST              35 ('\n            QPushButton {\n                background-color: #3a8ee6;\n                color: white;\n                border: none;\n                border-radius: 5px;\n                font-size: 16px;\n                font-weight: bold;\n            }\n            QPushButton:hover {\n                background-color: #4da3ff;\n            }\n        ')
+                CALL                     1
+                POP_TOP
+
+ 737            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              280 (exit_edit_mode_btn)
+                EXTENDED_ARG             1
+                LOAD_ATTR              284 (clicked)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              286 (toggle_subtitle_edit_mode)
+                CALL                     1
+                POP_TOP
+
+ 741            EXTENDED_ARG             1
+                LOAD_GLOBAL            289 (DraggableSubtitleLabel + NULL)
+                LOAD_DEREF               0 (self)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             145 (subtitle_label)
+
+ 742            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              290 (subtitle_label)
+                LOAD_ATTR              249 (setAlignment + NULL|self)
+                LOAD_GLOBAL             14 (Qt)
+                LOAD_ATTR              250 (AlignmentFlag)
+                LOAD_ATTR              252 (AlignCenter)
+                CALL                     1
+                POP_TOP
+
+ 743            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              290 (subtitle_label)
+                LOAD_ATTR              255 (hide + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 746            LOAD_GLOBAL            179 (QWidget + NULL)
+                LOAD_DEREF               0 (self)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             146 (subtitle_controls)
+
+ 747            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              292 (subtitle_controls)
+                LOAD_ATTR              255 (hide + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 750            EXTENDED_ARG             1
+                LOAD_GLOBAL            279 (QPushButton + NULL)
+                LOAD_CONST              36 ('+')
+                LOAD_DEREF               0 (self)
+                CALL                     2
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             147 (subtitle_size_up_btn)
+
+ 751            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              294 (subtitle_size_up_btn)
+                EXTENDED_ARG             1
+                LOAD_ATTR              283 (setFixedSize + NULL|self)
+                LOAD_SMALL_INT          30
+                LOAD_SMALL_INT          30
+                CALL                     2
+                POP_TOP
+
+ 752            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              294 (subtitle_size_up_btn)
+                LOAD_ATTR               91 (setStyleSheet + NULL|self)
+                LOAD_CONST              37 ('\n            QPushButton {\n                background-color: rgba(60, 60, 60, 200);\n                color: white;\n                border: 1px solid rgba(255, 255, 255, 100);\n                border-radius: 15px;\n                font-size: 16px;\n                font-weight: bold;\n            }\n            QPushButton:hover {\n                background-color: rgba(80, 80, 80, 220);\n            }\n        ')
+                CALL                     1
+                POP_TOP
+
+ 765            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              294 (subtitle_size_up_btn)
+                EXTENDED_ARG             1
+                LOAD_ATTR              284 (clicked)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_FAST_BORROW         0 (self)
+                BUILD_TUPLE              1
+                LOAD_CONST              38 (<code object <lambda> at 0x0000018790571230, file "C:\Users\Mouad\.gemini\antigravity\scratch\video_player\main.py", line 765>)
+                MAKE_FUNCTION
+                SET_FUNCTION_ATTRIBUTE   8 (closure)
+                CALL                     1
+                POP_TOP
+
+ 766            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              294 (subtitle_size_up_btn)
+                LOAD_ATTR              255 (hide + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 768            EXTENDED_ARG             1
+                LOAD_GLOBAL            279 (QPushButton + NULL)
+                LOAD_CONST              39 ('-')
+                LOAD_DEREF               0 (self)
+                CALL                     2
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             148 (subtitle_size_down_btn)
+
+ 769            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              296 (subtitle_size_down_btn)
+                EXTENDED_ARG             1
+                LOAD_ATTR              283 (setFixedSize + NULL|self)
+                LOAD_SMALL_INT          30
+                LOAD_SMALL_INT          30
+                CALL                     2
+                POP_TOP
+
+ 770            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              296 (subtitle_size_down_btn)
+                LOAD_ATTR               91 (setStyleSheet + NULL|self)
+                LOAD_CONST              37 ('\n            QPushButton {\n                background-color: rgba(60, 60, 60, 200);\n                color: white;\n                border: 1px solid rgba(255, 255, 255, 100);\n                border-radius: 15px;\n                font-size: 16px;\n                font-weight: bold;\n            }\n            QPushButton:hover {\n                background-color: rgba(80, 80, 80, 220);\n            }\n        ')
+                CALL                     1
+                POP_TOP
+
+ 783            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              296 (subtitle_size_down_btn)
+                EXTENDED_ARG             1
+                LOAD_ATTR              284 (clicked)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_FAST_BORROW         0 (self)
+                BUILD_TUPLE              1
+                LOAD_CONST              40 (<code object <lambda> at 0x0000018790571330, file "C:\Users\Mouad\.gemini\antigravity\scratch\video_player\main.py", line 783>)
+                MAKE_FUNCTION
+                SET_FUNCTION_ATTRIBUTE   8 (closure)
+                CALL                     1
+                POP_TOP
+
+ 784            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              296 (subtitle_size_down_btn)
+                LOAD_ATTR              255 (hide + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 787            BUILD_LIST               0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             149 (color_buttons)
+
+ 788            BUILD_LIST               0
+                LOAD_CONST              74 (('#FFFF00', '#FFFFFF', '#00FFFF', '#00FF00', '#FF00FF'))
+                LIST_EXTEND              1
+                STORE_FAST               5 (colors)
+
+ 790            LOAD_FAST_BORROW         5 (colors)
+                GET_ITER
+        L7:     FOR_ITER               136 (to L8)
+                STORE_FAST               6 (color)
+
+ 791            EXTENDED_ARG             1
+                LOAD_GLOBAL            279 (QPushButton + NULL)
+                LOAD_CONST              18 ('')
+                LOAD_DEREF               0 (self)
+                CALL                     2
+                STORE_FAST               7 (btn)
+
+ 792            LOAD_FAST_BORROW         7 (btn)
+                EXTENDED_ARG             1
+                LOAD_ATTR              283 (setFixedSize + NULL|self)
+                LOAD_SMALL_INT          24
+                LOAD_SMALL_INT          24
+                CALL                     2
+                POP_TOP
+
+ 793            LOAD_FAST_BORROW         7 (btn)
+                LOAD_ATTR               91 (setStyleSheet + NULL|self)
+                LOAD_CONST              41 ('\n                QPushButton {\n                    background-color: ')
+
+ 795            LOAD_FAST_BORROW         6 (color)
+                FORMAT_SIMPLE
+                LOAD_CONST              42 (';\n                    border: 2px solid rgba(255, 255, 255, 100);\n                    border-radius: 12px;\n                }\n                QPushButton:hover {\n                    border: 2px solid white;\n                    transform: scale(1.1);\n                }\n            ')
+
+ 793            BUILD_STRING             3
+                CALL                     1
+                POP_TOP
+
+ 805            LOAD_FAST_BORROW         7 (btn)
+                EXTENDED_ARG             1
+                LOAD_ATTR              284 (clicked)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_FAST_BORROW         6 (color)
+                BUILD_TUPLE              1
+                LOAD_FAST_BORROW         0 (self)
+                BUILD_TUPLE              1
+                LOAD_CONST              43 (<code object <lambda> at 0x0000018790571430, file "C:\Users\Mouad\.gemini\antigravity\scratch\video_player\main.py", line 805>)
+                MAKE_FUNCTION
+                SET_FUNCTION_ATTRIBUTE   8 (closure)
+                SET_FUNCTION_ATTRIBUTE   1 (defaults)
+                CALL                     1
+                POP_TOP
+
+ 806            LOAD_FAST_BORROW         7 (btn)
+                LOAD_ATTR              255 (hide + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 807            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              298 (color_buttons)
+                EXTENDED_ARG             1
+                LOAD_ATTR              301 (append + NULL|self)
+                LOAD_FAST_BORROW         7 (btn)
+                CALL                     1
+                POP_TOP
+                JUMP_BACKWARD          138 (to L7)
+
+ 790    L8:     END_FOR
+                POP_ITER
+
+ 810            LOAD_GLOBAL            143 (QTimer + NULL)
+                LOAD_DEREF               0 (self)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             151 (subtitle_timer)
+
+ 811            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              302 (subtitle_timer)
+                LOAD_ATTR              146 (timeout)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              304 (update_subtitle)
+                CALL                     1
+                POP_TOP
+
+ 812            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              302 (subtitle_timer)
+                LOAD_ATTR              151 (start + NULL|self)
+                LOAD_SMALL_INT         100
+                CALL                     1
+                POP_TOP
+
+ 815            LOAD_GLOBAL            179 (QWidget + NULL)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             153 (controls_widget)
+
+ 816            EXTENDED_ARG             1
+                LOAD_GLOBAL            309 (QHBoxLayout + NULL)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              306 (controls_widget)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             155 (controls_layout)
+
+ 817            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              310 (controls_layout)
+                LOAD_ATTR              189 (setContentsMargins + NULL|self)
+                LOAD_SMALL_INT           5
+                LOAD_SMALL_INT           5
+                LOAD_SMALL_INT           5
+                LOAD_SMALL_INT           5
+                CALL                     4
+                POP_TOP
+
+ 818            LOAD_DEREF               0 (self)
+                LOAD_ATTR              186 (layout)
+                LOAD_ATTR              241 (addWidget + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              306 (controls_widget)
+                CALL                     1
+                POP_TOP
+
+ 821            EXTENDED_ARG             1
+                LOAD_GLOBAL            279 (QPushButton + NULL)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             156 (play_button)
+
+ 822            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              312 (play_button)
+                EXTENDED_ARG             1
+                LOAD_ATTR              315 (setIcon + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              317 (style + NULL|self)
+                CALL                     0
+                EXTENDED_ARG             1
+                LOAD_ATTR              319 (standardIcon + NULL|self)
+                EXTENDED_ARG             1
+                LOAD_GLOBAL            320 (QStyle)
+                EXTENDED_ARG             1
+                LOAD_ATTR              322 (StandardPixmap)
+                EXTENDED_ARG             1
+                LOAD_ATTR              324 (SP_MediaPlay)
+                CALL                     1
+                CALL                     1
+                POP_TOP
+
+ 823            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              312 (play_button)
+                EXTENDED_ARG             1
+                LOAD_ATTR              284 (clicked)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              326 (play_video)
+                CALL                     1
+                POP_TOP
+
+ 824            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              310 (controls_layout)
+                LOAD_ATTR              241 (addWidget + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              312 (play_button)
+                CALL                     1
+                POP_TOP
+
+ 827            EXTENDED_ARG             1
+                LOAD_GLOBAL            279 (QPushButton + NULL)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             164 (stop_button)
+
+ 828            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              328 (stop_button)
+                EXTENDED_ARG             1
+                LOAD_ATTR              315 (setIcon + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              317 (style + NULL|self)
+                CALL                     0
+                EXTENDED_ARG             1
+                LOAD_ATTR              319 (standardIcon + NULL|self)
+                EXTENDED_ARG             1
+                LOAD_GLOBAL            320 (QStyle)
+                EXTENDED_ARG             1
+                LOAD_ATTR              322 (StandardPixmap)
+                EXTENDED_ARG             1
+                LOAD_ATTR              330 (SP_MediaStop)
+                CALL                     1
+                CALL                     1
+                POP_TOP
+
+ 829            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              328 (stop_button)
+                EXTENDED_ARG             1
+                LOAD_ATTR              284 (clicked)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              332 (stop_video)
+                CALL                     1
+                POP_TOP
+
+ 830            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              310 (controls_layout)
+                LOAD_ATTR              241 (addWidget + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              328 (stop_button)
+                CALL                     1
+                POP_TOP
+
+ 833            EXTENDED_ARG             1
+                LOAD_GLOBAL            335 (QSlider + NULL)
+                LOAD_GLOBAL             14 (Qt)
+                EXTENDED_ARG             1
+                LOAD_ATTR              336 (Orientation)
+                EXTENDED_ARG             1
+                LOAD_ATTR              338 (Horizontal)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             170 (seek_slider)
+
+ 834            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              340 (seek_slider)
+                EXTENDED_ARG             1
+                LOAD_ATTR              342 (sliderMoved)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              344 (set_position)
+                CALL                     1
+                POP_TOP
+
+ 835            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              340 (seek_slider)
+                LOAD_ATTR               11 (setMouseTracking + NULL|self)
+                LOAD_CONST               3 (True)
+                CALL                     1
+                POP_TOP
+
+ 836            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              340 (seek_slider)
+                EXTENDED_ARG             1
+                LOAD_ATTR              347 (installEventFilter + NULL|self)
+                LOAD_DEREF               0 (self)
+                CALL                     1
+                POP_TOP
+
+ 837            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              310 (controls_layout)
+                LOAD_ATTR              241 (addWidget + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              340 (seek_slider)
+                CALL                     1
+                POP_TOP
+
+ 840            LOAD_GLOBAL            245 (QLabel + NULL)
+                LOAD_DEREF               0 (self)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             174 (thumbnail_label)
+
+ 841            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              348 (thumbnail_label)
+                LOAD_ATTR               91 (setStyleSheet + NULL|self)
+                LOAD_CONST              44 ('\n            QLabel {\n                background-color: rgba(0, 0, 0, 200);\n                border: 2px solid #3a8ee6;\n                padding: 2px;\n            }\n        ')
+                CALL                     1
+                POP_TOP
+
+ 848            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              348 (thumbnail_label)
+                LOAD_ATTR              255 (hide + NULL|self)
+                CALL                     0
+                POP_TOP
+
+ 851            LOAD_GLOBAL            245 (QLabel + NULL)
+                LOAD_CONST              45 ('00:00 / 00:00')
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             175 (time_label)
+
+ 852            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              310 (controls_layout)
+                LOAD_ATTR              241 (addWidget + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              350 (time_label)
+                CALL                     1
+                POP_TOP
+
+ 855            EXTENDED_ARG             1
+                LOAD_GLOBAL            335 (QSlider + NULL)
+                LOAD_GLOBAL             14 (Qt)
+                EXTENDED_ARG             1
+                LOAD_ATTR              336 (Orientation)
+                EXTENDED_ARG             1
+                LOAD_ATTR              338 (Horizontal)
+                CALL                     1
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             176 (volume_slider)
+
+ 856            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              352 (volume_slider)
+                EXTENDED_ARG             1
+                LOAD_ATTR              355 (setRange + NULL|self)
+                LOAD_SMALL_INT           0
+                LOAD_SMALL_INT         100
+                CALL                     2
+                POP_TOP
+
+ 857            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              352 (volume_slider)
+                EXTENDED_ARG             1
+                LOAD_ATTR              347 (installEventFilter + NULL|self)
+                LOAD_DEREF               0 (self)
+                CALL                     1
+                POP_TOP
+
+ 858            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              352 (volume_slider)
+                EXTENDED_ARG             1
+                LOAD_ATTR              357 (setValue + NULL|self)
+                LOAD_SMALL_INT          70
+                CALL                     1
+                POP_TOP
+
+ 859            LOAD_DEREF               0 (self)
+                LOAD_ATTR              138 (audio_output)
+                EXTENDED_ARG             1
+                LOAD_ATTR              359 (setVolume + NULL|self)
+                LOAD_CONST              46 (0.7)
+                CALL                     1
+                POP_TOP
+
+ 860            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              352 (volume_slider)
+                EXTENDED_ARG             1
+                LOAD_ATTR              360 (valueChanged)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              362 (set_volume)
+                CALL                     1
+                POP_TOP
+
+ 861            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              352 (volume_slider)
+                EXTENDED_ARG             1
+                LOAD_ATTR              365 (setFixedWidth + NULL|self)
+                LOAD_SMALL_INT         100
+                CALL                     1
+                POP_TOP
+
+ 862            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              310 (controls_layout)
+                LOAD_ATTR              241 (addWidget + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              352 (volume_slider)
+                CALL                     1
+                POP_TOP
+
+ 865            EXTENDED_ARG             1
+                LOAD_GLOBAL            279 (QPushButton + NULL)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             183 (mute_btn)
+
+ 866            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              366 (mute_btn)
+                EXTENDED_ARG             1
+                LOAD_ATTR              315 (setIcon + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              317 (style + NULL|self)
+                CALL                     0
+                EXTENDED_ARG             1
+                LOAD_ATTR              319 (standardIcon + NULL|self)
+                EXTENDED_ARG             1
+                LOAD_GLOBAL            320 (QStyle)
+                EXTENDED_ARG             1
+                LOAD_ATTR              322 (StandardPixmap)
+                EXTENDED_ARG             1
+                LOAD_ATTR              368 (SP_MediaVolume)
+                CALL                     1
+                CALL                     1
+                POP_TOP
+
+ 867            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              366 (mute_btn)
+                EXTENDED_ARG             1
+                LOAD_ATTR              284 (clicked)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              370 (toggle_mute)
+                CALL                     1
+                POP_TOP
+
+ 868            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              310 (controls_layout)
+                LOAD_ATTR              241 (addWidget + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              366 (mute_btn)
+                CALL                     1
+                POP_TOP
+
+ 871            EXTENDED_ARG             1
+                LOAD_GLOBAL            373 (QComboBox + NULL)
+                CALL                     0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             187 (speed_combo)
+
+ 872            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              374 (speed_combo)
+                EXTENDED_ARG             1
+                LOAD_ATTR              377 (addItems + NULL|self)
+                BUILD_LIST               0
+                LOAD_CONST              75 (('0.5x', '1.0x', '1.5x', '2.0x'))
+                LIST_EXTEND              1
+                CALL                     1
+                POP_TOP
+
+ 873            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              374 (speed_combo)
+                EXTENDED_ARG             1
+                LOAD_ATTR              379 (setCurrentText + NULL|self)
+                LOAD_CONST              47 ('1.0x')
+                CALL                     1
+                POP_TOP
+
+ 874            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              374 (speed_combo)
+                EXTENDED_ARG             1
+                LOAD_ATTR              380 (currentTextChanged)
+                LOAD_ATTR              129 (connect + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              382 (change_speed)
+                CALL                     1
+                POP_TOP
+
+ 875            LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              310 (controls_layout)
+                LOAD_ATTR              241 (addWidget + NULL|self)
+                LOAD_DEREF               0 (self)
+                EXTENDED_ARG             1
+                LOAD_ATTR              374 (speed_combo)
+                CALL                     1
+                POP_TOP
+
+ 878            LOAD_SMALL_INT           0
+                LOAD_DEREF               0 (self)
+                STORE_ATTR             192 (repeat_mode)
+
+ 879            EXTENDED_ARG             1
+                LOAD_GLOBAL            279 (QPushButton + NULL)

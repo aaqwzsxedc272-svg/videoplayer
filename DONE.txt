@@ -1,0 +1,552 @@
+
+
+
+
+
+
+
+
+
+
+-------sextb
+
+
+
+
+
+
+------sometimes links dont show in playlist even after showing in captured links popup and the links appear after i close the session and restore it using restore last session
+
+
+
+
+
+----------also for voe links i dont think its neccesary to open a browser and show the name gotten trought url in the playlist 
+
+
+
+
+
+
+------------also for javgg can we capture more links either throught analysing the page or m3u8 and can we make them work for javgg's case or other jav sites "[emturbovid.com](http://emturbovid.com)", "[javclan.com](http://javclan.com)", "[vidara.to](http://vidara.to)" ...
+
+emtubovid.com starts at the end and stuck there 
+
+javclan.com "could not resolve a playable video stream for that URL"
+
+
+
+
+
+
+
+
+----------vidara takes very long
+
+
+
+
+------javclan
+
+
+
+
+
+----------https://emturbovid.com/t/6a9f11e12b396
+
+
+
+
+
+
+
+----------javgg javenglish and its family sites show the main copied url "https://javenglish.cc/video/roe-550-eng-sub-pierced-deep-in-my-pussy-by-my-stepsons-big-cock-i-was-made-to-realize-im-just-a-female-failing-as-a-stepmother/" , "https://javgg.net/jav/090626-001-carib/" as a mirror
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+------If i mark one video from porn00.org all videos in playlist from the same site get marked  
+
+
+
+
+
+-----renamed 3 items using metadata linkder they didnt combine
+
+
+
+
+
+
+
+-----------also if a link that isnt required to open a browser for it to work like bunkrr , pixeldrain dont open it in a browser if you had problems making it work
+
+
+
+
+
+------------------for the links popup make it like a browser extention popup if click away it goes away 
+
+----------make the capture links pop up tab like extention popups in browser shows when i click and dissapears when i click away with a button to open it like now as a window if i want to
+
+
+
+
+
+
+
+------------if there is a problem with a link to work if openned in browser always hide the browser 
+
+
+
+
+
+------------make noodlemagazine work 
+
+
+
+
+-------------also for the jav sites there is many mirrors always show the site icon next to it that hoster icon example : "doodstream icon" "roshy icon"
+
+
+
+-----------------javgg javenglish and its family sites show the main copied url "https://javenglish.cc/video/roe-550-eng-sub-pierced-deep-in-my-pussy-by-my-stepsons-big-cock-i-was-made-to-realize-im-just-a-female-failing-as-a-stepmother/" , "https://javgg.net/jav/090626-001-carib/" as a mirror
+
+
+
+-------------for missav show the sites logo even thought the link is from another site also for roshy and jav guru and jable.tv and javenglish and similar show both
+
+
+
+
+-----------add little pic of the urls site (the little icon that shows in the browser tab) show it in the far right of the name section next to the folder icon
+
+
+
+
+
+---------lets move to javgg in the most cases it has 4 hosters currently 3 are captured and one is missed , also the javgg icon isnt showing
+
+----------also for jav sites dont show their url in the mirrors list
+
+
+-------also even if change mirror for jav site keep site icon showing if goes away now
+
+
+
+
+
+
+
+---------familypornhd
+
+
+
+
+
+------------this phone file "Pamsnusnu - Step Sister; 'what are you doing with my Dirty Thong¿¿¿_1080p.mp4" doesnt work also this one sometimes isnt imported correctly throught analyze folder
+
+
+
+
+
+
+-----------------fix eporner links pasting a link gets the name and duration but video doesnt load
+
+
+
+
+---------for eporner sometimes some links fail take a look at it its working but might fail
+
+
+-----------for eporner sometimes some links fail (doesnt click the buttons and skip the ad) take a look at it its working but might fail
+
+
+
+---------use eporner_m3u8_extractor.py
+
+
+--------------------mass playlist items search in google
+
+
+
+
+
+-----------milfnut
+
+
+
+-------GOFILE
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+-------good job it works well now lets tackle an even harder problem gofile links now only first gofile link works but then i am banned until a long time pass or i change wifi or use vpn
+
+
+
+
+--------tested with a link in the app it worked but tested in browser after and i got this message "Slow down a moment
+The API is rate-limiting requests from this device. Wait a few seconds, then retry."
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!:!!!!!!!!!!!!!
+
+
+
+
+-----------only one gofile link works but then i am banned until a long time pass or i change wifi or use vpn
+
+
+
+
+---------for some phone files and urls the duration isnt gotten until i load the file (double click it) before that it only shows "Loading..." in playlist and Stream in mb/s ///// for playlist items specialy phone ones, even if the duration or size is gotten after the item is loaded or after some time calculate and show the mb/s instead of keeping "Stream" ////
+
+
+
+
+--------play next after current video
+
+
+
+
+-----------at click at playlist a phone item show thumbnail
+
+
+
+--------when i select a playlist item then click a header keep the selected item now it just selects the top one
+
+
+
+
+
+
+
+
+
+
+
+
+------for phone files get subs in sub folders too
+
+
+-------selecting a bunch of playlist items or all of them then clicking one of them lags the app and then selects last item of the selection instead of the one i clicked
+
+
+
+--------creation , modification date for local/usb/phone files
+
+
+
+--------audio track wasnt detected in a movie with two audio tracks
+
+
+
+---------subtitle delay or ... fixing
+detect duplicates same name or similar, same size within a range, same duration within 10 seconds
+
+
+
+
+
+----renaming for phone files should be like urls only on playlist not actualy renaming
+
+
+
+
+
+------late autohibernate should show on top bar like autohibernate they should share the current red or green circle and timer
+
+
+
+
+
+
+
+
+
+-------METADATA LINKER APPLYING RENAME TO PLAYLIST 
+QWidgetWindow(0x17b7c4ef100, name="QWidgetClassWindow") must be a top level window.
+QWidgetWindow(0x17b7c4ef100, name="QWidgetClassWindow") must be a top level window.
+[PHONE_FTP][RENAME] /Mihon/downloads/P/[Anal TherapyXXX] Violet Dawn - Real Sex.mp4 -> /Mihon/downloads/P/[Anal TherapyXXX] Violet Dawn - Real Sex familytherapy.mp4
+QWidgetWindow(0x17b7c4ef100, name="QWidgetClassWindow") must be a top level window.
+===========================================================
+CRASH DETECTED:
+============================================================
+Traceback (most recent call last):
+  File "C:\Users\Mouad\Desktop\video_player\metadata_scraper.py", line 2751, in _on_apply_single
+    self._apply_to_file(file_path, movie, custom_name=custom)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mouad\Desktop\video_player\metadata_scraper.py", line 2799, in _apply_to_file
+    if self.player._meta_norm_path(fp) == key]
+                                          ^^^
+NameError: name 'key' is not defined
+============================================================
+CRASH DETECTED:
+============================================================
+Traceback (most recent call last):
+  File "C:\Users\Mouad\Desktop\video_player\metadata_scraper.py", line 2751, in _on_apply_single
+    self._apply_to_file(file_path, movie, custom_name=custom)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mouad\Desktop\video_player\metadata_scraper.py", line 2799, in _apply_to_file
+    if self.player._meta_norm_path(fp) == key]
+                                         ^^^
+NameError: name 'key' is not defined
+QWidgetWindow(0x17b7c4ef100, name="QWidgetClassWindow") must be a top level window.
+============================================================
+CRASH DETECTED:
+============================================================
+Traceback (most recent call last):
+  File "C:\Users\Mouad\Desktop\video_player\metadata_scraper.py", line 2751, in _on_apply_single
+    self._apply_to_file(file_path, movie, custom_name=custom)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Mouad\Desktop\video_player\metadata_scraper.py", line 2799, in _apply_to_file
+    if self.player._meta_norm_path(fp) == key]                                        ^^^
+NameError: name 'key' is not defined
+
+
+
+
+
+--------in the find metadata in the new display name return to line when the space isnt enough now it only shows first line and i need to scroll to see the rest
+
+
+
+
+
+
+
+-------------add , deleting and selecting folder
+
+
+
+
+---------------SUBS from phone dont work with local or phone files
+
+
+
+
+
+------metadata linker doesnt work offline with reptyle
+
+
+
+
+
+
+
+---MARKED JAVs REMEMBERED
+
+
+
+
+
+
+---pixeldrain folders use #item=0 to identify folder items but once another video is added the number changes and what once was a certain video becomes another one frequent problem 
+
+
+
+
+-------for fileditchfiles download doesnt have the playlist name on the dowloaded file
+
+
+
+
+
+-------now even thought its not very clean for urls that are in folders the folder icon shows in the far right of the name bar now lets add it for other sources to show the origin of the file phone,usb,pc
+
+-----ftp files should have a phone icon shown far right in name place also usb files should show a usb
+
+
+
+
+
+
+-----add scrolling to preferance window part of it is out of the screen now
+
+
+
+
+------while in fullscreen in read mode rightclicking the playlist doesnt work shows the options for regular playlist 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+----------if file is in a usb and i click delete file to trash show a the confirmation popup
+
+
+
+
+-----------add filtering by source usb,phone,pc,url  in the name header have a Combo Box with Multi-Selection & Checkboxes
+
+
+
+
+----------for bunkr.black links change the .black to any other bunkr top level domains  .cr , .br ...
+
+
+-------linked files should always stay toghter even if i sort by any header and doesnt matter their origin local,usb,phone(ftp)
+
+
+----marking ftp files doesnt work i marked 3 files but all ftp files got marked also an already marked file had - from ftp it shows as marked but the - doesnt show in playlist
+
+
+
+-------------if files are on phone import then visualy only show in playlist name,size,duration ... but actualy the file isnt here until i accept the file importation
+
+
+
+
+
+
+
+info-BAR
+----------add an info-bar under the playlist that appears while two playlist items are selected or more, it shows their total duration and size and total of selected items
+
+
+
+
+
+
+
+
+SUBS
+---------------if a subtitle line is to long return to line, now it goes out of the screen space
+
+
+
+
+
+
+
+
+
+
+
+MARKING
+----gofile urls marking a video inside a folder causes some problems (all folder files getting marked or other things)
+
+
+
+
+
+
+
+LATE AUTOHIBERNATE
+----------for late autohibernate the timer should start from the active hour, now the counting starts from before if the idle threshold is 5 min and the activate hour is 7:00 and no actions is made before 7:00 once 7:00 hits the hibernate alert shows
+
+
+-----------also reduce late autohibernate timer to half if a video is playling or a manga in openned in case of sleep while watching or reading and add a toggle to turn it on or off
+
+
+----create late autohibernate profiles if i want to fast change from some settings to other settings
+
+
+
+
+
+
+
+
+METADATA
+-----ignore the male models for metadata 
+
+
+------for metadata linker renaming swap the day and month format to be like this DAY/MONTH/YEAR
+
+
+---fix nubiles scraping
+
+
+
+
+
+
+
+
+
+
+RENAMING
+-------for renaming using f2 it doesnt work when i change the text to the same text with capital letters example from "Eng" to "ENG" doesnt work the renaming doesnt work 
+
+
+----add option to revert renaming after renaming either using playlist rename f2 or metadata linker renaming
+
+
+
+
+
+
+
+
+RESTART	   
+-------pressing "à" now restarts video it should restart mangas and chapters too in read mode
+
+
+
+
+
+
+
+LOOPS
+------loops shouldnt be kept across videos
+
+
+
+
+
+
+
+
+
+MARKING
+--------lets revise the marking for videos if they are in "C:\GhostToolbox" or any of the sub folders move them to "C:\GhostToolbox\SEEN" and add the "-" at the beginning just like now but for files not in "C:\GhostToolbox" either in the hard disk or usbs or urls no moving should happen only the marking and adding the "-" and remembering it ALSO if a video has - at the start means they are MARKED
+
+
+----sometimes marking isnt saved for some files from my usb after i close and reopen the app
+
+
+------marking a file after using metadatalinker renaming on it brings back the original name and once the metadata linker rename is redone again the "-" at the start doesnt show but the file is still marked
+
+
+
+-----if a file from a saved playlist isnt found at the location where he originaly was check the SEEN folder 
+
+
+
+
+
+
+
+
+ANALYSE FOLDER
+-----make analyse folder  analyse all these folders and their sub folders C:\GhostToolbox and F:\ and D:\Br and C:\TORRENT\S\ERO and make it only detect videos and for relinking add the new folders to the relinking too
+
+
+
+
+
+
+
+
+		
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+----------I DELETED brave-automation-tool (5gb) by mistake and all urls (bunkr,gofile,fileditch,pixeldrain,watchporn...) dont work in playlist can we make them work without it
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

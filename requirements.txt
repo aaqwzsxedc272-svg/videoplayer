@@ -1,0 +1,9 @@
+PyQt6>=6.11,<6.12
+PyQt6-WebEngine>=6.11,<6.12
+opencv-python
+Pillow
+pymupdf
+numpy
+requests
+yt-dlp>=2026.02.09
+send2trash

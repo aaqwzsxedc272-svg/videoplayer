@@ -1,0 +1,104 @@
+{
+  "auto_hibernate_enabled": false,
+  "hibernate_timeout_minutes": 30,
+  "late_night_hibernate_enabled": true,
+  "late_night_hibernate_hour": 6,
+  "late_night_hibernate_end_hour": 12,
+  "late_night_idle_minutes": 10,
+  "late_night_half_timeout_when_media_open": true,
+  "late_night_profiles": {
+    "Default": {
+      "late_night_hibernate_enabled": true,
+      "late_night_hibernate_hour": 3,
+      "late_night_hibernate_end_hour": 6,
+      "late_night_idle_minutes": 5,
+      "late_night_half_timeout_when_media_open": true
+    },
+    "ZZZZZZ": {
+      "late_night_hibernate_enabled": false,
+      "late_night_hibernate_hour": 7,
+      "late_night_hibernate_end_hour": 12,
+      "late_night_idle_minutes": 55,
+      "late_night_half_timeout_when_media_open": false
+    },
+    "ACCIDENT": {
+      "late_night_hibernate_enabled": true,
+      "late_night_hibernate_hour": 6,
+      "late_night_hibernate_end_hour": 12,
+      "late_night_idle_minutes": 10,
+      "late_night_half_timeout_when_media_open": true
+    }
+  },
+  "late_night_active_profile": "ACCIDENT",
+  "subtitle_y_offset": 100,
+  "subtitle_font_size": 24,
+  "subtitle_color": "#FFFFFF",
+  "subtitle_font": "Arial",
+  "subtitle_bg": false,
+  "zoom_level": 1.0,
+  "image_fit_expanded": false,
+  "preview_trigger_mode": "click",
+  "show_hours_for_long_media": false,
+  "auto_add_copied_links": false,
+  "restore_last_session_enabled": false,
+  "privacy_lock_enabled": false,
+  "pdf_dark_mode": true,
+  "pdf_dark_level": 2,
+  "read_mode_extra_folders": [],
+  "enable_pdf_edge_triggers": false,
+  "analyse_folders": [
+    {
+      "path": "C:\\GhostToolbox",
+      "active": true,
+      "builtin": true
+    },
+    {
+      "path": "F:\\\\",
+      "active": true,
+      "builtin": true
+    },
+    {
+      "path": "D:\\Br",
+      "active": true,
+      "builtin": true
+    },
+    {
+      "path": "C:\\TORRENT\\S\\ERO",
+      "active": true,
+      "builtin": true
+    },
+    {
+      "phone_folder": "P",
+      "active": false,
+      "builtin": true
+    },
+    {
+      "path": "C:\\Users\\Mouad\\Downloads",
+      "active": false
+    },
+    {
+      "phone_folder": "ftp://mou:mou@192.168.1.9:9999/snaptube/download/",
+      "active": false
+    },
+    {
+      "phone_folder": "ftp://mou:mou@192.168.1.9:9999/M/",
+      "active": false
+    }
+  ],
+  "ftp_creds": {
+    "ip": "192.168.1.9",
+    "port": "9999",
+    "user": "mou",
+    "password": "mou",
+    "regular_ip": "192.168.1.9",
+    "hotspot_ip": ""
+  },
+  "gofile_extraction_method": "browser",
+  "manga_page_zooms": {},
+  "time_display_mode": "remaining",
+  "link_flow_panel_size": [
+    711,
+    451
+  ],
+  "pdf_dark_level_last_nonzero": 2
+}
