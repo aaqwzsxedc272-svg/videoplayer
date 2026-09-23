@@ -7567,6 +7567,7 @@ class RemoteDownloadWorker(QThread):
 
 
 class VideoPlayer(QMainWindow):
+    battery_ready = pyqtSignal(str)
     # How long the scene cover stays on screen in the hover card before the
     # clip takes over. Buffering runs during the hold, so this is purely how
     # long the cover is visible, not added latency before the clip.
@@ -9042,6 +9043,7 @@ class VideoPlayer(QMainWindow):
             'QLabel { background:transparent; color:#3a8ee6; '
             'padding:2px 6px; font-size:11px; font-weight:bold; }')
         self._battery_levels = {}
+        self.battery_ready.connect(self.apply_audio_battery)
         self._battery_refresh_timer = QTimer(self)
         self._battery_refresh_timer.setInterval(60000)
         self._battery_refresh_timer.timeout.connect(self._refresh_audio_battery)
@@ -58209,14 +58211,13 @@ try {
         def _work():
             levels = _bluetooth_battery_levels()
             try:
-                from PyQt6.QtCore import Q_ARG
-                QMetaObject.invokeMethod(
-                    self, 'apply_audio_battery',
-                    Qt.ConnectionType.QueuedConnection,
-                    Q_ARG(str, json.dumps(levels)),
-                )
-            except Exception:
-                pass
+                # A queued signal is reliable across the worker/GUІ thread
+                # boundary.  The previous invokeMethod path could silently
+                # fail on Windows PyQt, leaving discovery successful but the
+                # label permanently hidden.
+                self.battery_ready.emit(json.dumps(levels))
+            except Exception as exc:
+                print(f'[BATTERY] UI dispatch failed: {exc}', flush=True)
 
         try:
             self.thread_pool.submit(_work)
