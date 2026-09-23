@@ -7615,10 +7615,75 @@ class RemoteDownloadWorker(QThread):
             except Exception:
                 continue
 
+    def _download_mega(self):
+        """Decrypt a public mega.nz file. The page URL is not the video."""
+        import mega_client
+        file_id = str(self.variant.get('mega_file_id') or '').strip()
+        file_key = str(self.variant.get('mega_file_key') or '').strip()
+        folder_id = str(self.variant.get('mega_folder_id') or '').strip()
+        folder_key = str(self.variant.get('mega_folder_key') or '').strip()
+        source_url = str(self.variant.get('source_url') or self.variant.get('playback_url') or '')
+        link = mega_client.parse_mega_url(source_url) if source_url else None
+        if link and link.kind == 'file':
+            file_id = file_id or link.file_id
+            file_key = file_key or link.file_key
+        elif link and link.kind == 'folder_file':
+            file_id = file_id or link.node_id
+            folder_id = folder_id or link.folder_id
+            folder_key = folder_key or link.folder_key
+        if file_id and not file_key and folder_id and folder_key:
+            rec = mega_client.describe(mega_client.MegaLink(
+                'folder_file', folder_id=folder_id, folder_key=folder_key,
+                node_id=file_id))
+            file_key = str(rec.get('key') or '')
+            file_id = str(rec.get('id') or file_id)
+        if not file_id or not file_key:
+            raise mega_client.MegaError('MEGA link is missing its decryption key')
+
+        def _progress(done, total):
+            self._pause_event.wait()
+            if self._cancelled:
+                raise mega_client.MegaError('Download cancelled')
+            self._wait_for_disk_space(0, max(0, int(total or 0) - int(done or 0)))
+            self.signals.progress.emit(self.job_id, int(done or 0), int(total or 0))
+
+        path = mega_client.download_file(
+            file_id,
+            file_key,
+            self.dest_dir,
+            filename=str(self.variant.get('title') or ''),
+            progress=_progress,
+            cancel=lambda: self._cancelled,
+            folder_id=folder_id,
+        )
+        sub_id = str(self.variant.get('mega_subtitle_id') or '').strip()
+        sub_key = str(self.variant.get('mega_subtitle_key') or '').strip()
+        if sub_id and sub_key:
+            try:
+                sub_path = mega_client.download_file(
+                    sub_id, sub_key, os.path.dirname(path),
+                    cancel=lambda: self._cancelled,
+                    folder_id=folder_id,
+                )
+                ext = os.path.splitext(sub_path)[1] or '.srt'
+                wanted = os.path.join(
+                    os.path.dirname(path),
+                    os.path.splitext(os.path.basename(path))[0] + ext)
+                if (os.path.normcase(os.path.abspath(sub_path))
+                        != os.path.normcase(os.path.abspath(wanted))
+                        and not os.path.exists(wanted)):
+                    os.replace(sub_path, wanted)
+                    mega_client._remember_download(os.path.dirname(path), sub_id, wanted)
+            except Exception as exc:
+                print(f'[MEGA] subtitle skipped: {exc}', flush=True)
+        return path
+
     def run(self):
         try:
             os.makedirs(self.dest_dir, exist_ok=True)
-            if self.variant.get('use_ytdlp_download'):
+            if self.variant.get('use_mega_download'):
+                out_path = self._download_mega()
+            elif self.variant.get('use_ytdlp_download'):
                 out_path = self._download_ytdlp()
             else:
                 out_path = self._download_direct()
@@ -7626,6 +7691,8 @@ class RemoteDownloadWorker(QThread):
             self.signals.progress.emit(self.job_id, 100, 100)
             self.signals.done.emit(self.job_id, out_path)
         except Exception as exc:
+            if self.variant.get('use_mega_download'):
+                print(f'[MEGA] download failed: {exc}', flush=True)
             self.signals.error.emit(self.job_id, str(exc))
 
 
@@ -23565,7 +23632,7 @@ try {
         # Probing it with HTTP HEAD will always return 0 and would then wipe
         # the saved duration.  Skip the probe; duration will be set once MPV
         # actually plays the file and emits durationChanged.
-        if cached.get('use_mpv_ytdl'):
+        if cached.get('use_mpv_ytdl') or cached.get('use_mega_download'):
             return
         pending = getattr(self, '_remote_duration_probe_pending', set())
         if file_path in pending:
@@ -26816,7 +26883,9 @@ try {
             return []
         urls = []
         seen = set()
-        for match in re.findall(r'https?://[^\s<>"\']+', str(text)):
+        # Stop at ']' so a markdown [url](url) paste is two links, not one
+        # string that swallows the fragment. mega.nz keeps its key there.
+        for match in re.findall(r'https?://[^\s<>"\'\]]+', str(text)):
             candidate = self._sanitize_url(match.rstrip('.,);]>`'))
             if not candidate:
                 continue
@@ -37745,9 +37814,9 @@ try {
         return host == 'ok.ru' or host == 'm.ok.ru' or host.endswith('.ok.ru')
 
     def _is_ytdlp_preferred_host(self, host):
-        # mega.nz is intentionally excluded here: it requires client-side
-        # decryption and cannot be streamed via mpv's built-in yt-dlp hook.
-        # It is handled by _resolve_mega_source (download-then-play path).
+        # mega.nz is intentionally excluded here: the file is AES-encrypted
+        # and the key is in the URL fragment. _resolve_mega_source downloads
+        # and decrypts it. mpv's yt-dlp hook has no mega extractor.
         host = str(host or '').lower()
         return any(token in host for token in (
             'beeg.',
@@ -39209,72 +39278,189 @@ try {
         host = str(host or '').lower()
         return 'mega.nz' in host or 'mega.co.nz' in host
 
-    def _resolve_mega_source(self, source_url):
-        """
-        Resolve a mega.nz file link.
-
-        mega.nz files are AES-encrypted and the key lives in the URL fragment,
-        so direct HTTP streaming is impossible.  yt-dlp can decrypt and
-        download them (when megasdkc or the built-in mega extractor is
-        available), so we mark the result as a download-then-play job.
-        """
-        import subprocess, json, sys
-        title = self._clean_remote_title(
-            self._playlist_display_name(source_url)
-        ) or 'mega_file'
-        cmd = [
-            *_yt_dlp_command_prefix(),
-            '-J', '--no-warnings', '--no-playlist',
-            '--socket-timeout', '20',
-            source_url,
-        ]
-        startupinfo = None
-        if os.name == 'nt':
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        try:
-            res = subprocess.run(
-                cmd, capture_output=True, text=True, encoding='utf-8',
-                timeout=30, startupinfo=startupinfo,
-            )
-            if res.returncode == 0 and res.stdout:
-                info = json.loads(res.stdout)
-                if isinstance(info, dict):
-                    fetched_title = self._clean_remote_title(
-                        info.get('title') or info.get('fulltitle')
-                    )
-                    if fetched_title:
-                        title = fetched_title
-                    duration_ms = 0
-                    try:
-                        duration_ms = max(0, int(float(info.get('duration') or 0) * 1000))
-                    except Exception:
-                        pass
-                    # If yt-dlp resolved a direct URL, use it as a hint;
-                    # but we always force the download path because mega links
-                    # expire and cannot be range-requested for streaming.
-                    return {
-                        'playback_url': source_url,
-                        'download_url': source_url,
-                        'source_url': source_url,
-                        'title': title,
-                        'duration_ms': duration_ms,
-                        'use_ytdlp_download': True,
-                        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-                        'headers': {},
-                    }
-        except Exception as exc:
-            print(f"[mega] yt-dlp probe failed: {exc}")
-        # Fallback: still mark as a yt-dlp download job even without metadata.
+    def _mega_error_result(self, source_url, message):
+        print(f'[MEGA] {message}', flush=True)
         return {
             'playback_url': source_url,
-            'download_url': source_url,
             'source_url': source_url,
-            'title': title,
-            'use_ytdlp_download': True,
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'title': 'MEGA',
+            'use_mega_download': True,
+            'use_ytdlp_download': False,
+            'mega_error': str(message or 'Could not open that MEGA link'),
+            'resolver_provider': 'mega',
             'headers': {},
         }
+
+    def _mega_stream_seed(self, source_url, link, title=''):
+        seed = {
+            'source_url': source_url,
+            'playback_url': source_url,
+            'title': title or link.file_id or link.node_id or 'MEGA file',
+            'use_mega_download': True,
+            'use_ytdlp_download': False,
+            'resolver_provider': 'mega',
+            'headers': {},
+        }
+        if link.kind == 'file':
+            seed['mega_file_id'] = link.file_id
+            seed['mega_file_key'] = link.file_key
+        elif link.kind == 'folder_file':
+            seed['mega_file_id'] = link.node_id
+            seed['mega_folder_id'] = link.folder_id
+            seed['mega_folder_key'] = link.folder_key
+        return seed
+
+    def _prepare_mega_playlist_entries(self, source_url):
+        """Turn one mega.nz link into playlist rows. A folder becomes its files."""
+        import mega_client
+        link = mega_client.parse_mega_url(source_url)
+        if link is None:
+            return []
+        if link.kind == 'folder':
+            files = mega_client.list_folder(link.folder_id, link.folder_key)
+            playable = mega_client.playable_files(files)
+            subs = mega_client.subtitle_files(files)
+            entries = []
+            for item in playable:
+                file_url = mega_client.folder_file_url(
+                    link.folder_id, link.folder_key, item['id'])
+                entry = {
+                    'source_url': file_url,
+                    'playback_url': file_url,
+                    'title': item.get('name') or item['id'],
+                    'size_bytes': item.get('size') or 0,
+                    'size_text': mega_client.format_size(item.get('size') or 0),
+                    'use_mega_download': True,
+                    'use_ytdlp_download': False,
+                    'resolver_provider': 'mega',
+                    'mega_file_id': item['id'],
+                    'mega_file_key': item['key'],
+                    'mega_folder_id': link.folder_id,
+                    'mega_folder_key': link.folder_key,
+                    'headers': {},
+                }
+                sub = mega_client.match_subtitle(item, subs)
+                if sub:
+                    entry['mega_subtitle_id'] = sub['id']
+                    entry['mega_subtitle_key'] = sub['key']
+                entries.append(entry)
+            print(f'[MEGA] folder {link.folder_id} has {len(entries)} playable file(s)', flush=True)
+            return entries
+        entry = self._mega_stream_seed(source_url, link)
+        try:
+            rec = mega_client.describe(link)
+        except Exception as exc:
+            print(f'[MEGA] name lookup failed, the file can still download: {exc}', flush=True)
+            rec = None
+        if rec:
+            entry['title'] = rec.get('name') or entry['title']
+            entry['mega_file_id'] = rec.get('id') or entry.get('mega_file_id')
+            entry['mega_file_key'] = rec.get('key') or entry.get('mega_file_key')
+            entry['size_bytes'] = rec.get('size') or 0
+            entry['size_text'] = mega_client.format_size(rec.get('size') or 0)
+            print(f"[MEGA] {entry['title']} ({entry['size_text']})", flush=True)
+        return [entry]
+
+    def _install_mega_folder_entries(self, folder_url, entries, autoplay=False):
+        entries = [entry for entry in (entries or []) if isinstance(entry, dict) and entry.get('source_url')]
+        if not entries:
+            self.play_button.setEnabled(True)
+            self.show_osd('Could not read that MEGA folder', duration=4000)
+            return
+        playlist = list(getattr(self, 'playlist', []) or [])
+        if folder_url in playlist:
+            idx = playlist.index(folder_url)
+            del playlist[idx]
+            self.playlist = playlist
+            pw = getattr(self, 'playlist_widget', None)
+            if pw is not None and idx < pw.rowCount():
+                pw.removeRow(idx)
+        first = None
+        for entry in entries:
+            entry_url = self._remember_stream_album_entry(entry)
+            if not entry_url:
+                continue
+            self.add_video_to_playlist(entry_url, batch_mode=True)
+            if first is None:
+                first = entry_url
+        try:
+            self.apply_playlist_filtering()
+        except Exception:
+            pass
+        if autoplay and first:
+            self.set_media(first)
+            self._start_current_media_playback()
+            return
+        self.play_button.setEnabled(True)
+        self.show_osd(f'Added {len(entries)} file(s) from the MEGA folder', duration=2600)
+
+    def _resolve_mega_source(self, source_url):
+        """Download and decrypt a public mega.nz file. Never hand the page to mpv.
+
+        yt-dlp has no mega extractor, and the bytes on the CDN are AES-encrypted
+        with the key in the URL fragment. A folder link is expanded into its files.
+        """
+        print(f'[MEGA] opening {str(source_url)[:140]}', flush=True)
+        try:
+            import mega_client
+        except Exception as exc:
+            return self._mega_error_result(source_url, f'MEGA support failed to load: {exc}')
+        link = mega_client.parse_mega_url(source_url)
+        if link is None:
+            return self._mega_error_result(
+                source_url, 'That MEGA link is not a file or folder link I can open')
+        cached = {}
+        try:
+            cached = dict(getattr(self, '_stream_resolution_cache', {}).get(source_url, {}) or {})
+        except Exception:
+            cached = {}
+        if link.kind == 'folder':
+            try:
+                entries = self._prepare_mega_playlist_entries(source_url)
+            except Exception as exc:
+                print(f'[MEGA] folder list failed: {exc}', flush=True)
+                entries = []
+            return {
+                'playback_url': source_url,
+                'source_url': source_url,
+                'title': cached.get('title') or 'MEGA folder',
+                'use_mega_download': True,
+                'use_ytdlp_download': False,
+                'mega_is_folder': True,
+                'mega_folder_entries': entries,
+                'resolver_provider': 'mega',
+                'headers': {},
+            }
+        info = self._mega_stream_seed(
+            source_url, link, title=str(cached.get('title') or ''))
+        if cached.get('mega_file_key') and not info.get('mega_file_key'):
+            info['mega_file_key'] = cached.get('mega_file_key')
+        if cached.get('mega_file_id') and not info.get('mega_file_id'):
+            info['mega_file_id'] = cached.get('mega_file_id')
+        for key in ('mega_folder_id', 'mega_folder_key', 'mega_subtitle_id', 'mega_subtitle_key', 'size_bytes', 'size_text'):
+            if cached.get(key) and not info.get(key):
+                info[key] = cached.get(key)
+        needs_lookup = (
+            not info.get('mega_file_key')
+            or not info.get('title')
+            or info.get('title') in (info.get('mega_file_id'), 'MEGA file', 'mega_file')
+        )
+        if needs_lookup:
+            try:
+                rec = mega_client.describe(link)
+                info['title'] = rec.get('name') or info.get('title') or info.get('mega_file_id') or 'MEGA file'
+                info['mega_file_id'] = rec.get('id') or info.get('mega_file_id')
+                info['mega_file_key'] = rec.get('key') or info.get('mega_file_key')
+                info['size_bytes'] = rec.get('size') or info.get('size_bytes') or 0
+                info['size_text'] = mega_client.format_size(info.get('size_bytes') or 0)
+                print(f"[MEGA] {info['title']} ({info.get('size_text') or '?'})", flush=True)
+            except Exception as exc:
+                print(f'[MEGA] name lookup failed, downloading anyway: {exc}', flush=True)
+                if not info.get('title'):
+                    info['title'] = info.get('mega_file_id') or 'MEGA file'
+                if not info.get('mega_file_key'):
+                    return self._mega_error_result(source_url, str(exc))
+        return info
 
     def _resolve_streamtape_source(self, source_url):
         """
@@ -44987,6 +45173,9 @@ try {
             # (JWPROBE files=[], title 'Подробнее'). It has never found
             # a video there.
             and not self._is_ok_host(host)
+            # A mega.nz page is not a player. If the decrypt path failed,
+            # a capture browser cannot recover the file either.
+            and not self._is_mega_host(host)
         ):
             # R47 standing rule: a capture browser is NEVER shown on
             # screen. This path runs whenever every static resolver
@@ -45164,7 +45353,7 @@ try {
             # should bypass stale guard – otherwise a prior TLS failure
             # blocks the good manifest from being applied.
             'embed_hls_unpack', 'dood', 'fetchv_capture', 'javdock_capture',
-            'missav_capture', 'tulipvid',
+            'missav_capture', 'tulipvid', 'mega',
         }:
             print(f'[STREAM] Skipping stale re-apply for {source_url[:80]} — a load-failure retry is in progress')
             return
@@ -45212,6 +45401,20 @@ try {
         # directly — yt-dlp must download and decrypt the file first.
         # Kick off a background download to a temp dir; once done, load the
         # local file through the normal path.
+        if stream_info.get('use_mega_download'):
+            # The page URL is not a video. Decrypt into a local file, or
+            # expand a folder into its files. Do not fall through to yt-dlp.
+            if stream_info.get('mega_error'):
+                self.play_button.setEnabled(True)
+                self.show_osd(str(stream_info.get('mega_error')), duration=5000)
+                return True
+            if stream_info.get('mega_is_folder'):
+                self._install_mega_folder_entries(
+                    file_path, stream_info.get('mega_folder_entries') or [],
+                    autoplay=autoplay)
+                return True
+            self._download_and_play(file_path, stream_info, autoplay=autoplay)
+            return True
         if stream_info.get('use_ytdlp_download'):
             self._download_and_play(file_path, stream_info, autoplay=autoplay)
             return True
@@ -45548,7 +45751,18 @@ try {
                 self._playlist_display_name(source_url) or 'download'
         dest_dir = os.path.join(tempfile.gettempdir(), 'antigravity_player_temp_play')
         os.makedirs(dest_dir, exist_ok=True)
-        self.show_osd(f"Downloading: {title}…", duration=60000)
+        if stream_info.get('use_mega_download'):
+            workers = getattr(self, '_remote_download_workers', {}) or {}
+            for existing in workers.values():
+                try:
+                    same = str((existing.variant or {}).get('source_url') or '') == str(source_url)
+                    if same and existing.isRunning():
+                        self.show_osd(f"Already downloading: {title}", duration=2200)
+                        return
+                except Exception:
+                    continue
+        verb = "Downloading from MEGA" if stream_info.get('use_mega_download') else "Downloading"
+        self.show_osd(f"{verb}: {title}…", duration=60000)
         self.play_button.setEnabled(False)
 
         import time as _time
@@ -45564,7 +45778,8 @@ try {
                 return
             if total > 0:
                 pct = int(done * 100 / total)
-                self.show_osd(f"Downloading: {title}… {pct}%", duration=5000)
+                verb = "Downloading from MEGA" if variant.get('use_mega_download') else "Downloading"
+                self.show_osd(f"{verb}: {title}… {pct}%", duration=5000)
 
         def _on_done(jid, out_path):
             if jid != job_id:
@@ -45767,7 +45982,7 @@ try {
         roshy_title = self._clean_remote_title((entry or {}).get('roshy_title'))
         eporner_title = self._clean_remote_title((entry or {}).get('eporner_title'))
         cached = {}
-        for key in ('playback_url', 'headers', 'title', 'roshy_title', 'roshy_source_url', 'eporner_title', 'eporner_source_url', 'origin_page', 'duration_ms', 'content_type', 'gofile_file_id', 'size_bytes', 'size_text', 'pre_resolved_playback_url', 'resolver_provider', 'resolved_at_ms', 'use_mpv_ytdl', 'variants', 'subtitle_tracks', 'tls_verify'):
+        for key in ('playback_url', 'headers', 'title', 'roshy_title', 'roshy_source_url', 'eporner_title', 'eporner_source_url', 'origin_page', 'duration_ms', 'content_type', 'gofile_file_id', 'size_bytes', 'size_text', 'pre_resolved_playback_url', 'resolver_provider', 'resolved_at_ms', 'use_mpv_ytdl', 'use_mega_download', 'mega_file_id', 'mega_file_key', 'mega_folder_id', 'mega_folder_key', 'mega_subtitle_id', 'mega_subtitle_key', 'variants', 'subtitle_tracks', 'tls_verify'):
             if key not in (entry or {}):
                 continue
             value = entry.get(key)
@@ -46121,6 +46336,7 @@ try {
 
         roshy_entries = []
         eporner_entries = []
+        mega_entries = []
         remaining_urls = []
         for raw_url in urls:
             url = self._canonicalize_remote_source_url(self._sanitize_url(raw_url))
@@ -46150,10 +46366,30 @@ try {
                         if prepared_key:
                             existing_keys.add(prepared_key)
                     continue
+            elif self._is_mega_host(host):
+                # Read the name (and, for a folder, the file list) before the
+                # row is added. A failure still leaves the URL in the playlist
+                # so Play can try the download itself.
+                try:
+                    prepared_list = self._prepare_mega_playlist_entries(url)
+                except Exception as exc:
+                    print(f'[MEGA] {exc}', flush=True)
+                    prepared_list = []
+                if prepared_list:
+                    for prepared in prepared_list:
+                        prepared_key = self._playlist_remote_url_key(prepared.get('source_url'))
+                        if prepared_key and prepared_key in existing_keys:
+                            print(f"[DUPLICATE] Skipped {prepared.get('source_url')} (already in playlist)")
+                            continue
+                        mega_entries.append(prepared)
+                        if prepared_key:
+                            existing_keys.add(prepared_key)
+                    continue
             remaining_urls.append(url)
 
         payload['prepared_entries'].extend(eporner_entries)
         payload['prepared_entries'].extend(roshy_entries)
+        payload['prepared_entries'].extend(mega_entries)
 
         mixed_entries, consumed_urls = self._mixed_remote_entries_from_urls(remaining_urls)
         for entry in mixed_entries:
