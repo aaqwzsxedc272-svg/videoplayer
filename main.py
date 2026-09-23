@@ -38764,6 +38764,11 @@ try {
                 _okru_title = self._okru_page_title(html, page_title)
                 if _okru_title and not str(_okru_title).strip().isdigit():
                     page_title = _okru_title
+                # Say what the row will be called. ok.ru serves no <title>,
+                # so when this reads back as the numeric id out of the url
+                # the name lookup has failed and the page needs a closer
+                # look -- otherwise the row just silently says "858843...".
+                print(f'[OKRU] page title: {page_title!r}', flush=True)
         except Exception:
             pass
 
@@ -58497,6 +58502,9 @@ try {
             # sitting on the picture for half a minute reads as a bug.
             # Hide it with the rest of the chrome, here, now.
             try:
+                if self.battery_label.isVisible():
+                    print('[BATTERY][UI] hiding the charge alongside the '
+                          'menubar for fullscreen', flush=True)
                 self.battery_label.setVisible(False)
             except Exception:
                 pass
