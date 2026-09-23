@@ -7637,6 +7637,14 @@ class VideoPlayer(QMainWindow):
     HOVER_PREVIEW_MEDIA_H = 190
 
     video_info_updated = pyqtSignal(str, float, float)
+    # Emitted from a resolver thread once a page has given up its title.
+    # Playlist rows are named from the resolution cache, and the resolver
+    # runs off the GUI thread -- so the row has to be redrawn through a
+    # queued signal, never by touching the widget directly. A direct
+    # setText from a worker appears to work and is then undone by the
+    # GUI thread's next paint, which is how a correct name came on
+    # screen for a second and then reverted to the numeric id.
+    row_metadata_refresh_requested = pyqtSignal(str)
     stream_resolved = pyqtSignal(str, object)
     remote_download_variants_ready = pyqtSignal(str, object)
     playback_quality_variants_ready = pyqtSignal(str, object, object)  # source_url, variants, global_pos
@@ -7961,6 +7969,8 @@ class VideoPlayer(QMainWindow):
         
         # Connect signals
         self.video_info_updated.connect(self.update_video_info)
+        self.row_metadata_refresh_requested.connect(
+            self._refresh_playlist_row_metadata)
         self.stream_resolved.connect(self._on_remote_stream_resolved)
         self.remote_download_variants_ready.connect(self._on_remote_download_variants_ready)
         self.playback_quality_variants_ready.connect(self._on_playback_quality_variants_ready)
@@ -38783,7 +38793,8 @@ try {
                         entry['title'] = page_title
                         _cache[source_url] = entry
                         self._stream_resolution_cache = _cache
-                        self._refresh_playlist_row_metadata(source_url)
+                        # Queued: the resolver is not the GUI thread.
+                        self.row_metadata_refresh_requested.emit(source_url)
                 except Exception:
                     pass
         except Exception:
@@ -47349,12 +47360,28 @@ try {
         quality_text = self._playlist_quality_text(file_path)
         size_text = self._playlist_size_text(file_path)
         display_name = self._playlist_display_name(file_path)
+        _remote_row = False
+        try:
+            _remote_row = bool(self._is_remote_url(file_path))
+        except Exception:
+            _remote_row = False
         for row in rows:
             name_item = self.playlist_widget.item(row, 0)
             duration_item = self.playlist_widget.item(row, 1)
             size_item = self.playlist_widget.item(row, 2)
             quality_item = self.playlist_widget.item(row, 3)
             if name_item:
+                # Only on a change, and only for remote rows: a name that
+                # arrives and is then replaced is invisible otherwise, and
+                # it is what turned a resolved title back into the numeric
+                # id out of the url.
+                try:
+                    if _remote_row and name_item.text() != display_name:
+                        print(f'[PLAYLIST][NAME] {file_path} : '
+                              f'{name_item.text()!r} -> {display_name!r}',
+                              flush=True)
+                except Exception:
+                    pass
                 name_item.setText(display_name)
                 name_item.setData(PLAYLIST_SEARCH_ROLE, display_name.lower())
             if duration_item:
