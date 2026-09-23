@@ -29786,6 +29786,10 @@ try {
         playback_url = self._canonicalize_remote_source_url(self._sanitize_url(playback_url))
         if not playback_url or not self._is_remote_url(playback_url):
             return playback_url
+        _pu = urlparse(playback_url)
+        if ('okcdn.ru' in (_pu.netloc or '').lower()
+                and (_pu.path or '').lower().rstrip('/').endswith('/video')):
+            return playback_url
         if not self._ensure_local_hls_proxy_server():
             return playback_url
 
