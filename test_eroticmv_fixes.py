@@ -18,6 +18,7 @@ import os
 import re
 import threading
 import time
+import inspect
 from html import unescape as html_unescape
 from urllib.parse import urlparse, unquote, urljoin, urlunparse, parse_qs
 
@@ -13093,6 +13094,20 @@ report(_t132._okru_page_title('', 'fallback') == 'fallback'
 report(_t132._okru_page_title(
     '<div data-options=\'{"title":"Just a moment"}\'>', 'fallback') == 'fallback',
    'an anti-bot challenge title is still refused')
+
+
+# 134. ok.ru does not always serve the rendition list. The same video has
+#      answered with two candidates on one request and twelve on the next
+#      -- 8577325992603 failed this way and later played from an identical
+#      page -- so a page carrying no real rendition is worth asking for
+#      again rather than being written off as a dead video.
+_okru_detector134 = lift('VideoPlayer', '_detect_voe_and_resolve')
+_sig134 = inspect.signature(_okru_detector134)
+report('_okru_retry' in _sig134.parameters
+       and _sig134.parameters['_okru_retry'].default == 0,
+   'the ok.ru page lookup takes a retry counter, defaulting to no retries '
+   '-- an unbounded one would recurse forever on a dud page',
+   str(_sig134))
 
 
 # 133. A field log showed ~59 PowerShell probes in one session. Qt

@@ -38537,7 +38537,7 @@ try {
             'source_url':   source_url,
         }
 
-    def _detect_voe_and_resolve(self, source_url):
+    def _detect_voe_and_resolve(self, source_url, _okru_retry=0):
         """
         Content-based VOE detection for white-label / mirror domains that are
         NOT in _is_voe_host (e.g. javlesbians.com, any future undiscovered mirror).
@@ -38856,6 +38856,20 @@ try {
                     list(mp4_urls) + list(hls_urls), page_url)
                 _codes = sorted({str(a[0]) for a in (_answers or [])
                                  if a and a[0]})
+                # ok.ru does not always serve the rendition list. The
+                # same video has answered with two candidates on one
+                # request and twelve on the next -- 8577325992603 failed
+                # exactly this way and later played from an identical
+                # page. A two-candidate page carries the preview-host url
+                # and one refused manifest and nothing else, so it is a
+                # dud *response* rather than a dud video, and asking
+                # again is worth more than the few seconds it costs.
+                if _okru_retry < 2 and len(mp4_urls) <= 1:
+                    print('[VOE-mirror] OK.ru: this page carries no real '
+                          f'rendition -- asking again '
+                          f'({_okru_retry + 1}/2)', flush=True)
+                    return self._detect_voe_and_resolve(
+                        source_url, _okru_retry=_okru_retry + 1)
                 print('[VOE-mirror] OK.ru: nothing on the page answered -- '
                       f'{len(mp4_urls) + len(hls_urls)} signed url(s), '
                       f'HTTP {"/".join(_codes) or "?"} from every one. '
