@@ -58278,15 +58278,10 @@ try {
                     best_score = score
                     percent = value
                     device = name
-        if percent is None:
-            for name, value in levels.items():
-                if self._is_headphone_like_device(name):
-                    percent = value
-                    device = name
-                    break
         if percent is None and levels:
-            # Do not display another headset's charge while Qt is still
-            # switching endpoints. Retry after the audio device settles.
+            # Never use a different paired headset as a fallback.  Qt can
+            # report the old endpoint briefly while it switches outputs; the
+            # only safe action is to wait and match again after it settles.
             try: QTimer.singleShot(1500, self._refresh_audio_battery)
             except Exception: pass
         if percent is None:
@@ -58305,6 +58300,8 @@ try {
         self.battery_label.setText(f'\U0001F50B {percent}%')
         self.battery_label.setToolTip(
             f'{device or "Audio device"} battery: {percent}%')
+        print(f'[BATTERY][UI] selected={current or "<unknown>"} '
+              f'matched={device or "<unknown>"} value={percent}%', flush=True)
         self.battery_label.setStyleSheet(
             'QLabel { background:transparent; color:' + color + '; '
             'padding:2px 6px; font-size:11px; font-weight:bold; }')

@@ -12134,9 +12134,9 @@ report(_st114.battery_label.text == '\U0001F50B 78%',
 
 _st114 = _BatStub114('Speakers (Realtek Audio)')
 _st114.apply_audio_battery(json.dumps({'airpods pro': 62}))
-report(_st114.battery_label.text == '\U0001F50B 62%',
-   'and when the selected output reports no charge at all, a headphone-like '
-   'device is used rather than showing nothing',
+report(not _st114.battery_label.shown,
+   'and when the selected output has no matching charge, another paired '
+   'headset is not shown as a fallback',
    repr(_st114.battery_label.text))
 
 _st114 = _BatStub114('Speakers (Realtek Audio)')
