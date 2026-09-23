@@ -14,14 +14,15 @@ function Emit($m) { [Console]::Out.WriteLine($m) }
 # directly and only use the older WinRT ladder if this returns nothing.
 try {
     $bt = @()
-    foreach ($dev in @(Get-PnpDevice -PresentOnly -Class Bluetooth -ErrorAction SilentlyContinue)) {
+    foreach ($dev in @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue)) {
         try {
             $prop = Get-PnpDeviceProperty -InstanceId $dev.InstanceId -KeyName '{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2' -ErrorAction SilentlyContinue
             if ($prop -and $null -ne $prop.Data) {
                 $name = [string]$dev.FriendlyName
                 $value = $prop.Data
-                if ($name -and ([double]::TryParse([string]$value, [Globalization.NumberStyles]::Any, [Globalization.CultureInfo]::InvariantCulture, [ref]$null))) {
-                    Emit (@($name, $value) -join "`t")
+                try { $number = [double]$value } catch { $number = -1 }
+                if ($name -and $number -ge 0 -and $number -le 100) {
+                    Emit (@($name, $number) -join "`t")
                     $bt += $name
                 }
             }
