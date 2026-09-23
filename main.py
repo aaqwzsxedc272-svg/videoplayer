@@ -4401,9 +4401,13 @@ class MpvMediaPlayerAdapter(QObject):
                 _target_path = _target_parsed.path.lower().rstrip('/')
                 _is_direct_stream = (_target_path.endswith(('.m3u8', '.m3u', '.mpd')) or ('okcdn.ru' in _target_parsed.netloc.lower()) and _target_path.endswith('/video'))
                 _target_host = _target_parsed.netloc.lower()
-                if 'okcdn.ru' in _target_host:
-                    # OK.ru's CDN presents a certificate mpv/FFmpeg rejects
-                    # before it can use the browser-equivalent progressive URL.
+                if 'okcdn.ru' in _target_host or 'vkuser.net' in _target_host:
+                    # OK.ru's CDNs present a certificate mpv/FFmpeg rejects
+                    # (tls 0A000086). The progressive files are on okcdn;
+                    # the signed manifest is on vkuser.net. The first load
+                    # of that manifest always fails the check, and the
+                    # verify-off retry then sits there until something else
+                    # is pasted. Start with the check off.
                     self._tls_verify = False
                     self._apply_tls_verify_option()
                 elif 'eporner' in _target_host:
@@ -23073,18 +23077,106 @@ try {
                 self.media_player.setPosition(0)
                 self.show_osd("Restarted Video")
 
+    def _play_click_should_pause(self):
+        """Pause only when a picture is actually up.
+
+        play() reports PlayingState immediately, including while a signed
+        manifest is still opening. A play click in that state used to
+        pause the load, so the button looked dead and the picture arrived
+        only when another link was pasted.
+        """
+        try:
+            if self.media_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+                return False
+            return bool(getattr(self.media_player, '_file_loaded', False))
+        except Exception:
+            return False
+
+    def _nudge_unloaded_remote(self, file_path):
+        """A click on a remote row that has not opened a picture yet.
+
+        Returns True if the click was handled. An open that is already in
+        flight is not aborted and not paused: aborting it is the
+        reason=stop click, and pausing it is the play-button click that
+        did nothing. A load that already failed is replayed from the url
+        we have, with the certificate check off, instead of asking the
+        page again — that ask returned the same dud page every time.
+        """
+        try:
+            if not self._is_remote_url(file_path):
+                return False
+            if getattr(self, 'current_file', None) != file_path:
+                return False
+            if file_path in getattr(self, '_remote_stream_resolve_pending', set()):
+                self._remote_autoplay_after_resolve.add(file_path)
+                self.show_osd("Resolving stream URL...", duration=1500)
+                return True
+            player = self.media_player
+            if getattr(player, '_file_loaded', False):
+                return False
+            cached = dict((getattr(self, '_stream_resolution_cache', {}) or {}).get(file_path) or {})
+            url = str(cached.get('playback_url') or '').strip()
+            status = getattr(player, '_status', None)
+            loading = status == QMediaPlayer.MediaStatus.LoadingMedia
+            state = player.playbackState()
+            if url and loading and state != QMediaPlayer.PlaybackState.StoppedState:
+                try:
+                    player.play()
+                except Exception:
+                    pass
+                try:
+                    self.play_button.setIcon(self.style().standardIcon(
+                        QStyle.StandardPixmap.SP_MediaPause))
+                except Exception:
+                    pass
+                try:
+                    if self._is_ok_host(urlparse(file_path).netloc or ''):
+                        print('[OKRU] click while the stream has not opened'
+                              ' — not pausing it', flush=True)
+                except Exception:
+                    pass
+                return True
+            if not url:
+                return False
+            try:
+                if self._is_ok_host(urlparse(file_path).netloc or ''):
+                    print('[OKRU] click while nothing opened — reloading '
+                          'the stream with the certificate check off',
+                          flush=True)
+            except Exception:
+                pass
+            cached['tls_verify'] = False
+            try:
+                player.note_tls_untrusted_host(url)
+            except Exception:
+                pass
+            last = getattr(self, '_last_stream_apply', None)
+            if isinstance(last, dict):
+                last.pop(file_path, None)
+            retry = getattr(self, '_remote_playback_retry_state', None)
+            if isinstance(retry, dict):
+                retry.pop(file_path, None)
+            self._apply_resolved_remote_stream(file_path, cached, autoplay=True)
+            return True
+        except Exception:
+            return False
+
     def play_video(self):
         self._release_post_hibernate_media_gate()
-        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+        if self._play_click_should_pause():
             self.media_player.pause()
             self.play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-        else:
-            replay_path = getattr(self, '_stopped_media_path', None)
-            if not getattr(self, 'current_file', None) and replay_path and self._playlist_entry_available(replay_path):
-                self._skip_resume_once_for = replay_path
-                self.set_media(replay_path)
-                self._stopped_media_path = None
-            self._start_current_media_playback()
+            return
+        current = getattr(self, 'current_file', None)
+        if current and not getattr(self.media_player, '_file_loaded', False):
+            if self._nudge_unloaded_remote(current):
+                return
+        replay_path = getattr(self, '_stopped_media_path', None)
+        if not getattr(self, 'current_file', None) and replay_path and self._playlist_entry_available(replay_path):
+            self._skip_resume_once_for = replay_path
+            self.set_media(replay_path)
+            self._stopped_media_path = None
+        self._start_current_media_playback()
 
     def _start_current_media_playback(self):
         self._release_post_hibernate_media_gate()
@@ -38990,10 +39082,10 @@ try {
                 # Asking the page again has turned this exact shape into
                 # a full rendition list. Do it before committing to the
                 # manifest.
-                if _okru_retry < 2 and len(mp4_urls) <= 1:
+                if _okru_retry < 1 and len(mp4_urls) <= 1:
                     print('[VOE-mirror] OK.ru: this page carries no real '
                           f'rendition -- asking again '
-                          f'({_okru_retry + 1}/2)', flush=True)
+                          f'({_okru_retry + 1}/1)', flush=True)
                     return self._detect_voe_and_resolve(
                         source_url, _okru_retry=_okru_retry + 1)
                 print('[VOE-mirror] OK.ru: no progressive rendition '
@@ -39022,10 +39114,10 @@ try {
                 # and one refused manifest and nothing else, so it is a
                 # dud *response* rather than a dud video, and asking
                 # again is worth more than the few seconds it costs.
-                if _okru_retry < 2 and len(mp4_urls) <= 1:
+                if _okru_retry < 1 and len(mp4_urls) <= 1:
                     print('[VOE-mirror] OK.ru: this page carries no real '
                           f'rendition -- asking again '
-                          f'({_okru_retry + 1}/2)', flush=True)
+                          f'({_okru_retry + 1}/1)', flush=True)
                     return self._detect_voe_and_resolve(
                         source_url, _okru_retry=_okru_retry + 1)
                 print('[VOE-mirror] OK.ru: nothing on the page answered -- '
@@ -45153,6 +45245,7 @@ try {
                         proxied_last
                         and current_source == proxied_last
                         and current_state != QMediaPlayer.PlaybackState.StoppedState
+                        and getattr(self.media_player, '_file_loaded', False)
                     )
                 except Exception:
                     still_active = False
@@ -45415,6 +45508,15 @@ try {
         }
         self._last_stream_apply = last_apply
         self._apply_media_request_headers(request_headers)
+        try:
+            _tls_host = (urlparse(str(playback_target or '')).netloc or '').lower()
+        except Exception:
+            _tls_host = ''
+        if 'vkuser.net' in _tls_host or 'okcdn.ru' in _tls_host:
+            # Same certificate mpv rejects on the first try. Do not wait
+            # for that failure: the verify-off retry is the load that
+            # sits there until another link is pasted.
+            stream_info['tls_verify'] = False
         try:
             self.media_player.setTlsVerify(stream_info.get('tls_verify', True))
         except Exception:
@@ -48342,23 +48444,14 @@ try {
                 return False
             if file_path in getattr(self, '_remote_stream_resolve_pending', set()):
                 return True
-            # A load that already failed is not in flight. The TLS retry
-            # of a dud HLS manifest sits in PlayingState for minutes
-            # without a picture, and every double-click during that was
-            # swallowed. The click is the user saying that retry is not
-            # getting anywhere.
-            _retry = getattr(self, '_remote_playback_retry_state', {})
-            if isinstance(_retry, dict) and _retry.get(file_path):
+            # PlayingState is set the moment play() is called, before a
+            # picture exists. Murmur of the Heart sat there: the play
+            # button paused it, and the row click was treated as "already
+            # playing". Only a file that has actually opened is kept.
+            if not getattr(self.media_player, '_file_loaded', False):
                 return False
             state = self.media_player.playbackState()
-            if state != QMediaPlayer.PlaybackState.PlayingState:
-                return False
-            status = self.media_player.mediaStatus()
-            return status in (
-                QMediaPlayer.MediaStatus.LoadedMedia,
-                QMediaPlayer.MediaStatus.BufferedMedia,
-                QMediaPlayer.MediaStatus.BufferingMedia,
-            )
+            return state == QMediaPlayer.PlaybackState.PlayingState
         except Exception:
             return False
 
@@ -48382,6 +48475,8 @@ try {
                 # with reason=stop, and it looked like the click did
                 # nothing. Leave it alone.
                 self._start_current_media_playback()
+            elif self._nudge_unloaded_remote(file_path):
+                return
             else:
                 # A failed load still has its bad url in the cache. stop()
                 # raises loadFailed before set_media runs, and that handler

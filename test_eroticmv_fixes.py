@@ -13368,20 +13368,21 @@ class _Keep136(object):
     _keep_in_flight_remote_playback = lift(
         'VideoPlayer', '_keep_in_flight_remote_playback')
 
-    def __init__(self, state, status, retry=None, pending=False):
+    def __init__(self, state, status, retry=None, pending=False, loaded=False):
         self.current_file = 'https://ok.ru/video/8512056593051'
         self._remote_playback_retry_state = retry or {}
         self._remote_stream_resolve_pending = (
             {self.current_file} if pending else set())
-        self.media_player = _Keep136._Player(state, status)
+        self.media_player = _Keep136._Player(state, status, loaded)
 
     def _is_remote_url(self, path):
         return str(path).startswith('http')
 
     class _Player(object):
-        def __init__(self, state, status):
+        def __init__(self, state, status, loaded=False):
             self._state = state
             self._status = status
+            self._file_loaded = bool(loaded)
         def playbackState(self):
             return self._state
         def mediaStatus(self):
@@ -13393,7 +13394,7 @@ _hung136 = _Keep136('playing', 'buffering',
                     retry={_url136: {'tls_retry_tried': True}})
 report(not _hung136._keep_in_flight_remote_playback(_url136),
        'a double-click during a failed ok.ru load is not swallowed')
-_playing136 = _Keep136('playing', 'loaded')
+_playing136 = _Keep136('playing', 'loaded', loaded=True)
 report(_playing136._keep_in_flight_remote_playback(_url136),
        'a double-click does not restart a video that is actually playing')
 _loading136 = _Keep136('playing', 'loading')
@@ -13433,6 +13434,34 @@ report('_had_load_failure' in _src136
        and '_user_abandoned_playback' in _src136,
        'a failed stream is dropped from the cache so the click re-asks the page')
 
+
+
+class _Pause136(object):
+    _play_click_should_pause = lift('VideoPlayer', '_play_click_should_pause')
+
+    def __init__(self, state, loaded):
+        self.media_player = self._P(state, loaded)
+
+    class _P(object):
+        def __init__(self, state, loaded):
+            self._state = state
+            self._file_loaded = loaded
+        def playbackState(self):
+            return self._state
+
+
+report(not _Pause136('playing', False)._play_click_should_pause(),
+       'a play click does not pause a stream that has not opened')
+report(_Pause136('playing', True)._play_click_should_pause(),
+       'a play click pauses a video that is actually on screen')
+report(not _Pause136('stopped', False)._play_click_should_pause(),
+       'a play click on a stopped row starts it')
+_src136b = open('main.py', encoding='utf-8').read()
+report("vkuser.net' in _target_host" in _src136b
+       or "vkuser.net' in _tls_host" in _src136b,
+       'an ok.ru manifest starts with the certificate check off')
+report('not pausing it' in _src136b,
+       'a click during an unopened load is logged instead of ignored')
 
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
