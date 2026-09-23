@@ -14,174 +14,99 @@ qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.3 LGPL version
 [video_backend] mpv renderer: native D3D11 window
 [SUBS] caption detection build 7 (page scan, subtitle endpoint, session warm-up, no-Referer retry logged)
 [PASSWORDS] Loaded 41 cached passwords from disk
-Auto-selecting headphones at startup: Headphones (Roseland TWS RE-500 Stereo)
-Switching audio to: Headphones (Roseland TWS RE-500 Stereo)
-[OKRU] https://ok.ru/video/16828443205345 -> yt-dlp
+No headphones detected at startup, using default audio output
+[BATTERY] Windows reported 0 device(s) with a charge
+[BATTERY]   pnp-direct=0
+[OKRU] https://ok.ru/video/8577325992603 -> yt-dlp
 [FAVICON] ok.ru: 6 declared icon(s) — https://ok.ru/favicon.svg
 [FAVICON] ok.ru: got site icon from https://ok.ru/favicon.svg
-[BATTERY] Windows reported 3 device(s) with a charge: [('itel t1neo hands-free ag', 10), ('musicman bt-x78 hands-free ag', 70), ('roseland tws re-500 hands-free ag', 100)]
-[BATTERY]   pnp-direct=3
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=100%
 [YTDLP] ok.ru: no info -- ERROR: the JSON object must be str, bytes or bytearray, not dict
 [YTDLP] ok.ru: that is yt-dlp's own Odnoklassniki extractor failing on the page it just downloaded, not this player and not the video. Nothing here can route around it -- run "pip install -U yt-dlp" once upstream lands a fix and ok.ru will start working again.
 [OKRU] yt-dlp found nothing; letting the rest of the ladder try
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=100%
 [COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
 [COOKIES] nothing for ['ok.ru', 'voe.sx', 'voe.ru'] in any browser profile either -- the yt-dlp module
 [COOKIES] No matching cookies found for domains=['ok.ru', 'voe.sx', 'voe.ru'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
-[OKRU] page title: 'XII Всероссийский онлайн-марафон «Ночь выборов»'
-[VOE-mirror] Decoded 1 HLS + 2 MP4 candidate(s) for https://ok.ru/video/16828443205345
-[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=20293455776481&type=36&idx=0&tkn=yLT12C7mF2WV8dkD9Ejn3xbvIgk
-[VOE-mirror] dropped 0 site promo(s) + 1 trailer/preview candidate(s) of 2
-[VOE-mirror] OK.ru: retrying the best 1 rendition(s) with browser-shaped headers
-[VOE-mirror] OK.ru: no progressive rendition answered, falling back to the signed HLS manifest
-[VOE-mirror] refused https://iv.okcdn.ru/id/20293455776481/type/36/video/ -> HTTP 404 (no content-type) | Server=Apache
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=100%
-[VOE-mirror] refused https://ok6-30.vkuser.net/video.m3u8?cmd=videoPlayerCdn&expires=1790272567199&srcIp=105.68.184.251&pr=30&srcAg=CHROME_MAC&ch=-536166974&ms=95.142.206.34&type=2&sig=JmftGWuHxSY&ct=8&urls=95.163.35.41%3B176.112.172.39&clientType=0&zs=65&id=20293455776481 -> HTTP 400 (no content-type) | 10
-[VOE-mirror] OK.ru: this page carries no real rendition -- asking again (1/2)
-[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
-[COOKIES] nothing for ['ok.ru', 'voe.sx', 'voe.ru'] in any browser profile either -- the yt-dlp module
-[COOKIES] No matching cookies found for domains=['ok.ru', 'voe.sx', 'voe.ru'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
-[OKRU] page title: 'XII Всероссийский онлайн-марафон «Ночь выборов»'
-[VOE-mirror] Decoded 1 HLS + 2 MP4 candidate(s) for https://ok.ru/video/16828443205345
-[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=20293455776481&type=36&idx=0&tkn=yLT12C7mF2WV8dkD9Ejn3xbvIgk
-[VOE-mirror] dropped 0 site promo(s) + 1 trailer/preview candidate(s) of 2
-[VOE-mirror] OK.ru: retrying the best 1 rendition(s) with browser-shaped headers
-[VOE-mirror] OK.ru: no progressive rendition answered, falling back to the signed HLS manifest
-[VOE-mirror] refused https://iv.okcdn.ru/id/20293455776481/type/36/video/ -> HTTP 404 (no content-type) | Server=Apache
-[VOE-mirror] refused https://ok6-30.vkuser.net/video.m3u8?cmd=videoPlayerCdn&expires=1790272580282&srcIp=105.68.184.251&pr=30&srcAg=CHROME_MAC&ch=-536166974&ms=95.142.206.34&type=2&sig=bIYAnotzFeU&ct=8&urls=95.163.35.41%3B176.112.172.39&clientType=0&zs=65&id=20293455776481 -> HTTP 400 (no content-type) | 10
-[VOE-mirror] OK.ru: this page carries no real rendition -- asking again (2/2)
-[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
-[COOKIES] nothing for ['ok.ru', 'voe.sx', 'voe.ru'] in any browser profile either -- the yt-dlp module
-[COOKIES] No matching cookies found for domains=['ok.ru', 'voe.sx', 'voe.ru'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=100%
-[VOE-mirror] curl_cffi fetch failed: Failed to perform, curl: (28) Operation timed out after 20005 milliseconds with 0 bytes received. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
-[OKRU] page title: 'XII Всероссийский онлайн-марафон «Ночь выборов»'
-[VOE-mirror] Decoded 1 HLS + 2 MP4 candidate(s) for https://ok.ru/video/16828443205345
-[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=20293455776481&type=36&idx=0&tkn=yLT12C7mF2WV8dkD9Ejn3xbvIgk
-[VOE-mirror] dropped 0 site promo(s) + 1 trailer/preview candidate(s) of 2
-[VOE-mirror] OK.ru: retrying the best 1 rendition(s) with browser-shaped headers
-[VOE-mirror] OK.ru: no progressive rendition answered, falling back to the signed HLS manifest
-[VOE-mirror] Resolved HLS: https://ok6-30.vkuser.net/video.m3u8?cmd=videoPlayerCdn&expires=1790272614118&sr
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=100%
-[PLAYLIST][INFO] path='https://ok.ru/video/16828443205345' rows=[0] duration='Stream' quality='Stream'
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=90%
-[OKRU] https://ok.ru/video/7334874843717 -> yt-dlp
-[YTDLP] ok.ru: no info -- ERROR: the JSON object must be str, bytes or bytearray, not dict
-[YTDLP] ok.ru: that is yt-dlp's own Odnoklassniki extractor failing on the page it just downloaded, not this player and not the video. Nothing here can route around it -- run "pip install -U yt-dlp" once upstream lands a fix and ok.ru will start working again.
-[OKRU] yt-dlp found nothing; letting the rest of the ladder try
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=90%
-[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
-[COOKIES] nothing for ['ok.ru', 'voe.sx', 'voe.ru'] in any browser profile either -- the yt-dlp module
-[COOKIES] No matching cookies found for domains=['ok.ru', 'voe.sx', 'voe.ru'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
-[OKRU] page title: 'John.Cleese.The Strange Case of the End of Civilization as We Know It'
-[VOE-mirror] Decoded 1 HLS + 10 MP4 candidate(s) for https://ok.ru/video/7334874843717
-[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=6652909521477&type=36&idx=0&tkn=cS4h2XJd6VCGI9y8JplejEunPE0
-[VOE-mirror] dropped 0 site promo(s) + 1 trailer/preview candidate(s) of 10
+[OKRU] page title: 'Deep End (1970) | Eng Subs'
+[VOE-mirror] Decoded 1 HLS + 12 MP4 candidate(s) for https://ok.ru/video/8577325992603
+[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=7348071762587&type=36&idx=0&tkn=n8Ch4T8wHrPJ4aIuGM7q2c9YEnc
+[VOE-mirror] dropped 0 site promo(s) + 1 trailer/preview candidate(s) of 12
 [VOE-mirror] OK.ru: retrying the best 3 rendition(s) with browser-shaped headers
-[VOE-mirror] Resolved MP4: https://vd423.okcdn.ru/?expires=1790272702541&srcIp=105.68.184.251&pr=10&srcAg=C
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=90%
-[PLAYLIST][INFO] path='https://ok.ru/video/7334874843717' rows=[1] duration='54:42' quality='0.03'
-[OKRU] https://ok.ru/video/7334874843717 -> yt-dlp
+[VOE-mirror] Resolved MP4: https://vd423.okcdn.ru/?expires=1790275712864&srcIp=105.68.184.251&pr=10&srcAg=C
+[PLAYLIST][INFO] path='https://ok.ru/video/8577325992603' rows=[0] duration='Stream' quality='Stream'
+[OKRU] https://ok.ru/video/8577325992603 -> yt-dlp
 [YTDLP] ok.ru: no info -- ERROR: the JSON object must be str, bytes or bytearray, not dict
 [YTDLP] ok.ru: that is yt-dlp's own Odnoklassniki extractor failing on the page it just downloaded, not this player and not the video. Nothing here can route around it -- run "pip install -U yt-dlp" once upstream lands a fix and ok.ru will start working again.
 [OKRU] yt-dlp found nothing; letting the rest of the ladder try
 [COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=90%
 [COOKIES] nothing for ['ok.ru', 'voe.sx', 'voe.ru'] in any browser profile either -- the yt-dlp module
 [COOKIES] No matching cookies found for domains=['ok.ru', 'voe.sx', 'voe.ru'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
-[OKRU] page title: 'John.Cleese.The Strange Case of the End of Civilization as We Know It'
-[VOE-mirror] Decoded 1 HLS + 10 MP4 candidate(s) for https://ok.ru/video/7334874843717
-[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=6652909521477&type=36&idx=0&tkn=cS4h2XJd6VCGI9y8JplejEunPE0
-[VOE-mirror] dropped 0 site promo(s) + 1 trailer/preview candidate(s) of 10
+[OKRU] page title: 'Deep End (1970) | Eng Subs'
+[VOE-mirror] Decoded 1 HLS + 12 MP4 candidate(s) for https://ok.ru/video/8577325992603
+[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=7348071762587&type=36&idx=0&tkn=n8Ch4T8wHrPJ4aIuGM7q2c9YEnc
+[VOE-mirror] dropped 0 site promo(s) + 1 trailer/preview candidate(s) of 12
 [VOE-mirror] OK.ru: retrying the best 3 rendition(s) with browser-shaped headers
-[VOE-mirror] Resolved MP4: https://vd423.okcdn.ru/?expires=1790272756720&srcIp=105.68.184.251&pr=10&srcAg=C
-[PLAYBACK][LOADFILE] https://vd423.okcdn.ru/?expires=1790272756720&srcIp=105.68.184.251&pr=10&srcAg=CHROME_MAC&ms=178.237.23.39&type=0&sig=cOyMSAwj_1E&ct=0&urls=176.112.172.39&clientType=0&zs=65&id=6652909521477
-[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=False target=https://vd423.okcdn.ru/?expires=1790272756720&srcIp=105.68.184.251&pr=10&srcAg=CHROME_MAC&ms=178.237.23.39&type=0&sig=cOyMSAwj_1E&ct=0&urls=
-Looking for subtitle mapping for: https://ok.ru/video/7334874843717
-No saved subtitle for this video or its mirrors: https://ok.ru/video/7334874843717
-[SUBS] no usable caption track for https://ok.ru/video/7334874843717 (0 offered by the resolver)
-[PLAYBACK][FILE_LOADED] https://vd423.okcdn.ru/?expires=1790272756720&srcIp=105.68.184.251&pr=10&srcAg=CHROME_MAC&ms=178.237.23.39&type=0&sig=cOyMSAwj_1E&ct=0&urls=176.112.172.39&clientType=0&zs=65&id=6652909521477
-[mpv][perf] profile=base 300x240 fps=25.00 bitrate=0kbps hwdec=d3d11va-copy config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=90%
-[MPV][error][ffmpeg] https: Stream ends prematurely at 4702208, should be 104716063
-
-[MPV][error][ffmpeg] NULL: Invalid NAL unit size (1619 > 137).
+[VOE-mirror] Resolved MP4: https://vd423.okcdn.ru/?expires=1790275783201&srcIp=105.68.184.251&pr=10&srcAg=C
+[PLAYBACK][LOADFILE] https://vd423.okcdn.ru/?expires=1790275783201&srcIp=105.68.184.251&pr=10&srcAg=CHROME_MAC&ms=178.237.23.39&type=0&sig=YL2XDuTJVm0&ct=0&urls=95.163.35.41&clientType=0&zs=65&id=7348071762587
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=False target=https://vd423.okcdn.ru/?expires=1790275783201&srcIp=105.68.184.251&pr=10&srcAg=CHROME_MAC&ms=178.237.23.39&type=0&sig=YL2XDuTJVm0&ct=0&urls=
+Looking for subtitle mapping for: https://ok.ru/video/8577325992603
+No saved subtitle for this video or its mirrors: https://ok.ru/video/8577325992603
+[SUBS] no usable caption track for https://ok.ru/video/8577325992603 (0 offered by the resolver)
+[PLAYLIST][INFO] path='https://ok.ru/video/8577325992603' rows=[0] duration='Stream' quality='Stream'
+[PLAYBACK][FILE_LOADED] https://vd423.okcdn.ru/?expires=1790275783201&srcIp=105.68.184.251&pr=10&srcAg=CHROME_MAC&ms=178.237.23.39&type=0&sig=YL2XDuTJVm0&ct=0&urls=95.163.35.41&clientType=0&zs=65&id=7348071762587
+[mpv][perf] profile=base 410x240 fps=30.00 bitrate=0kbps hwdec=d3d11va-copy config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
+[MPV][error][ffmpeg] https: Stream ends prematurely at 6356992, should be 263817510
 
 [PLAYBACK][END_FILE]  event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'stop', 'playlist_entry_id': 1}>
-[MPV][error][ffmpeg] NULL: missing picture in access unit with size 153
+[MPV][error][ffmpeg] NULL: Invalid NAL unit size (2928 > 1894).
 
-[OKRU] https://ok.ru/video/306800954051 -> yt-dlp
-[YTDLP] ok.ru: no info -- ERROR: [Odnoklassniki] 306800954051: Unable to download webpage: The read operation timed out (caused by TransportError('The read operation timed out'))
-[OKRU] yt-dlp found nothing; letting the rest of the ladder try
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=90%
-[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
-[COOKIES] nothing for ['ok.ru', 'voe.sx', 'voe.ru'] in any browser profile either -- the yt-dlp module
-[COOKIES] No matching cookies found for domains=['ok.ru', 'voe.sx', 'voe.ru'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
-[OKRU] page title: 'Cain.S03E07.HC.Eng.Subs-WLEXT'
-[VOE-mirror] Decoded 1 HLS + 10 MP4 candidate(s) for https://ok.ru/video/306800954051
-[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=289501940419&type=36&idx=0&tkn=QmLheSH-j9qzjM_hSMtY4ApFKJg
-[VOE-mirror] dropped 0 site promo(s) + 1 trailer/preview candidate(s) of 10
-[VOE-mirror] OK.ru: retrying the best 3 rendition(s) with browser-shaped headers
-[VOE-mirror] Resolved MP4: https://vd423.okcdn.ru/?expires=1790272827963&srcIp=105.68.184.251&pr=10&srcAg=C
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=90%
-[PLAYLIST][INFO] path='https://ok.ru/video/306800954051' rows=[2] duration='52:22' quality='0.04'
-[OKRU] https://ok.ru/video/306800954051 -> yt-dlp
-[YTDLP] ok.ru: no info -- ERROR: the JSON object must be str, bytes or bytearray, not dict
-[YTDLP] ok.ru: that is yt-dlp's own Odnoklassniki extractor failing on the page it just downloaded, not this player and not the video. Nothing here can route around it -- run "pip install -U yt-dlp" once upstream lands a fix and ok.ru will start working again.
-[OKRU] yt-dlp found nothing; letting the rest of the ladder try
-[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
-[COOKIES] nothing for ['ok.ru', 'voe.sx', 'voe.ru'] in any browser profile either -- the yt-dlp module
-[COOKIES] No matching cookies found for domains=['ok.ru', 'voe.sx', 'voe.ru'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
-[OKRU] page title: 'Cain.S03E07.HC.Eng.Subs-WLEXT'
-[VOE-mirror] Decoded 1 HLS + 10 MP4 candidate(s) for https://ok.ru/video/306800954051
-[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=289501940419&type=36&idx=0&tkn=QmLheSH-j9qzjM_hSMtY4ApFKJg
-[VOE-mirror] dropped 0 site promo(s) + 1 trailer/preview candidate(s) of 10
-[VOE-mirror] OK.ru: retrying the best 3 rendition(s) with browser-shaped headers
-[VOE-mirror] Resolved MP4: https://vd423.okcdn.ru/?expires=1790272859429&srcIp=105.68.184.251&pr=10&srcAg=C
-[PLAYBACK][LOADFILE] https://vd423.okcdn.ru/?expires=1790272859429&srcIp=105.68.184.251&pr=10&srcAg=CHROME_MAC&ms=178.237.23.39&type=0&sig=Hz1zAGdJaG4&ct=0&urls=95.163.35.41&clientType=0&zs=65&id=289501940419
-[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=False target=https://vd423.okcdn.ru/?expires=1790272859429&srcIp=105.68.184.251&pr=10&srcAg=CHROME_MAC&ms=178.237.23.39&type=0&sig=Hz1zAGdJaG4&ct=0&urls=
-Looking for subtitle mapping for: https://ok.ru/video/306800954051
-No saved subtitle for this video or its mirrors: https://ok.ru/video/306800954051
-[SUBS] no usable caption track for https://ok.ru/video/306800954051 (0 offered by the resolver)
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=90%
-[PLAYBACK][FILE_LOADED] https://vd423.okcdn.ru/?expires=1790272859429&srcIp=105.68.184.251&pr=10&srcAg=CHROME_MAC&ms=178.237.23.39&type=0&sig=Hz1zAGdJaG4&ct=0&urls=95.163.35.41&clientType=0&zs=65&id=289501940419
-[mpv][perf] profile=base 426x240 fps=25.00 bitrate=0kbps hwdec=['d3d11va-copy'] config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
-[MPV][error][ffmpeg] https: Stream ends prematurely at 3112960, should be 117888154
+[MPV][error][ffmpeg] NULL: missing picture in access unit with size 1898
 
-[PLAYBACK][END_FILE]  event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'stop', 'playlist_entry_id': 2}>
-Audio device lost - falling back to: Haut-parleur (Conexant SmartAudio HD)
-[OKRU] https://ok.ru/video/207738309212 -> yt-dlp
+[OKRU] https://ok.ru/video/8677106715291 -> yt-dlp
 [YTDLP] ok.ru: no info -- ERROR: the JSON object must be str, bytes or bytearray, not dict
 [YTDLP] ok.ru: that is yt-dlp's own Odnoklassniki extractor failing on the page it just downloaded, not this player and not the video. Nothing here can route around it -- run "pip install -U yt-dlp" once upstream lands a fix and ok.ru will start working again.
 [OKRU] yt-dlp found nothing; letting the rest of the ladder try
 [COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
 [COOKIES] nothing for ['ok.ru', 'voe.sx', 'voe.ru'] in any browser profile either -- the yt-dlp module
 [COOKIES] No matching cookies found for domains=['ok.ru', 'voe.sx', 'voe.ru'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
-[VOE-mirror] curl_cffi fetch failed: Failed to perform, curl: (28) Operation timed out after 20009 milliseconds with 50811 bytes received. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
-[OKRU] page title: 'Deep Purple - Child In Time - 1970'
-[VOE-mirror] Decoded 1 HLS + 12 MP4 candidate(s) for https://ok.ru/video/207738309212
-[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=837807966821&type=36&idx=0&tkn=706FXsKCN2gGDNDBMp5fWO0k1TM
+[OKRU] page title: 'My Tutor (1983) | Eng Subs'
+[VOE-mirror] Decoded 1 HLS + 12 MP4 candidate(s) for https://ok.ru/video/8677106715291
+[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=7479761504923&type=36&idx=0&tkn=SoH0WXQrf0Dv06ih6CUneyXLDUE
 [VOE-mirror] dropped 0 site promo(s) + 1 trailer/preview candidate(s) of 12
-[VOE-mirror] Resolved MP4: https://vd296.okcdn.ru/?expires=1790272930418&srcIp=105.68.184.251&pr=10&srcAg=C
-[PLAYLIST][INFO] path='https://ok.ru/video/207738309212' rows=[3] duration='09:33' quality='0.04'
-[OKRU] https://ok.ru/video/207738309212 -> yt-dlp
+[VOE-mirror] OK.ru: retrying the best 3 rendition(s) with browser-shaped headers
+[VOE-mirror] Resolved MP4: https://vd296.okcdn.ru/?expires=1790275854042&srcIp=105.68.184.251&pr=10&srcAg=C
+[OKRU] https://ok.ru/video/8577325992603 -> yt-dlp
+[OKRU] https://ok.ru/video/8677106715291 -> yt-dlp
+[YTDLP] ok.ru: no info -- ERROR: the JSON object must be str, bytes or bytearray, not dict
+[YTDLP] ok.ru: that is yt-dlp's own Odnoklassniki extractor failing on the page it just downloaded, not this player and not the video. Nothing here can route around it -- run "pip install -U yt-dlp" once upstream lands a fix and ok.ru will start working again.
+[OKRU] yt-dlp found nothing; letting the rest of the ladder try
 [YTDLP] ok.ru: no info -- ERROR: the JSON object must be str, bytes or bytearray, not dict
 [YTDLP] ok.ru: that is yt-dlp's own Odnoklassniki extractor failing on the page it just downloaded, not this player and not the video. Nothing here can route around it -- run "pip install -U yt-dlp" once upstream lands a fix and ok.ru will start working again.
 [OKRU] yt-dlp found nothing; letting the rest of the ladder try
 [COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[PLAYLIST][INFO] path='https://ok.ru/video/8677106715291' rows=[1] duration='Loading...' quality='Stream'
 [COOKIES] nothing for ['ok.ru', 'voe.sx', 'voe.ru'] in any browser profile either -- the yt-dlp module
 [COOKIES] No matching cookies found for domains=['ok.ru', 'voe.sx', 'voe.ru'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
-[VOE-mirror] curl_cffi fetch failed: Failed to perform, curl: (28) Operation timed out after 20003 milliseconds with 0 bytes received. See https://curl.se/libcurl/c/libcurl-errors.html first for more details.
-[OKRU] page title: 'Deep Purple - Child In Time - 1970'
-[VOE-mirror] Decoded 1 HLS + 12 MP4 candidate(s) for https://ok.ru/video/207738309212
-[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=837807966821&type=36&idx=0&tkn=706FXsKCN2gGDNDBMp5fWO0k1TM
+[COOKIES] nothing for ['ok.ru', 'voe.sx', 'voe.ru'] in any browser profile either -- the yt-dlp module
+[COOKIES] No matching cookies found for domains=['ok.ru', 'voe.sx', 'voe.ru'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[OKRU] page title: 'My Tutor (1983) | Eng Subs'
+[VOE-mirror] Decoded 1 HLS + 12 MP4 candidate(s) for https://ok.ru/video/8677106715291
+[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=7479761504923&type=36&idx=0&tkn=SoH0WXQrf0Dv06ih6CUneyXLDUE
 [VOE-mirror] dropped 0 site promo(s) + 1 trailer/preview candidate(s) of 12
-[VOE-mirror] Resolved MP4: https://vd296.okcdn.ru/?expires=1790272983058&srcIp=105.68.184.251&pr=10&srcAg=C
-[PLAYBACK][LOADFILE] https://vd296.okcdn.ru/?expires=1790272983058&srcIp=105.68.184.251&pr=10&srcAg=CHROME&ms=185.180.203.46&type=0&sig=gHeeNCFlD5c&ct=0&urls=95.163.35.41&clientType=0&zs=65&id=837807966821
-[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=False target=https://vd296.okcdn.ru/?expires=1790272983058&srcIp=105.68.184.251&pr=10&srcAg=CHROME&ms=185.180.203.46&type=0&sig=gHeeNCFlD5c&ct=0&urls=95.
-Looking for subtitle mapping for: https://ok.ru/video/207738309212
-No saved subtitle for this video or its mirrors: https://ok.ru/video/207738309212
-[SUBS] no usable caption track for https://ok.ru/video/207738309212 (0 offered by the resolver)
-[PLAYBACK][FILE_LOADED] https://vd296.okcdn.ru/?expires=1790272983058&srcIp=105.68.184.251&pr=10&srcAg=CHROME&ms=185.180.203.46&type=0&sig=gHeeNCFlD5c&ct=0&urls=95.163.35.41&clientType=0&zs=65&id=837807966821
-[mpv][perf] profile=base 426x240 fps=30.00 bitrate=0kbps hwdec=['d3d11va-copy'] config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
+[OKRU] page title: 'Deep End (1970) | Eng Subs'
+[VOE-mirror] Decoded 1 HLS + 12 MP4 candidate(s) for https://ok.ru/video/8577325992603
+[VOE-mirror] dropped as trailer/preview: https://iv.okcdn.ru/videoPreview?id=7348071762587&type=36&idx=0&tkn=n8Ch4T8wHrPJ4aIuGM7q2c9YEnc
+[VOE-mirror] dropped 0 site promo(s) + 1 trailer/preview candidate(s) of 12
+[VOE-mirror] OK.ru: retrying the best 3 rendition(s) with browser-shaped headers
+[VOE-mirror] OK.ru: retrying the best 3 rendition(s) with browser-shaped headers
+[VOE-mirror] Resolved MP4: https://vd296.okcdn.ru/?expires=1790275883792&srcIp=105.68.184.251&pr=10&srcAg=C
+[PLAYBACK][LOADFILE] https://vd296.okcdn.ru/?expires=1790275883792&srcIp=105.68.184.251&pr=10&srcAg=CHROME_MAC&ms=185.180.203.46&type=0&sig=PBkZO9GHkVI&ct=0&urls=176.112.172.39&clientType=0&zs=65&id=7479761504923
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=False target=https://vd296.okcdn.ru/?expires=1790275883792&srcIp=105.68.184.251&pr=10&srcAg=CHROME_MAC&ms=185.180.203.46&type=0&sig=PBkZO9GHkVI&ct=0&urls
+Looking for subtitle mapping for: https://ok.ru/video/8677106715291
+No saved subtitle for this video or its mirrors: https://ok.ru/video/8677106715291
+[SUBS] no usable caption track for https://ok.ru/video/8677106715291 (0 offered by the resolver)
+[VOE-mirror] Resolved MP4: https://vd423.okcdn.ru/?expires=1790275883781&srcIp=105.68.184.251&pr=10&srcAg=C
+[PLAYLIST][INFO] path='https://ok.ru/video/8677106715291' rows=[1] duration='Stream' quality='Stream'
+[PLAYBACK][FILE_LOADED] https://vd296.okcdn.ru/?expires=1790275883792&srcIp=105.68.184.251&pr=10&srcAg=CHROME_MAC&ms=185.180.203.46&type=0&sig=PBkZO9GHkVI&ct=0&urls=176.112.172.39&clientType=0&zs=65&id=7479761504923
+[mpv][perf] profile=base 426x240 fps=30.00 bitrate=0kbps hwdec=d3d11va-copy config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
+QWidgetWindow(0x17ec43eca30, name="QWidgetClassWindow") must be a top level window.
