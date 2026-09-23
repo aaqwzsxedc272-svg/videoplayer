@@ -1144,7 +1144,7 @@ function Emit($m) { [Console]::Out.WriteLine($m) }
 # directly and only use the older WinRT ladder if this returns nothing.
 try {
     $bt = @()
-    foreach ($dev in @(Get-PnpDevice -PresentOnly -Class Bluetooth -ErrorAction SilentlyContinue)) {
+    foreach ($dev in @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue)) {
         try {
             $prop = Get-PnpDeviceProperty -InstanceId $dev.InstanceId -KeyName '{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2' -ErrorAction SilentlyContinue
             if ($prop -and $null -ne $prop.Data) {
@@ -53930,6 +53930,8 @@ try {
             and self._is_remote_url(cached_url)
             and not cached.get('use_mpv_ytdl')
             and not state.get('local_proxy_tried')
+            and not ('okcdn.ru' in str(urlparse(cached_url).netloc or '').lower()
+                     and str(urlparse(cached_url).path or '').lower().endswith('/video'))
             and (
                 cached_url != current
                 or self._is_hls_stream_url(cached_url, cached.get('content_type'))
