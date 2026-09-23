@@ -12911,6 +12911,44 @@ report(_r127._voe_probe_candidates(
 
 
 # -----------------------------------------------------------------------
+# 130. ok.ru signs the client it minted the url for into srcAg, so the
+#      edge can compare the request against what it signed. Asking for a
+#      url minted as CHROME_MAC with a Windows agent is a mismatch, and
+#      worth ruling out before deciding the video itself is blocked.
+# -----------------------------------------------------------------------
+class _OkHdr130(object):
+    _okru_request_headers = lift('VideoPlayer', '_okru_request_headers')
+
+    def _stream_request_headers(self, referer=None, extra=None):
+        return {'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                               'AppleWebKit/537.36 (KHTML, like Gecko) '
+                               'Chrome/131.0.0.0 Safari/537.36'),
+                'Referer': str(referer or '')}
+
+
+_o130 = _OkHdr130()
+_mac130 = _o130._okru_request_headers(
+    'https://vd423.okcdn.ru/?expires=1&srcAg=CHROME_MAC&type=3',
+    'https://ok.ru/video/1')
+report('Macintosh' in _mac130.get('User-Agent', ''),
+   'a url signed CHROME_MAC is asked for with a Mac agent, so the '
+   'request matches the client ok.ru signed it for',
+   repr(_mac130.get('User-Agent', '')[:60]))
+report(_mac130.get('Referer') == 'https://ok.ru/video/1'
+       and 'Accept' in _mac130,
+   'keeping the referer and adding the Accept header a browser sends, '
+   'rather than replacing the whole header set',
+   repr(sorted(_mac130)))
+_win130 = _o130._okru_request_headers(
+    'https://vd423.okcdn.ru/?expires=1&srcAg=CHROME&type=3',
+    'https://ok.ru/video/1')
+report('Windows' in _win130.get('User-Agent', ''),
+   'and a url signed for anything else keeps the ordinary agent, rather '
+   'than guessing a Mac at every url on the page',
+   repr(_win130.get('User-Agent', '')[:60]))
+
+
+# -----------------------------------------------------------------------
 # 128. OK.ru is not a VOE host. It only ever reached the VOE decoder
 #      because /video/<digits> looks like an embed slug. Match it on its
 #      own name -- exactly, because a bare 'ok.ru' substring also catches

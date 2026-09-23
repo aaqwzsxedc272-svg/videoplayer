@@ -32051,6 +32051,21 @@ try {
             if last_error:
                 print(f'[YTDLP] {host}: no info -- '
                       f'{last_error[:300]}', flush=True)
+                # Odnoklassniki is broken in yt-dlp itself right now: the
+                # extractor parses the page's metadata and then parses it
+                # again, so every ok.ru url raises the same TypeError
+                # before it ever looks at a format (upstream issues 17585
+                # and 17698, all regions, every video). Not this player,
+                # not this machine, not the video's licence -- so say so,
+                # or the log reads as if we failed to fetch the page.
+                if self._is_ok_host(host) and 'JSON object must be str' in last_error:
+                    print('[YTDLP] ok.ru: that is yt-dlp\'s own '
+                          'Odnoklassniki extractor failing on the page it '
+                          'just downloaded, not this player and not the '
+                          'video. Nothing here can route around it -- run '
+                          '"pip install -U yt-dlp" once upstream lands a '
+                          'fix and ok.ru will start working again.',
+                          flush=True)
             return None
         if isinstance(info, dict) and info.get('_type') == 'playlist':
             entries = info.get('entries') or []
@@ -38159,8 +38174,12 @@ try {
         for url in list(urls or [])[:4]:
             try:
                 import requests
+                # Exactly what the probe sent -- no Range. A range request
+                # is a different request, and a CDN that refuses one will
+                # happily answer the other; diagnosing with a header the
+                # real probe does not use reports a refusal that says
+                # nothing about why the probe failed.
                 hdrs = dict(self._stream_request_headers(page_url) or {})
-                hdrs['Range'] = 'bytes=0-1'
                 resp = requests.get(url, headers=hdrs, stream=True,
                                     timeout=10, allow_redirects=True)
                 status = resp.status_code
@@ -38168,9 +38187,15 @@ try {
                 body = ''
                 if status >= 400:
                     try:
-                        body = (resp.text or '')[:80].replace('\n', ' ')
+                        body = (resp.text or '')[:200].replace('\n', ' ')
                     except Exception:
                         body = ''
+                # Whatever the edge says about itself: which CDN node, and
+                # whether it is a cache or ok.ru's own refusal.
+                detail = ' '.join(
+                    f'{k}={resp.headers.get(k)}'
+                    for k in ('Server', 'X-Cache', 'Cache-Control')
+                    if resp.headers.get(k))
                 try:
                     resp.close()
                 except Exception:
@@ -38178,6 +38203,7 @@ try {
                 answers.append((status, body))
                 print(f'[VOE-mirror] refused {url[:70]} -> HTTP {status} '
                       f'{ctype or "(no content-type)"}'
+                      f'{(" | " + detail) if detail else ""}'
                       f'{(" | " + body) if body else ""}', flush=True)
             except Exception as exc:
                 answers.append((0, type(exc).__name__))
@@ -38185,8 +38211,35 @@ try {
                       f'{type(exc).__name__}: {exc}', flush=True)
         return answers
 
+    def _okru_request_headers(self, url, page_url):
+        """Browser-shaped headers for one okcdn url.
+
+        The probe ordinarily sends a bare User-Agent and a Referer. ok.ru
+        signs a `srcAg` into every url naming the client it was minted
+        for, so the edge can compare the request against what it signed --
+        and a url minted as CHROME_MAC asked for with a Windows agent is a
+        mismatch. Sending the shape that matches is a cheap thing to test
+        before concluding nothing on the page will ever play.
+        """
+        hdrs = dict(self._stream_request_headers(page_url) or {})
+        signed = str(url or '').upper()
+        if 'CHROME_MAC' in signed:
+            hdrs['User-Agent'] = (
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/131.0.0.0 Safari/537.36')
+        elif 'GECKO' in signed or 'FIREFOX' in signed:
+            hdrs['User-Agent'] = (
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:133.0) '
+                'Gecko/20100101 Firefox/133.0')
+        hdrs.setdefault(
+            'Accept', 'video/webm,video/ogg,video/*;q=0.9,*/*;q=0.5')
+        hdrs.setdefault('Accept-Language', 'en-US,en;q=0.9')
+        return hdrs
+
     def _voe_probe_candidates(self, urls, page_url, page_title, source_url,
-                              hls=False, require_probe=False):
+                              hls=False, require_probe=False,
+                              headers_for=None):
         """Probe decoded candidates in order; the first that answers wins.
 
         Lifted out of _detect_voe_and_resolve so OK.ru can try its
@@ -38202,8 +38255,9 @@ try {
             return None
         is_hls = bool(hls)
         for url in urls:
-            hdrs = (self._hls_request_headers(page_url) if is_hls
-                    else self._stream_request_headers(page_url))
+            hdrs = (headers_for(url) if headers_for
+                    else (self._hls_request_headers(page_url) if is_hls
+                          else self._stream_request_headers(page_url)))
             probe = self._probe_remote_media_candidate(
                 url, referer=page_url, headers=hdrs, title=page_title,
             )
@@ -38505,6 +38559,22 @@ try {
                     hls=False, require_probe=True)
                 if _progressive:
                     return _progressive
+                # Second pass, browser-shaped headers. The bare
+                # User-Agent + Referer above is not what a browser sends,
+                # and ok.ru signs the client it minted the url for. Only
+                # the best few: this is a hypothesis under test, and it is
+                # not worth a dozen more requests to prove.
+                if mp4_urls:
+                    print('[VOE-mirror] OK.ru: retrying the best '
+                          f'{min(3, len(mp4_urls))} rendition(s) with '
+                          'browser-shaped headers')
+                    _progressive = self._voe_probe_candidates(
+                        mp4_urls[:3], page_url, page_title, source_url,
+                        hls=False, require_probe=True,
+                        headers_for=lambda u: self._okru_request_headers(
+                            u, page_url))
+                    if _progressive:
+                        return _progressive
                 print('[VOE-mirror] OK.ru: no progressive rendition '
                       'answered, falling back to the signed HLS manifest')
                 _hls_probe = self._voe_probe_candidates(
