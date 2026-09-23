@@ -1144,7 +1144,7 @@ function Emit($m) { [Console]::Out.WriteLine($m) }
 # directly and only use the older WinRT ladder if this returns nothing.
 try {
     $bt = @()
-    foreach ($dev in @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue)) {
+    foreach ($dev in @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -match 'Headset|Headphone|Hands-Free|Ear|TWS|Speaker|Buds|AirPod' })) {
         try {
             $prop = Get-PnpDeviceProperty -InstanceId $dev.InstanceId -KeyName '{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2' -ErrorAction Stop
             if ($prop -and $null -ne $prop.Data) {
