@@ -12141,9 +12141,8 @@ report(_st114.battery_label.text == '\U0001F50B 62%',
 
 _st114 = _BatStub114('Speakers (Realtek Audio)')
 _st114.apply_audio_battery(json.dumps({'monitor audio': 55}))
-report(_st114.battery_label.shown,
-   'and a model-bearing endpoint is shown as a last-resort fallback while '
-   'Windows finishes switching the selected audio output')
+report(not _st114.battery_label.shown,
+   'and a nonmatching endpoint is withheld while the selected output settles')
 
 _st114 = _BatStub114('Buds')
 _st114.apply_audio_battery(json.dumps({'buds': 55}))

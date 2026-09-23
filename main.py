@@ -58285,15 +58285,10 @@ try {
                     device = name
                     break
         if percent is None and levels:
-            # Some Windows endpoint names omit headphone/earbud words
-            # (Hands-Free AG). If Qt has not finished switching outputs yet,
-            # show the strongest model-bearing result instead of hiding a
-            # valid battery reading.
-            device, percent = max(
-                levels.items(),
-                key=lambda item: (0 if item[0].strip() in _GENERIC_AUDIO_NAMES else 1,
-                                  len(item[0])),
-            )
+            # Do not display another headset's charge while Qt is still
+            # switching endpoints. Retry after the audio device settles.
+            try: QTimer.singleShot(1500, self._refresh_audio_battery)
+            except Exception: pass
         if percent is None:
             self.battery_label.setVisible(False)
             self._reposition_hb_overlay()
