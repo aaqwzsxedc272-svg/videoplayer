@@ -9106,7 +9106,11 @@ class VideoPlayer(QMainWindow):
         self._battery_match_device = ''
         self.battery_ready.connect(self.apply_audio_battery)
         self._battery_refresh_timer = QTimer(self)
-        self._battery_refresh_timer.setInterval(60000)
+        # Half of what it was. Switching earbuds on the same headset does
+        # not change the endpoint name, so nothing announces it and the
+        # number only moves when the next poll lands. The probe is one
+        # PowerShell call on the thread pool, so this is cheap.
+        self._battery_refresh_timer.setInterval(30000)
         self._battery_refresh_timer.timeout.connect(self._refresh_audio_battery)
         self._battery_refresh_timer.start()
         QTimer.singleShot(2500, self._refresh_audio_battery)
@@ -32041,6 +32045,12 @@ try {
         if not info:
             if self._is_dood_host(host) and browser_cookie_sources:
                 self._stream_debug_log('dood', 'ytdlp_browser_cookies_unavailable', source_url, error=last_error)
+            # Carried this far and then dropped on the floor. A host whose
+            # extractor is the whole strategy needs to say why it came back
+            # empty, or 'found nothing' is all anyone can ever know.
+            if last_error:
+                print(f'[YTDLP] {host}: no info -- '
+                      f'{last_error[:300]}', flush=True)
             return None
         if isinstance(info, dict) and info.get('_type') == 'playlist':
             entries = info.get('entries') or []
@@ -38145,6 +38155,7 @@ try {
         reaching the log. A ranged GET, so it costs a status line, and
         only on the path where everything has already failed.
         """
+        answers = []
         for url in list(urls or [])[:4]:
             try:
                 import requests
@@ -38164,12 +38175,15 @@ try {
                     resp.close()
                 except Exception:
                     pass
+                answers.append((status, body))
                 print(f'[VOE-mirror] refused {url[:70]} -> HTTP {status} '
                       f'{ctype or "(no content-type)"}'
                       f'{(" | " + body) if body else ""}', flush=True)
             except Exception as exc:
+                answers.append((0, type(exc).__name__))
                 print(f'[VOE-mirror] refused {str(url)[:70]} -> '
                       f'{type(exc).__name__}: {exc}', flush=True)
+        return answers
 
     def _voe_probe_candidates(self, urls, page_url, page_title, source_url,
                               hls=False, require_probe=False):
@@ -38498,10 +38512,18 @@ try {
                     hls=True, require_probe=True)
                 if _hls_probe:
                     return _hls_probe
-                self._voe_report_refused_candidates(
+                _answers = self._voe_report_refused_candidates(
                     list(mp4_urls) + list(hls_urls), page_url)
-                print('[VOE-mirror] OK.ru: nothing on the page answered; '
-                      'leaving it to yt-dlp')
+                _codes = sorted({str(a[0]) for a in (_answers or [])
+                                 if a and a[0]})
+                print('[VOE-mirror] OK.ru: nothing on the page answered -- '
+                      f'{len(mp4_urls) + len(hls_urls)} signed url(s), '
+                      f'HTTP {"/".join(_codes) or "?"} from every one. '
+                      'ok.ru signs these per request and refuses them by '
+                      'territory, so a page that answers 400 on all of them '
+                      'is usually the video\'s licence rather than a '
+                      'decoding mistake -- check it in a browser on the same '
+                      'connection before chasing the URL shape.', flush=True)
                 return None
             for hls_url in hls_urls:
                 probe = self._probe_remote_media_candidate(
@@ -59070,10 +59092,35 @@ try {
             no_device_action.setEnabled(False)
             self.audio_device_menu.addAction(no_device_action)
     
+    def _battery_device_changed(self):
+        """Re-pick the charge for the newly selected output, without waiting.
+
+        The probe shells out to PowerShell and only ran once a minute, so
+        switching headsets left the old device's number on screen for up to
+        a minute -- which is most of the point of watching it when the
+        reason for switching is that the current one is low.
+
+        The levels from the last probe are still good enough to answer for
+        the new device: battery does not move perceptibly in a minute, so
+        re-match against them now for an instant update and let a
+        background probe bring the numbers up to date behind it.
+        """
+        try:
+            levels = getattr(self, '_battery_levels', None)
+            if levels and hasattr(self, 'battery_label'):
+                self.apply_audio_battery(json.dumps(levels))
+        except Exception:
+            pass
+        try:
+            QTimer.singleShot(200, self._refresh_audio_battery)
+        except Exception:
+            pass
+
     def switch_audio_device(self, device: QAudioDevice):
         """Switch to a different audio output device"""
         print(f"Switching audio to: {device.description()}")
         self.audio_output.setDevice(device)
+        self._battery_device_changed()
         restored_after_disconnect = False
         resumed_after_disconnect = False
         headphone_like = self._is_headphone_like_device(device)
@@ -59214,6 +59261,7 @@ try {
                     print(f"Audio device lost - falling back to: {default_device.description()}")
                     self.audio_output.setDevice(default_device)
                     self.update_audio_device_menu()
+                    self._battery_device_changed()
                     if not lost_headphones:
                         self.show_osd(f"Audio device changed: {default_device.description()}", duration=2000)
                     self.last_audio_devices = current_devices

@@ -12753,6 +12753,61 @@ report(not _FakeQTimer.callbacks,
 
 
 # -----------------------------------------------------------------------
+# 129. Switching headsets left the old device's charge on screen for up to
+#      a minute. The probe shells out to PowerShell and only ran once a
+#      minute, and nothing re-read the answer when the output changed, so
+#      the number followed the audio a minute late -- which is most of the
+#      point of watching it when the reason for switching is that the
+#      current one is low.
+# -----------------------------------------------------------------------
+_LEVELS129 = {'itel t1neo hands-free ag': 20,
+              'musicman bt-x78 hands-free ag': 80}
+
+
+class _Switch129(object):
+    _battery_device_changed = lift('VideoPlayer', '_battery_device_changed')
+    apply_audio_battery = _g114b['apply_audio_battery']
+
+    def __init__(self, device, levels):
+        self.battery_label = _Label114()
+        self._device = device
+        self._battery_levels = levels
+
+    def _current_audio_device_name(self):
+        return self._device
+
+    def _is_app_fullscreen(self):
+        return False
+
+    def _reposition_hb_overlay(self):
+        pass
+
+    def _refresh_audio_battery(self):
+        pass
+
+
+_s129 = _Switch129('itel T1Neo Stereo', _LEVELS129)
+_s129.apply_audio_battery(json.dumps(_LEVELS129))
+report(_s129.battery_label.text == '\U0001F50B 20%',
+   'on the itel, the itel\'s charge is shown',
+   repr(_s129.battery_label.text))
+
+_FakeQTimer.callbacks = []
+_s129._device = 'MusicMan BT-X78 Stereo'      # the user switches headsets
+_s129._battery_device_changed()
+report(_s129.battery_label.text == '\U0001F50B 80%'
+       and _s129.battery_label.shown,
+   'switching output re-picks the charge from the levels already read, '
+   'rather than waiting for the next probe',
+   repr(_s129.battery_label.text))
+report(any(fn == _s129._refresh_audio_battery
+           for _ms, fn in _FakeQTimer.callbacks),
+   'and a fresh probe is queued behind it, so the number it just showed '
+   'is not the last one it will ever show')
+_FakeQTimer.callbacks = []
+
+
+# -----------------------------------------------------------------------
 # 126. OK.ru: the player config lists one signed url per quality, but the
 #      object around them is percent-encoded (%7B / %7D), so json.loads of
 #      the whole blob fails and nothing read the renditions. The only
