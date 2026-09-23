@@ -2825,6 +2825,13 @@ if os.path.exists(_SEXTB_PAGE):
     report(_src36.index('_extract_inline_player(html, url)') < _src36.index('_fetch_episode_stream(btn'),
            'the inline player is read before the API is called')
 else:
+    # Still named, so the groups below that drive the extractor with a stub
+    # HTTP layer keep running instead of dying on NameError -- which used to
+    # abort the rest of this file, battery probe and OK.ru included. They
+    # report their own failures against the empty page; the missing fixture
+    # is reported here, once.
+    _sp = ''
+    _SEXTB_URL = 'https://sextb.net/jul-509-rm'
     report(False, 'sextb.txt fixture is present')
 
 # ── 37. sextb second hop: player page -> video file ──────────────────────────
@@ -3000,12 +3007,15 @@ finally:
     sg34._make_session = _real_session
 # Every hoster is now found, so this scenario keeps all five player pages.
 # The point is that none of them is replaced by a fabricated media URL.
-report(_res38b['streams'][0] == _WANT_PLAYER and len(_res38b['streams']) == 5,
-       f"no media anywhere -> all 5 player pages kept (got {len(_res38b['streams'])})")
-report(all(not sg34._is_media_url(u) for u in _res38b['streams']),
-       'and none is passed off as a media file')
-report(not any('duq8bcrl' in u or 'dtscout' in u for u in _res38b['streams']),
-       'no ad ever reaches the playlist')
+# Needs the real watch page: with no sextb.txt there are no buttons to find,
+# so _res38b['streams'] is empty and these assertions would measure nothing.
+if _sp:
+    report(_res38b['streams'][0] == _WANT_PLAYER and len(_res38b['streams']) == 5,
+           f"no media anywhere -> all 5 player pages kept (got {len(_res38b['streams'])})")
+    report(all(not sg34._is_media_url(u) for u in _res38b['streams']),
+           'and none is passed off as a media file')
+    report(not any('duq8bcrl' in u or 'dtscout' in u for u in _res38b['streams']),
+           'no ad ever reaches the playlist')
 
 # ── 39. sextb: the other hosters, and the API's not-found answer ─────────────
 # The episode API is Turnstile-gated. Without a solved token it answers
@@ -3168,10 +3178,11 @@ try:
 finally:
     sg34.time = _real_time41
     sg34._make_session = _real_sess41
-report(len(_r41['streams']) == 5,
-       f"every hoster resolves regardless of its host (got {len(_r41['streams'])}: {_r41['streams']})")
-report(not any('trailerhg' in u or 'dtscout' in u or u.endswith('.jpg') for u in _r41['streams']),
-       'and no trailer, tracker or artwork slips through')
+if _sp:   # driven off the real watch page; see sextb.txt above
+    report(len(_r41['streams']) == 5,
+           f"every hoster resolves regardless of its host (got {len(_r41['streams'])}: {_r41['streams']})")
+    report(not any('trailerhg' in u or 'dtscout' in u or u.endswith('.jpg') for u in _r41['streams']),
+           'and no trailer, tracker or artwork slips through')
 
 # ── 42. sextb: the SW and US hosters, from DevTools ──────────────────────────
 # The user read the live DOM after each click. SW is an iframe on
@@ -3225,10 +3236,11 @@ try:
     _r42 = sg34.grab_all_static('https://sextb.net/jul-509-rm')
 finally:
     sg34.time = _rt42; sg34._make_session = _rm42
-report(len(_r42['streams']) == 5,
-       f"all five hoster families resolve (got {len(_r42['streams'])}: {_r42['streams']})")
-report(any('master.m3u8' in u and 'upn.one' in u for u in _r42['streams']),
-       'including the upn.one manifest')
+if _sp:   # driven off the real watch page; see sextb.txt above
+    report(len(_r42['streams']) == 5,
+           f"all five hoster families resolve (got {len(_r42['streams'])}: {_r42['streams']})")
+    report(any('master.m3u8' in u and 'upn.one' in u for u in _r42['streams']),
+           'including the upn.one manifest')
 
 # ── 43. placeholder schemes are not media candidates ─────────────────────────
 # playmate.to's capture began MEDIA_URL::javascript:false, the probe rejected
@@ -11971,15 +11983,23 @@ report(len(_bat114) == 1, 'the player can ask Windows for a device charge')
 _ps114 = [n for n in TREE.body if isinstance(n, ast.Assign)
           and getattr(n.targets[0], 'id', '') in
           ('_BATTERY_POWERSHELL', '_BATTERY_PROBE_STATE',
-           '_GENERIC_AUDIO_NAMES')]
-report(len(_ps114) == 3,
+           '_GENERIC_AUDIO_NAMES', '_BATTERY_STOP_TOKENS')]
+report(len(_ps114) == 4,
    'with the script it runs and the state it reports through',
    'found %d' % len(_ps114))
-_g114 = {'print': print, 'os': os,
+# The helpers the probe and the matcher both call now live at module level
+# too: the probe decodes whatever encoding PowerShell chose, and the matcher
+# reduces an endpoint name to the words that identify the hardware.
+_helpers114 = [n for n in TREE.body if isinstance(n, ast.FunctionDef)
+               and n.name in ('_decode_probe_output', '_battery_model_tokens')]
+_g114 = {'print': print, 'os': os, 're': re,
          '_BATTERY_PROBE_STATE': {'reported': False}}
 if _ps114:
     exec(compile(ast.Module(body=_ps114, type_ignores=[]), 'batps114',
                  'exec'), _g114)
+if _helpers114:
+    exec(compile(ast.Module(body=_helpers114, type_ignores=[]),
+                 'bathelpers114', 'exec'), _g114)
 if _bat114:
     exec(compile(ast.Module(body=_bat114, type_ignores=[]), 'bat114', 'exec'),
          _g114)
@@ -12061,9 +12081,13 @@ report(len(_apply114) == 1, 'the top bar can be told what to show')
 
 # pyqtSlot comes with the source segment, so it has to exist here; a
 # pass-through decorator is all the lifted function needs.
-_g114b = {'print': print, 'json': json,
+_g114b = {'print': print, 'json': json, 're': re,
           '_GENERIC_AUDIO_NAMES': _g114.get('_GENERIC_AUDIO_NAMES')
           or frozenset(),
+          '_BATTERY_STOP_TOKENS': _g114.get('_BATTERY_STOP_TOKENS')
+          or frozenset(),
+          '_battery_model_tokens': _g114.get('_battery_model_tokens'),
+          'QTimer': _FakeQTimer,
           'pyqtSlot': lambda *a, **k: (lambda f: f)}
 if _apply114:
     exec(compile(ast.Module(body=_apply114, type_ignores=[]), 'apply114',
@@ -12643,6 +12667,126 @@ report('[Windows.Devices.Enumeration.DeviceInformationCollection]' in _script115
 report("$diType::FindAllAsync($directArgs[0], $directArgs[1], $directArgs[2])" in _script115
        and "$pnType::FindAllAsync($directArgs[0], $directArgs[1], $directArgs[2])" in _script115,
    'trying both APIs by direct call, each with its own argument order')
+
+
+# -----------------------------------------------------------------------
+# 124. The top bar showed no charge at all on a machine whose probe was
+#      working. battery_probe_output.txt named three headsets with a
+#      level -- MusiMan BT-X78 80%, itel T1Neo 20%, Roseland TWS RE-500
+#      100% -- and only the itel ever appeared.
+#
+#      The matcher kept tokens of four characters or more and required two
+#      in common. That filters the transport words ('stereo', 'hands',
+#      'free', 'ag') and the model numbers alike, because Bluetooth model
+#      numbers are short: 'BT-X78' splits to 'bt' and 'x78', both under
+#      four, so MusiMan's two endpoints shared exactly one word -- the
+#      brand -- and missed the gate. Roseland (TWS, RE-500) lost all three
+#      of its model words the same way. Only 'itel' + 't1neo' survived.
+#
+#      Matching now strips the transport words by name instead of by
+#      length, so what is compared is the model.
+# -----------------------------------------------------------------------
+_LEVELS124 = {
+    'musiman bt-x78 hands-free ag':      80,
+    'itel t1neo hands-free ag':          20,
+    'roseland tws re-500 hands-free ag': 100,
+}
+# Qt reports the A2DP endpoint; Windows exposes the charge on the
+# Hands-Free one. Same headset, two names, never a substring of each other.
+for _cur124, _want124 in [
+        ('MusiMan BT-X78 Stereo',       80),
+        ('Headphones (MusiMan BT-X78)', 80),
+        ('itel T1Neo Stereo',           20),
+        ('Roseland TWS RE-500 Stereo',  100),
+        ('MusiMan BT-X78 Stereo (2)',   80),
+]:
+    _st114 = _BatStub114(_cur124)
+    _st114.apply_audio_battery(json.dumps(_LEVELS124))
+    report(_st114.battery_label.shown
+           and _st114.battery_label.text == f'\U0001F50B {_want124}%',
+       f'{_cur124} shows the charge of its own hands-free endpoint',
+       f'got {_st114.battery_label.text!r}')
+
+# A rival headset of the same brand shares words but is not the same
+# device, so a shared-word count is the wrong test and containment is the
+# right one: neither token set contains the other.
+_st114 = _BatStub114('Sony WH-1000XM4 Stereo')
+_st114.apply_audio_battery(json.dumps({'sony wh-1000xm5 hands-free ag': 90}))
+report(not _st114.battery_label.shown,
+   'a same-brand sibling is not matched by the words it happens to share',
+   repr(_st114.battery_label.text))
+
+_st114 = _BatStub114('Soundcore Space One Stereo')
+_st114.apply_audio_battery(json.dumps({'soundcore liberty 4 hands-free ag': 70}))
+report(not _st114.battery_label.shown,
+   'nor is a different model from the same maker, which shares only the brand',
+   repr(_st114.battery_label.text))
+
+# Wired output must never borrow a charge from a headset sitting nearby.
+_st114 = _BatStub114('Speakers (Realtek(R) Audio)')
+_st114.apply_audio_battery(json.dumps(_LEVELS124))
+report(not _st114.battery_label.shown,
+   'and a wired output is still shown nothing, however many headsets report',
+   repr(_st114.battery_label.text))
+
+
+# -----------------------------------------------------------------------
+# 125. Bounded retry. Qt can report the old endpoint for a moment while
+#      the output switches, so a miss is worth asking again -- but the
+#      probe shells out to PowerShell, and an unmatched device used to
+#      re-run it every 1.5 s for as long as any charged headset stayed
+#      paired. Six attempts, then stop and say so.
+# -----------------------------------------------------------------------
+_FakeQTimer.callbacks = []
+_st114 = _BatStub114('Speakers (Realtek Audio)')
+for _i125 in range(20):
+    _st114.apply_audio_battery(json.dumps({'roseland tws re-500 hands-free ag': 100}))
+report(len(_FakeQTimer.callbacks) <= 6,
+   'a device that never matches stops being asked instead of re-running '
+   'the probe forever',
+   f'{len(_FakeQTimer.callbacks)} retry(s) scheduled for 20 misses')
+_FakeQTimer.callbacks = []
+_st114 = _BatStub114('Roseland TWS RE-500 Stereo')
+_st114.apply_audio_battery(json.dumps(_LEVELS124))
+report(not _FakeQTimer.callbacks,
+   'and a match clears the counter, so the next miss starts fresh')
+
+
+# -----------------------------------------------------------------------
+# 126. OK.ru: the player config lists one signed url per quality, but the
+#      object around them is percent-encoded (%7B / %7D), so json.loads of
+#      the whole blob fails and nothing read the renditions. The only
+#      candidate that survived was a "direct" url rewritten from the HLS
+#      manifest's own signature with type forced to 3 -- a url okcdn never
+#      signed for, which it refuses. HLS was then deleted for OK.ru, so
+#      there was nothing left to play.
+# -----------------------------------------------------------------------
+_ok126 = _Voe122()
+_hls126, _mp4126 = _ok126._voe_decode_source_candidates(_frag122)
+
+report(len(_mp4126) == 2,
+   'both of OK.ru\'s progressive renditions are read out of the config',
+   f'got {len(_mp4126)}: {_mp4126}')
+
+_sig126 = [m.group(1) for m in
+           (re.search(r'/sig/([^/]+)', u) for u in _mp4126) if m]
+report(sorted(_sig126) == sorted(('mWogbr1ArNI', 'ko5vMJCwau0')),
+   'each carrying the signature okcdn minted for its own quality, rather '
+   'than one forged from the HLS manifest',
+   repr(_sig126))
+
+_type126 = [m.group(1) for m in
+            (re.search(r'/type/(\d+)', u) for u in _mp4126) if m]
+report(sorted(_type126) == ['3', '4'],
+   'with the type left as it was signed -- forcing every rendition to '
+   'type 3 put the mobile signature on an hd request',
+   repr(_type126))
+
+report(len(_hls126) == 1
+       and _hls126[0].startswith('https://vd423.okcdn.ru/video.m3u8?cmd=videoPlayerCdn&'),
+   'and the HLS manifest is still there, so a refused rewrite can fall '
+   'back to the one url on the page okcdn actually signed',
+   repr(_hls126[:1]))
 
 
 print('FAILURES:', FAILS)

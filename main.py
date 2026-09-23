@@ -1389,6 +1389,66 @@ _GENERIC_AUDIO_NAMES = frozenset((
     'earbuds', 'buds', 'airpods', 'speaker', 'speakers', 'audio',
 ))
 
+# Words Windows and Qt both bolt onto nearly every audio endpoint name.
+# They describe the transport, not the hardware, so the two endpoints of
+# one headset ('MusiMan BT-X78 Stereo' and 'MusiMan BT-X78 Hands-Free AG')
+# share none of them and differ only in the model tokens -- which is
+# exactly what has to be matched on.
+#
+# The previous rule dropped every token shorter than four characters
+# instead. That threw away the model numbers along with the noise ('bt',
+# 'x78', 'tws', 're', '500'), so most real headsets ended up sharing a
+# single word with their own battery entry and no charge was ever shown.
+_BATTERY_STOP_TOKENS = frozenset((
+    'hands', 'free', 'handsfree', 'headset', 'headsets', 'headphone',
+    'headphones', 'earphone', 'earphones', 'earbud', 'earbuds',
+    'earpiece', 'airpod', 'airpods', 'speaker', 'speakers', 'stereo',
+    'mono', 'audio', 'device', 'devices', 'default', 'output', 'input',
+    'ag', 'a2dp', 'avrcp', 'hfp', 'hsp', 'bluetooth', 'wireless',
+    'the', 'and', 'for',
+))
+
+
+def _battery_model_tokens(text):
+    """The identifying words of an audio endpoint name, lowercase.
+
+    Everything the OS adds to describe the transport is stripped, so what
+    is left is the model: 'MusiMan BT-X78 Hands-Free AG' and
+    'MusiMan BT-X78 Stereo' both reduce to {'bt', 'musiman', 'x78'}, which
+    is what lets a charge found on one endpoint be shown for the other.
+    """
+    words = re.split(r'[^0-9a-z]+', str(text or '').lower())
+    return {w for w in words if len(w) >= 2 and w not in _BATTERY_STOP_TOKENS}
+
+
+def _decode_probe_output(raw):
+    """The probe's stdout as text, whatever encoding PowerShell chose.
+
+    The script asks for UTF-8, but a host that ignores that hands back the
+    console default or UTF-16 (every character trailed by a NUL). Read as
+    UTF-8, both turn into lines no parser recognises, which is
+    indistinguishable from 'Windows reported 0 devices' -- so say which
+    one it was by decoding the bytes the host actually sent.
+    """
+    if isinstance(raw, str):
+        return raw
+    raw = bytes(raw or b'')
+    for bom, encoding in ((b'\xff\xfe', 'utf-16'), (b'\xfe\xff', 'utf-16'),
+                          (b'\xef\xbb\xbf', 'utf-8-sig')):
+        if raw.startswith(bom):
+            try:
+                return raw.decode(encoding)
+            except Exception:
+                break
+    if b'\x00' in raw:
+        # NUL between every character: UTF-16 that arrived without a BOM.
+        for encoding in ('utf-16-le', 'utf-16-be'):
+            try:
+                return raw.decode(encoding)
+            except Exception:
+                continue
+    return raw.decode('utf-8', errors='replace')
+
 
 def _bluetooth_battery_levels():
     """{lowercase device name: charge percent}, empty when there is nothing.
@@ -1419,8 +1479,7 @@ def _bluetooth_battery_levels():
                        '-ExecutionPolicy', 'Bypass', '-Command', _BATTERY_POWERSHELL])
         proc = subprocess.run(
             _probe_cmd,
-            capture_output=True, text=True, timeout=60,
-            encoding='utf-8', errors='replace',
+            capture_output=True, timeout=60,
             startupinfo=startupinfo, creationflags=creationflags,
         )
     except Exception as exc:
@@ -1431,7 +1490,7 @@ def _bluetooth_battery_levels():
         return {}
     levels = {}
     diag = []
-    for line in str(getattr(proc, 'stdout', '') or '').splitlines():
+    for line in _decode_probe_output(getattr(proc, 'stdout', '') or b'').splitlines():
         line = line.strip()
         if line.startswith('#diag '):
             diag.append(line[6:].strip())
@@ -1446,7 +1505,7 @@ def _bluetooth_battery_levels():
     if not _BATTERY_PROBE_STATE['reported']:
         _BATTERY_PROBE_STATE['reported'] = True
         detail = f': {sorted(levels.items())}' if levels else ''
-        err = str(getattr(proc, 'stderr', '') or '').strip()
+        err = _decode_probe_output(getattr(proc, 'stderr', '') or b'').strip()
         if err:
             detail = f'{detail} -- {err[:200]}'
         print(f'[BATTERY] Windows reported {len(levels)} device(s) with a '
@@ -9043,6 +9102,8 @@ class VideoPlayer(QMainWindow):
             'QLabel { background:transparent; color:#3a8ee6; '
             'padding:2px 6px; font-size:11px; font-weight:bold; }')
         self._battery_levels = {}
+        self._battery_match_tries = 0
+        self._battery_match_device = ''
         self.battery_ready.connect(self.apply_audio_battery)
         self._battery_refresh_timer = QTimer(self)
         self._battery_refresh_timer.setInterval(60000)
@@ -37752,15 +37813,27 @@ try {
                 return
             # Video Download Helper shows OK.ru's working progressive form:
             # convert the signed query URL to the /expires/.../video/ path.
+            #
+            # Only for a PROGRESSIVE url. An HLS manifest url is signed for
+            # its own endpoint -- type=2, its own sig -- and rewriting it
+            # into a progressive path produces something okcdn never issued
+            # a signature for, which it refuses. That rewrite used to be the
+            # only OK.ru candidate this decoder produced, so the page had a
+            # stream that could never play while the renditions that were
+            # actually signed sat in the config unread.
             try:
                 _op = urlparse(u)
-                if 'okcdn.ru' in (_op.netloc or '').lower() and _op.query:
+                if ('okcdn.ru' in (_op.netloc or '').lower() and _op.query
+                        and not _op.path.lower().endswith(('.m3u8', '.m3u'))):
                     _parts = []
                     for _pair in _op.query.split('&'):
                         if '=' in _pair:
                             _k, _v = _pair.split('=', 1)
                             if _k in {'expires','srcIp','pr','srcAg','ch','ms','type','sig','ct','urls','clientType','zs','id'}:
-                                if _k == 'type': _v = '3'
+                                # The type rides along inside the signature.
+                                # Forcing every rendition to type 3 handed
+                                # okcdn the mobile entry's sig on an hd
+                                # request, and it answers those with a 403.
                                 if _k == 'srcAg': _v = 'CHROME'
                                 _parts.extend((_k, _v))
                     if _parts:
@@ -38018,7 +38091,69 @@ try {
         except Exception:
             pass
 
+        # OK.ru lists one signed url per quality
+        #   "videos":[{"name":"mobile","url":"https://…okcdn.ru/?…type=4&sig=…"},
+        #             {"name":"hd","url":"https://…okcdn.ru/?…type=3&sig=…"}]
+        # but the object around them is percent-encoded (%7B / %7D), so a
+        # json.loads of the whole config fails and neither the structured
+        # walk above nor the raw sweep -- which only knows .m3u8 and .mp4
+        # -- ever sees them. Read them off the unescaped page directly:
+        # each carries the signature okcdn minted for its own type, which
+        # is what makes the progressive path form work. Keyed to OK.ru's
+        # own CDNs so no other site's "url" keys are swept up here.
+        try:
+            for m in re.finditer(
+                    r'"(?:url|hlsManifestUrl)"\s*:\s*"'
+                    r'(https?://[^"\s]*?(?:okcdn\.ru|mycdn\.me)[^"\s]*?)"',
+                    _flat, re.IGNORECASE):
+                _push(m.group(1))
+        except Exception:
+            pass
+
         return hls_urls, mp4_urls
+
+    def _voe_probe_candidates(self, urls, page_url, page_title, source_url,
+                              hls=False, require_probe=False):
+        """Probe decoded candidates in order; the first that answers wins.
+
+        Lifted out of _detect_voe_and_resolve so OK.ru can try its
+        progressive renditions ahead of its HLS manifest without the loop
+        being written twice.
+
+        require_probe refuses to fall back on an unprobed URL. A page whose
+        only candidates are refused needs the next rung of the ladder, not
+        a URL that looks plausible and plays nothing.
+        """
+        urls = list(urls or [])
+        if not urls:
+            return None
+        is_hls = bool(hls)
+        for url in urls:
+            hdrs = (self._hls_request_headers(page_url) if is_hls
+                    else self._stream_request_headers(page_url))
+            probe = self._probe_remote_media_candidate(
+                url, referer=page_url, headers=hdrs, title=page_title,
+            )
+            if probe:
+                probe.setdefault('title', page_title)
+                probe.setdefault('source_url', source_url)
+                print(f'[VOE-mirror] Resolved '
+                      f'{"HLS" if is_hls else "MP4"}: {url[:80]}')
+                return probe
+        if require_probe:
+            return None
+        # CDN blocks HEAD probes — trust the structurally valid URL.
+        print(f'[VOE-mirror] Trusting unprobed '
+              f'{"HLS" if is_hls else "MP4"}: {urls[0][:80]}')
+        return {
+            'playback_url': urls[0],
+            'headers':      (self._hls_request_headers(page_url) if is_hls
+                             else self._stream_request_headers(page_url)),
+            'content_type': ('application/vnd.apple.mpegurl' if is_hls
+                             else 'video/mp4'),
+            'title':        page_title,
+            'source_url':   source_url,
+        }
 
     def _detect_voe_and_resolve(self, source_url):
         """
@@ -38259,11 +38394,33 @@ try {
             hls_urls = self._rank_real_media_candidates(hls_urls, 'VOE-mirror')
             mp4_urls = self._rank_real_media_candidates(mp4_urls, 'VOE-mirror')
             # OK.ru's query-style HLS endpoint is rejected by its CDN while
-            # the browser extension's path-style progressive URL works. Do
-            # not trust HLS first on OK.ru; let the generated direct URL win.
-            if 'ok.ru/' in str(page_url or '').lower():
-                hls_urls = []
+            # the browser extension's path-style progressive URL works, so
+            # the progressive renditions are tried first there. The HLS
+            # manifest used to be deleted outright -- but it is the one URL
+            # on the page okcdn has genuinely signed, so when the rewrite
+            # into a progressive path is refused it is a better answer than
+            # nothing. Preferred last, never discarded.
+            _okru = 'ok.ru/' in str(page_url or '').lower()
+            if _okru and mp4_urls:
+                # In OK.ru's config a lower type is the better rendition
+                # (3 = hd, 4 = mobile), and the path form carries no
+                # resolution for _rank_real_media_candidates to read.
+                def _okru_type(url):
+                    m = re.search(r'/type/(\d+)(?:/|$)', str(url or ''))
+                    try:
+                        return int(m.group(1)) if m else 99
+                    except Exception:
+                        return 99
+                mp4_urls = sorted(mp4_urls, key=_okru_type)
             referer_hdrs = self._hls_request_headers(page_url)
+            if _okru:
+                _progressive = self._voe_probe_candidates(
+                    mp4_urls, page_url, page_title, source_url,
+                    hls=False, require_probe=True)
+                if _progressive:
+                    return _progressive
+                print('[VOE-mirror] OK.ru: no progressive rendition '
+                      'answered, falling back to the signed HLS manifest')
             for hls_url in hls_urls:
                 probe = self._probe_remote_media_candidate(
                     hls_url, referer=page_url,
@@ -38284,6 +38441,8 @@ try {
                     'title':        page_title,
                     'source_url':   source_url,
                 }
+            if _okru:
+                return None
             for mp4_url in mp4_urls:
                 hdrs = self._stream_request_headers(page_url)
                 probe = self._probe_remote_media_candidate(
@@ -58261,20 +58420,30 @@ try {
             # A generic label carries less identifying information than a
             # model name, so it loses; length settles everything else.
             best_score = (-1, -1, -1)
+            _current_tokens = _battery_model_tokens(current)
             for name, value in levels.items():
                 if not name:
                     continue
-                _a = {x for x in name.lower().replace('-', ' ').replace('_', ' ').split() if len(x) >= 4}
-                _b = {x for x in current.lower().replace('-', ' ').replace('_', ' ').split() if len(x) >= 4}
-                shared = len(_a & _b)
+                _name_tokens = _battery_model_tokens(name)
+                shared = len(_name_tokens & _current_tokens)
+                # Windows exposes the same headset as two endpoints and
+                # only the Hands-Free one carries a charge, so the names
+                # never match outright ('MusiMan BT-X78 Stereo' versus
+                # 'MusiMan BT-X78 Hands-Free AG'). What identifies the
+                # hardware is the model, so that is what has to line up.
+                #
+                # Containment, not a shared-word count: one endpoint name
+                # may carry extra words the other does not ('... Stereo
+                # (2)'), but a rival headset of the same brand must not
+                # match, and 'Sony WH-1000XM4' / 'Sony WH-1000XM5' share
+                # two words while being different devices. Requiring one
+                # token set to contain the other says what a token count
+                # cannot.
                 if name not in current and current not in name:
-                    # Windows exposes separate endpoint names (for example
-                    # 'itel T1Neo Stereo' versus 'itel T1Neo Hands-Free AG').
-                    # Prefer the candidate with the most model tokens in
-                    # common.  The old length-first score let a longer,
-                    # unrelated headset win because all endpoints shared
-                    # generic suffix tokens such as hands-free and ag.
-                    if shared < 2:
+                    if not _name_tokens or not _current_tokens:
+                        continue
+                    if not (_name_tokens <= _current_tokens
+                            or _current_tokens <= _name_tokens):
                         continue
                 score = (0 if name.strip() in _GENERIC_AUDIO_NAMES else 1,
                          shared,
@@ -58287,8 +58456,29 @@ try {
             # Never use a different paired headset as a fallback.  Qt can
             # report the old endpoint briefly while it switches outputs; the
             # only safe action is to wait and match again after it settles.
-            try: QTimer.singleShot(1500, self._refresh_audio_battery)
-            except Exception: pass
+            #
+            # Bounded, though: the probe shells out to PowerShell, so an
+            # unmatched device used to re-run it every 1.5 s for as long as
+            # any headset with a charge stayed paired.
+            _tries = int(getattr(self, '_battery_match_tries', 0) or 0) + 1
+            # Switching outputs is the one thing that can turn a miss into
+            # a hit, so it gets a fresh set of attempts.
+            if getattr(self, '_battery_match_device', None) != current:
+                _tries = 1
+            self._battery_match_device = current
+            self._battery_match_tries = _tries
+            if _tries <= 6:
+                try: QTimer.singleShot(1500, self._refresh_audio_battery)
+                except Exception: pass
+            elif _tries == 7:
+                # Say it once, then stop asking: a silent top bar is
+                # otherwise indistinguishable from a probe that never ran.
+                print('[BATTERY][UI] no charge matched '
+                      f'{self._current_audio_device_name() or "<unknown>"!r} '
+                      f'of {sorted(levels)}; giving up until the output '
+                      'changes', flush=True)
+        if percent is not None:
+            self._battery_match_tries = 0
         if percent is None:
             self.battery_label.setVisible(False)
             self._reposition_hb_overlay()
