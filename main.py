@@ -30695,13 +30695,69 @@ try {
     _COOKIE_BROWSERS = ('brave', 'chrome', 'edge', 'chromium', 'firefox',
                         'opera')
 
+    def _yt_dlp_exe_cookie_loader(self, exe):
+        """Ask the yt-dlp *binary* to dump a browser's jar into a file.
+
+        Plenty of Windows installs put yt-dlp.exe on PATH and have no
+        importable yt_dlp module at all -- that is precisely the case
+        _yt_dlp_command_prefix prefers the binary for. Reading browser
+        cookies from Python is impossible there, so the only way through
+        is to ask the executable to do it.
+
+        `--cookies FILE` reads from a file *and* dumps the jar back into
+        it, and the dump happens on shutdown whatever the extraction did.
+        The url below therefore only has to be cheap; nothing is expected
+        to resolve from it.
+        """
+        import http.cookiejar
+        import subprocess
+        import tempfile
+
+        def _load(browser):
+            import os as _os
+            fd, path = tempfile.mkstemp(prefix='vpcookies_', suffix='.txt')
+            _os.close(fd)
+            try:
+                cmd = [
+                    exe, '--cookies-from-browser', browser,
+                    '--cookies', path, '--skip-download', '--simulate',
+                    '--no-warnings', '--no-playlist',
+                    'https://example.com/',
+                ]
+                startupinfo = None
+                if _os.name == 'nt':
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=45, startupinfo=startupinfo)
+                jar = http.cookiejar.MozillaCookieJar(path)
+                try:
+                    jar.load(ignore_discard=True, ignore_expires=True)
+                except Exception:
+                    return None
+                return list(jar)
+            except Exception:
+                return None
+            finally:
+                try:
+                    _os.remove(path)
+                except Exception:
+                    pass
+
+        return _load
+
     def _profile_cookie_loader(self):
-        """A callable(browser) -> cookie jar, or None when neither is there.
+        """(callable(browser) -> jar, what it is) or (None, why there isn't one).
 
         yt-dlp already ships the extraction this app relies on elsewhere
         through --cookies-from-browser, so use its own code rather than
         grow a second, worse copy of the same decryption. browser_cookie3
-        is the fallback on installs where yt-dlp is absent.
+        is the fallback where yt-dlp is absent, and the yt-dlp binary is
+        the fallback where yt-dlp is present only as an executable.
+
+        The second value is for the log. Returning None alone is what
+        left a silent anonymous fetch looking, ten lines later, like a
+        problem with the URL.
         """
         try:
             from yt_dlp.cookies import extract_cookies_from_browser as _extract
@@ -30712,7 +30768,7 @@ try {
                 except TypeError:
                     # Older signatures take the profile explicitly.
                     return _extract(browser, None)
-            return _load
+            return _load, 'the yt-dlp module'
         except Exception:
             pass
         try:
@@ -30721,10 +30777,16 @@ try {
             def _load3(browser):
                 getter = getattr(_bc3, str(browser).lower(), None)
                 return getter() if getter else None
-            return _load3
+            return _load3, 'browser_cookie3'
         except Exception:
             pass
-        return None
+        exe = _find_yt_dlp_executable()
+        if exe:
+            return (self._yt_dlp_exe_cookie_loader(exe),
+                    f'the yt-dlp binary at {exe}')
+        return None, ('no cookie extractor is installed -- not the yt-dlp '
+                      'python module, not browser_cookie3, not a yt-dlp '
+                      'binary')
 
     def _profile_cookies_for(self, domains):
         """Cookies for *domains*, read out of the installed browser profiles.
@@ -30745,7 +30807,7 @@ try {
                        for d in (domains or []) if str(d or '').strip())
         if not wanted:
             return []
-        loader = self._profile_cookie_loader()
+        loader, self._profile_cookie_origin = self._profile_cookie_loader()
         if loader is None:
             return []
         # Only successes are cached. Reading a cookie store means
@@ -30844,13 +30906,20 @@ try {
                     except Exception:
                         continue
                 if total_count > 0:
-                    print(f'[COOKIES] {total_count} cookie(s) read from the '
-                          f'browser profile for {domain_tokens}')
+                    print(f'[COOKIES] {total_count} cookie(s) read from '
+                          f'{self._profile_cookie_origin} for '
+                          f'{domain_tokens}')
+                else:
+                    # Say why. Silence here is what makes an anonymous
+                    # fetch read, ten lines later, like a URL problem.
+                    print(f'[COOKIES] nothing for {domain_tokens} in any '
+                          f'browser profile either -- '
+                          f'{self._profile_cookie_origin}')
             if total_count <= 0:
                 print(f"[COOKIES] No matching cookies found for "
-                      f"domains={domains!r} -- export this site's cookies "
-                      "to <domain>_cookies.txt to let the app use your "
-                      "logged-in session")
+                      f"domains={domains!r} -- this page will be fetched "
+                      "anonymously. Export the site's cookies to "
+                      "<domain>_cookies.txt to use your logged-in session.")
         except Exception as e:
             print(f'[COOKIES] Failed to load Netscape cookies: {e}')
         return session
@@ -38715,11 +38784,15 @@ try {
                 print('[VOE-mirror] OK.ru: nothing on the page answered -- '
                       f'{len(mp4_urls) + len(hls_urls)} signed url(s), '
                       f'HTTP {"/".join(_codes) or "?"} from every one. '
-                      'ok.ru signs these per request and refuses them by '
-                      'territory, so a page that answers 400 on all of them '
-                      'is usually the video\'s licence rather than a '
-                      'decoding mistake -- check it in a browser on the same '
-                      'connection before chasing the URL shape.', flush=True)
+                      'This is not a decoding mistake and not the video\'s '
+                      'licence: ok.ru answers an anonymous request with a '
+                      'config that holds no playable rendition at all, so '
+                      'there was never anything here to play. The same '
+                      'video does play in a browser that is logged in. '
+                      'Send the session -- export ok.ru_cookies.txt, or let '
+                      'the app read the browser profile -- and check the '
+                      '[COOKIES] lines above for whether it found one.',
+                      flush=True)
                 return None
             for hls_url in hls_urls:
                 probe = self._probe_remote_media_candidate(

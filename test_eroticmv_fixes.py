@@ -12966,6 +12966,8 @@ class _Cookie131(object):
 class _Profile131(object):
     _profile_cookies_for = lift('VideoPlayer', '_profile_cookies_for')
     _profile_cookie_loader = lift('VideoPlayer', '_profile_cookie_loader')
+    _yt_dlp_exe_cookie_loader = lift(
+        'VideoPlayer', '_yt_dlp_exe_cookie_loader')
     _COOKIE_BROWSERS = lift_attr('VideoPlayer', '_COOKIE_BROWSERS')
 
     def __init__(self, jar):
@@ -12975,8 +12977,8 @@ class _Profile131(object):
         if self._jar is _RAISE131:
             def _boom(browser):
                 raise OSError('browser is running')
-            return _boom
-        return lambda browser: self._jar
+            return _boom, 'a stubbed extractor'
+        return lambda browser: self._jar, 'a stubbed extractor'
 
 
 _RAISE131 = object()
@@ -13003,11 +13005,25 @@ report(_Profile131(_RAISE131)._profile_cookies_for(['ok.ru']) == [],
 report(_Profile131(_JAR131)._profile_cookies_for([]) == [],
    'with nothing asked for, nothing is read')
 
-# Neither extractor is installed here, so the loader must say so rather
-# than raise -- the caller treats "no extractor" as "no cookies".
-report(_Profile131(_JAR131)._profile_cookie_loader() is None
-       or callable(_Profile131(_JAR131)._profile_cookie_loader()),
+# Whatever is installed here, the loader reports (loader, what-it-is) or
+# (None, why-there-isn't-one) -- never raising, because the caller treats
+# "no extractor" as "no cookies".
+_loader131, _origin131 = _Profile131(_JAR131)._profile_cookie_loader()
+report(_loader131 is None or callable(_loader131),
    'the loader is either missing or callable, never broken')
+report(isinstance(_origin131, str) and bool(_origin131.strip()),
+   'and it always says which extractor it used, or why there is none -- a '
+   'bare None is what left an anonymous fetch looking like a URL problem',
+   repr(_origin131)[:90])
+
+# A yt-dlp present only as a binary has no module to import, so the dump
+# has to go through the executable. With nothing runnable at that path it
+# must fail soft, the same way a locked cookie store does.
+_exeload131 = _Profile131(_JAR131)._yt_dlp_exe_cookie_loader(
+    os.path.join('no', 'such', 'yt-dlp'))
+report(callable(_exeload131) and _exeload131('brave') is None,
+   'a yt-dlp binary that cannot be run yields no cookies rather than '
+   'breaking the resolution')
 
 
 # -----------------------------------------------------------------------
