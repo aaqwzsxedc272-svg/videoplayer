@@ -43568,15 +43568,27 @@ try {
         # teaser is still worth opening. A page that only offers its own
         # advert is not.
         usable = [u for u in urls if not self._media_url_is_site_promo(u)]
-        dropped_promo = len(urls) - len(usable)
+        dropped_promo = [u for u in urls if self._media_url_is_site_promo(u)]
         real = [u for u in usable
                 if not self._media_url_is_trailer(u)
                 and not self._media_url_looks_like_preview(u)]
-        dropped = len(usable) - len(real)
-        if (dropped or dropped_promo) and label:
-            print(f'[{label}] dropped {dropped_promo} site promo(s) + '
-                  f'{dropped} trailer/preview candidate(s) of {len(urls)}',
+        dropped = [u for u in usable
+                   if self._media_url_is_trailer(u)
+                   or self._media_url_looks_like_preview(u)]
+        # Name what was thrown away. A count cannot say whether the
+        # discards were genuinely the site's own promos or the one real
+        # rendition on the page, and on ok.ru -- where every remaining
+        # candidate was refused -- that distinction is the whole question.
+        for u in dropped_promo:
+            print(f'[{label or "rank"}] dropped as site promo: {u[:120]}',
                   flush=True)
+        for u in dropped:
+            print(f'[{label or "rank"}] dropped as trailer/preview: '
+                  f'{u[:120]}', flush=True)
+        if (dropped or dropped_promo) and label:
+            print(f'[{label}] dropped {len(dropped_promo)} site promo(s) + '
+                  f'{len(dropped)} trailer/preview candidate(s) '
+                  f'of {len(urls)}', flush=True)
         return sorted(real or usable, key=self._media_url_height_hint, reverse=True)
 
     def _resolve_stream_from_html(self, source_url):
