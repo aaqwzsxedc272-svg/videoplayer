@@ -4342,7 +4342,12 @@ class MpvMediaPlayerAdapter(QObject):
                 _target_path = _target_parsed.path.lower().rstrip('/')
                 _is_direct_stream = (_target_path.endswith(('.m3u8', '.m3u', '.mpd')) or ('okcdn.ru' in _target_parsed.netloc.lower()) and _target_path.endswith('/video'))
                 _target_host = _target_parsed.netloc.lower()
-                if 'eporner' in _target_host:
+                if 'okcdn.ru' in _target_host:
+                    # OK.ru's CDN presents a certificate mpv/FFmpeg rejects
+                    # before it can use the browser-equivalent progressive URL.
+                    self._tls_verify = False
+                    self._apply_tls_verify_option()
+                elif 'eporner' in _target_host:
                     # ffmpeg/mpv rejects Eporner's cert chain (tls 0A000086)
                     # even though Python urllib fetched the same host fine.
                     self._tls_verify = False
