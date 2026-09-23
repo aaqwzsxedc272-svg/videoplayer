@@ -37345,6 +37345,18 @@ try {
         age_ms = max(0, int(time.time() * 1000) - resolved_at_ms)
         return age_ms <= ttl_ms
 
+    def _is_ok_host(self, host):
+        """Odnoklassniki (ok.ru) and the CDNs its player config points at.
+
+        Matched on the exact host rather than a bare 'ok.ru' substring,
+        which would also catch book.ru, look.ru and anything else ending
+        in those five characters.
+        """
+        host = str(host or '').strip().lower()
+        if host.startswith('www.'):
+            host = host[4:]
+        return host == 'ok.ru' or host == 'm.ok.ru' or host.endswith('.ok.ru')
+
     def _is_ytdlp_preferred_host(self, host):
         # mega.nz is intentionally excluded here: it requires client-side
         # decryption and cannot be streamed via mpv's built-in yt-dlp hook.
@@ -37830,16 +37842,27 @@ try {
                         if '=' in _pair:
                             _k, _v = _pair.split('=', 1)
                             if _k in {'expires','srcIp','pr','srcAg','ch','ms','type','sig','ct','urls','clientType','zs','id'}:
-                                # The type rides along inside the signature.
-                                # Forcing every rendition to type 3 handed
-                                # okcdn the mobile entry's sig on an hd
-                                # request, and it answers those with a 403.
-                                if _k == 'srcAg': _v = 'CHROME'
+                                # Every one of these is covered by the
+                                # signature, so not one of them may be
+                                # altered on the way through. Rewriting
+                                # type to 3 handed okcdn the mobile
+                                # rendition's sig with an hd request, and
+                                # rewriting srcAg to 'CHROME' did the same
+                                # to a URL signed as CHROME_MAC: the field
+                                # run had all six renditions refused.
                                 _parts.extend((_k, _v))
                     if _parts:
                         _direct = _op.scheme + '://' + _op.netloc + '/' + '/'.join(_parts) + '/video/'
                         if _direct not in mp4_urls:
                             mp4_urls.append(_direct)
+                        # The path form is what the browser extension
+                        # shows, but it is still a rewrite of what the page
+                        # served. Keep the query form as a candidate too:
+                        # on a page where okcdn refuses the rewrite, the
+                        # browser's own URL is the shape most likely to
+                        # answer, and the probe decides between them.
+                        if u not in mp4_urls:
+                            mp4_urls.append(u)
             except Exception:
                 pass
             low = u.lower()
@@ -38111,6 +38134,42 @@ try {
             pass
 
         return hls_urls, mp4_urls
+
+    def _voe_report_refused_candidates(self, urls, page_url):
+        """Say what okcdn answered for candidates none of which played.
+
+        _probe_remote_media_candidate returns None and prints nothing when
+        it declines a candidate, so a page whose every rendition was
+        refused looks exactly like one that had no renditions at all --
+        which is how OK.ru went three rounds without the reason ever
+        reaching the log. A ranged GET, so it costs a status line, and
+        only on the path where everything has already failed.
+        """
+        for url in list(urls or [])[:4]:
+            try:
+                import requests
+                hdrs = dict(self._stream_request_headers(page_url) or {})
+                hdrs['Range'] = 'bytes=0-1'
+                resp = requests.get(url, headers=hdrs, stream=True,
+                                    timeout=10, allow_redirects=True)
+                status = resp.status_code
+                ctype = (resp.headers.get('Content-Type') or '').strip()
+                body = ''
+                if status >= 400:
+                    try:
+                        body = (resp.text or '')[:80].replace('\n', ' ')
+                    except Exception:
+                        body = ''
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+                print(f'[VOE-mirror] refused {url[:70]} -> HTTP {status} '
+                      f'{ctype or "(no content-type)"}'
+                      f'{(" | " + body) if body else ""}', flush=True)
+            except Exception as exc:
+                print(f'[VOE-mirror] refused {str(url)[:70]} -> '
+                      f'{type(exc).__name__}: {exc}', flush=True)
 
     def _voe_probe_candidates(self, urls, page_url, page_title, source_url,
                               hls=False, require_probe=False):
@@ -38405,15 +38464,28 @@ try {
                 # In OK.ru's config a lower type is the better rendition
                 # (3 = hd, 4 = mobile), and the path form carries no
                 # resolution for _rank_real_media_candidates to read.
+                # Within one rendition the URL the page actually served
+                # goes before the one rewritten here.
                 def _okru_type(url):
-                    m = re.search(r'/type/(\d+)(?:/|$)', str(url or ''))
+                    text = str(url or '')
+                    m = re.search(r'[/?&]type[=/](\d+)', text)
                     try:
-                        return int(m.group(1)) if m else 99
+                        quality = int(m.group(1)) if m else 99
                     except Exception:
-                        return 99
+                        quality = 99
+                    return (quality, 0 if '?' in text else 1)
                 mp4_urls = sorted(mp4_urls, key=_okru_type)
             referer_hdrs = self._hls_request_headers(page_url)
             if _okru:
+                # Probe-only, both shapes. The field run had all six
+                # progressive renditions refused and the HLS manifest
+                # answering 400, and the ladder still handed mpv the
+                # manifest -- "CDN blocks HEAD probes, trust the
+                # structurally valid URL" -- which is how a page with
+                # candidates ended in 'loading failed'. A URL okcdn has
+                # already refused is not worth replaying: return None and
+                # let yt-dlp, which has a real Odnoklassniki extractor,
+                # take the page instead.
                 _progressive = self._voe_probe_candidates(
                     mp4_urls, page_url, page_title, source_url,
                     hls=False, require_probe=True)
@@ -38421,6 +38493,16 @@ try {
                     return _progressive
                 print('[VOE-mirror] OK.ru: no progressive rendition '
                       'answered, falling back to the signed HLS manifest')
+                _hls_probe = self._voe_probe_candidates(
+                    hls_urls, page_url, page_title, source_url,
+                    hls=True, require_probe=True)
+                if _hls_probe:
+                    return _hls_probe
+                self._voe_report_refused_candidates(
+                    list(mp4_urls) + list(hls_urls), page_url)
+                print('[VOE-mirror] OK.ru: nothing on the page answered; '
+                      'leaving it to yt-dlp')
+                return None
             for hls_url in hls_urls:
                 probe = self._probe_remote_media_candidate(
                     hls_url, referer=page_url,
@@ -38441,8 +38523,6 @@ try {
                     'title':        page_title,
                     'source_url':   source_url,
                 }
-            if _okru:
-                return None
             for mp4_url in mp4_urls:
                 hdrs = self._stream_request_headers(page_url)
                 probe = self._probe_remote_media_candidate(
@@ -44055,6 +44135,19 @@ try {
                 resolved = self._resolve_noodle_family_source(source_url)
             elif self._is_lulustream_host(host):
                 resolved = self._resolve_lulustream_source(source_url)
+            elif self._is_ok_host(host):
+                # Odnoklassniki. It is not a VOE host at all -- it only
+                # reached _detect_voe_and_resolve because /video/<digits>
+                # happens to look like an embed slug, and that decoder has
+                # no idea what to do with okcdn's signed URLs. yt-dlp ships
+                # a maintained Odnoklassniki extractor, so ask it first
+                # instead of letting a content-sniffing heuristic guess.
+                print(f'[OKRU] {source_url[:80]} -> yt-dlp')
+                resolved = self._resolve_stream_with_ytdlp(
+                    source_url, allow_mpv_ytdl=not force_direct_ytdlp)
+                if not resolved:
+                    print('[OKRU] yt-dlp found nothing; letting the rest '
+                          'of the ladder try')
             elif self._is_voe_host(host):
                 # Primary path: VOE URLs are captured via playwright in
                 # _launch_voe_playwright (called from _apply_prepared_url_addition).

@@ -12762,31 +12762,119 @@ report(not _FakeQTimer.callbacks,
 #      there was nothing left to play.
 # -----------------------------------------------------------------------
 _ok126 = _Voe122()
-_hls126, _mp4126 = _ok126._voe_decode_source_candidates(_frag122)
+# The fragment the player actually served on the machine this was reported
+# from: the config carries pr and srcAg, and srcAg is CHROME_MAC.
+_U126 = chr(92) + 'u0026'
+_frag126 = (
+    '&quot;videos&quot;:[{&quot;name&quot;:&quot;mobile&quot;,&quot;url&quot;:&quot;'
+    'https://vd423.okcdn.ru/?expires=1790218806321{u}srcIp=105.68.184.251{u}pr=10'
+    '{u}srcAg=CHROME_MAC{u}type=4{u}sig=mWogbr1ArNI{u}id=7348071762587&quot;},'
+    '{&quot;name&quot;:&quot;hd&quot;,&quot;url&quot;:&quot;'
+    'https://vd423.okcdn.ru/?expires=1790218806321{u}srcIp=105.68.184.251{u}pr=10'
+    '{u}srcAg=CHROME_MAC{u}type=3{u}sig=ko5vMJCwau0{u}id=7348071762587&quot;}],'
+    '&quot;hlsManifestUrl&quot;:&quot;'
+    'https://vd423.okcdn.ru/video.m3u8?cmd=videoPlayerCdn{u}expires=1790218806321'
+    '{u}srcIp=105.68.184.251{u}pr=10{u}srcAg=CHROME_MAC{u}type=2{u}sig=NBz3bp0g9BM'
+    '{u}ct=8{u}id=7348071762587&quot;,'
+    '&quot;autoplay&quot;:%7B&quot;autoplayEnabled&quot;:true%7D'
+).replace('{u}', _U126)
+_hls126, _mp4126 = _ok126._voe_decode_source_candidates(_frag126)
 
-report(len(_mp4126) == 2,
-   'both of OK.ru\'s progressive renditions are read out of the config',
-   f'got {len(_mp4126)}: {_mp4126}')
+# Two renditions, each offered in the shape the page served and in the
+# rewritten path form, so a CDN that refuses one can still answer the other.
+report(len(_mp4126) == 4,
+   'both of OK.ru\'s progressive renditions are read out of the config, '
+   'each in the shape the page served and in the rewritten path form',
+   f'got {len(_mp4126)}')
 
-_sig126 = [m.group(1) for m in
-           (re.search(r'/sig/([^/]+)', u) for u in _mp4126) if m]
-report(sorted(_sig126) == sorted(('mWogbr1ArNI', 'ko5vMJCwau0')),
+_sig126 = sorted({m.group(1) for m in
+                  (re.search(r'[/?&]sig[=/]([^/&]+)', u) for u in _mp4126) if m})
+report(_sig126 == sorted(('mWogbr1ArNI', 'ko5vMJCwau0')),
    'each carrying the signature okcdn minted for its own quality, rather '
    'than one forged from the HLS manifest',
    repr(_sig126))
 
-_type126 = [m.group(1) for m in
-            (re.search(r'/type/(\d+)', u) for u in _mp4126) if m]
-report(sorted(_type126) == ['3', '4'],
-   'with the type left as it was signed -- forcing every rendition to '
-   'type 3 put the mobile signature on an hd request',
+report(not any('NBz3bp0g9BM' in u for u in _mp4126),
+   'and the HLS manifest\'s signature is never reused on a progressive url '
+   '-- it was signed for a different endpoint, which is why the field run '
+   'got a 400')
+
+# Every parameter okcdn signed over has to survive the rewrite untouched.
+report(all('CHROME_MAC' in u for u in _mp4126),
+   'srcAg is passed through as it was signed: rewriting CHROME_MAC to '
+   'CHROME hands over a url whose signature no longer covers it',
+   repr([u for u in _mp4126 if 'CHROME_MAC' not in u][:1]))
+
+_type126 = sorted({m.group(1) for m in
+                   (re.search(r'[/?&]type[=/](\d+)', u) for u in _mp4126) if m})
+report(_type126 == ['3', '4'],
+   'and so is the type -- forcing every rendition to 3 put the mobile '
+   'signature on an hd request',
    repr(_type126))
 
 report(len(_hls126) == 1
        and _hls126[0].startswith('https://vd423.okcdn.ru/video.m3u8?cmd=videoPlayerCdn&'),
-   'and the HLS manifest is still there, so a refused rewrite can fall '
-   'back to the one url on the page okcdn actually signed',
+   'with the HLS manifest still there, so a refused rewrite can fall back '
+   'to the one url on the page okcdn actually signed',
    repr(_hls126[:1]))
+
+
+# -----------------------------------------------------------------------
+# 127. The first fix still handed mpv a dead url. The field run had all
+#      six progressive renditions refused and the HLS manifest answering
+#      400 -- and the ladder replied "CDN blocks HEAD probes, trust the
+#      structurally valid URL" and played it anyway, which mpv reported as
+#      'loading failed'. A url the CDN has already refused is not worth
+#      replaying; yt-dlp has a real Odnoklassniki extractor and should get
+#      the page instead.
+# -----------------------------------------------------------------------
+class _Refused127(object):
+    _voe_probe_candidates = lift('VideoPlayer', '_voe_probe_candidates')
+
+    def _probe_remote_media_candidate(self, *a, **k):
+        return None          # the CDN refuses everything
+
+    def _hls_request_headers(self, url):
+        return {}
+
+    def _stream_request_headers(self, url, extra=None):
+        return {}
+
+
+_r127 = _Refused127()
+report(_r127._voe_probe_candidates(
+           ['https://vd423.okcdn.ru/video.m3u8?x=1'], 'https://ok.ru/video/1',
+           't', 'https://ok.ru/video/1', hls=True, require_probe=True) is None,
+   'a candidate that the CDN refused is not handed to the player as if it '
+   'would work',
+   'returned a url anyway')
+report(_r127._voe_probe_candidates(
+           ['https://vd423.okcdn.ru/video.m3u8?x=1'], 'https://ok.ru/video/1',
+           't', 'https://ok.ru/video/1', hls=True, require_probe=False) is not None,
+   'while other hosts keep the old behaviour of trusting a structurally '
+   'valid url when their CDN blocks probes')
+
+
+# -----------------------------------------------------------------------
+# 128. OK.ru is not a VOE host. It only ever reached the VOE decoder
+#      because /video/<digits> looks like an embed slug. Match it on its
+#      own name -- exactly, because a bare 'ok.ru' substring also catches
+#      book.ru and look.ru.
+# -----------------------------------------------------------------------
+class _OkHost128(object):
+    _is_ok_host = lift('VideoPlayer', '_is_ok_host')
+
+
+_okh128 = _OkHost128()._is_ok_host
+for _h128, _want128 in [('ok.ru', True), ('m.ok.ru', True), ('www.ok.ru', True),
+                        ('video.ok.ru', True),
+                        ('book.ru', False), ('look.ru', False),
+                        ('notok.ru', False), ('ok.ru.evil.example', False),
+                        ('myok.rubicon.example', False), ('', False)]:
+    _got128 = bool(_okh128(_h128))
+    report(_got128 is _want128,
+       f'{_h128 or "(empty)"} is {"an OK.ru host" if _want128 else "not OK.ru"}',
+       f'got {_got128}')
 
 
 print('FAILURES:', FAILS)
