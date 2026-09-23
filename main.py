@@ -4339,7 +4339,7 @@ class MpvMediaPlayerAdapter(QObject):
                 # page-URL format selector, yt-dlp fails on the CDN manifest, and
                 # mpv enters a dead state that survives until the next video load.
                 _target_path = _target_parsed.path.lower().rstrip('/')
-                _is_direct_stream = (_target_path.endswith(('.m3u8', '.m3u', '.mpd')) or ('okcdn.ru' in _target_parsed.netloc.lower()) and '/video/' in (_target_path + '/'))
+                _is_direct_stream = (_target_path.endswith(('.m3u8', '.m3u', '.mpd')) or ('okcdn.ru' in _target_parsed.netloc.lower()) and _target_path.endswith('/video'))
                 _target_host = _target_parsed.netloc.lower()
                 if 'eporner' in _target_host:
                     # ffmpeg/mpv rejects Eporner's cert chain (tls 0A000086)
