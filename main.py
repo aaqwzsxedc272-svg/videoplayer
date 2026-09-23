@@ -38511,7 +38511,12 @@ try {
         hdrs.setdefault('Accept-Language', 'en-US,en;q=0.9')
         return hdrs
 
-    _OKRU_TITLE_NOISE = frozenset({'ok', 'ok.ru', 'okru', 'одноклассники'})
+    _OKRU_TITLE_NOISE = frozenset({
+        'ok', 'ok.ru', 'okru', 'одноклассники',
+        # A button on the page, not a video. 'Подробнее' is what the
+        # title lookup returned for a page that had no player at all.
+        'подробнее', 'подробности', 'more', 'more details', 'read more',
+    })
 
     def _okru_page_title(self, html, fallback=''):
         """The video's name out of an ok.ru page.
@@ -38977,6 +38982,20 @@ try {
                             u, page_url))
                     if _progressive:
                         return _progressive
+                # A page with one preview and one progressive that does
+                # not answer is a dud *response*, not a dud video. The
+                # signed HLS manifest on that page answers a probe and
+                # then hangs in mpv (TLS error, then a verify-off retry
+                # that does not finish until something else happens).
+                # Asking the page again has turned this exact shape into
+                # a full rendition list. Do it before committing to the
+                # manifest.
+                if _okru_retry < 2 and len(mp4_urls) <= 1:
+                    print('[VOE-mirror] OK.ru: this page carries no real '
+                          f'rendition -- asking again '
+                          f'({_okru_retry + 1}/2)', flush=True)
+                    return self._detect_voe_and_resolve(
+                        source_url, _okru_retry=_okru_retry + 1)
                 print('[VOE-mirror] OK.ru: no progressive rendition '
                       'answered, falling back to the signed HLS manifest')
                 # Same browser-shaped headers as the progressive retry
@@ -44815,6 +44834,12 @@ try {
         if resolved is None:
             resolved = self._resolve_stream_from_html(source_url)
 
+        if resolved is None and self._is_ok_host(host):
+            # The page ladder and yt-dlp already ran. A capture browser
+            # does not find a player that is not in the HTML; it only
+            # spends the watch on ads. Say so, then skip that pass.
+            print('[OKRU] no playable rendition in the page; not opening '
+                  'a capture browser', flush=True)
         # ── Generic browser-click fallback ──────────────────────────────────
         # Some aggregator pages (milfnut.com's own video.js player loading a
         # signed mxcontent.net/mixdrop delivery URL) only create the real
@@ -44864,6 +44889,12 @@ try {
             # headed as the fallback). Letting it reach this path too would
             # open a second browser for the same link when both of those fail.
             and 'turbo.cr' not in host
+            # ok.ru either has its signed renditions in the page HTML or
+            # it does not. The generic click-capture opened for a page
+            # with no player and spent the whole watch on ads and JS
+            # (JWPROBE files=[], title 'Подробнее'). It has never found
+            # a video there.
+            and not self._is_ok_host(host)
         ):
             # R47 standing rule: a capture browser is NEVER shown on
             # screen. This path runs whenever every static resolver
@@ -48311,8 +48342,23 @@ try {
                 return False
             if file_path in getattr(self, '_remote_stream_resolve_pending', set()):
                 return True
+            # A load that already failed is not in flight. The TLS retry
+            # of a dud HLS manifest sits in PlayingState for minutes
+            # without a picture, and every double-click during that was
+            # swallowed. The click is the user saying that retry is not
+            # getting anywhere.
+            _retry = getattr(self, '_remote_playback_retry_state', {})
+            if isinstance(_retry, dict) and _retry.get(file_path):
+                return False
             state = self.media_player.playbackState()
-            return state != QMediaPlayer.PlaybackState.StoppedState
+            if state != QMediaPlayer.PlaybackState.PlayingState:
+                return False
+            status = self.media_player.mediaStatus()
+            return status in (
+                QMediaPlayer.MediaStatus.LoadedMedia,
+                QMediaPlayer.MediaStatus.BufferedMedia,
+                QMediaPlayer.MediaStatus.BufferingMedia,
+            )
         except Exception:
             return False
 
@@ -48337,6 +48383,22 @@ try {
                 # nothing. Leave it alone.
                 self._start_current_media_playback()
             else:
+                # A failed load still has its bad url in the cache. stop()
+                # raises loadFailed before set_media runs, and that handler
+                # would start a proxy retry of the same url and then refuse
+                # the page we are about to ask for. Take the url away first.
+                _retry = getattr(self, '_remote_playback_retry_state', {})
+                if isinstance(_retry, dict) and _retry.get(file_path):
+                    self._user_abandoned_playback = file_path
+                    _cache = getattr(self, '_stream_resolution_cache', {})
+                    _entry = _cache.get(file_path)
+                    if isinstance(_entry, dict) and _entry.get('playback_url'):
+                        _entry = {k: v for k, v in _entry.items()
+                                  if k not in ('playback_url', 'download_url',
+                                               'headers', 'variants',
+                                               'content_type', 'resolved_at_ms')}
+                        _cache[file_path] = _entry
+                        self._stream_resolution_cache = _cache
                 try:
                     self.media_player.stop()
                     self.media_player.setPosition(0)
@@ -50053,7 +50115,8 @@ try {
                             file_path, dict(_cached_entry), autoplay=True)
                         return
                     if (
-                        _family_capture_stale
+                        _had_load_failure
+                        or _family_capture_stale
                         or (
                             not _signed_still_fresh
                             and (
@@ -50075,7 +50138,7 @@ try {
                         # worker performs the lightweight page refresh.  That
                         # gives the refresh path its cookies and preserves the
                         # existing direct-URL fallback if the page is blocked.
-                        if _family_capture_stale:
+                        if _family_capture_stale and not _had_load_failure:
                             _preserved = dict(_cached_entry)
                         else:
                             _preserved = {k: v for k, v in _cached_entry.items()
@@ -50085,6 +50148,23 @@ try {
                         _cache[file_path] = _preserved
                         self._stream_resolution_cache = _cache
                     self.show_osd("Resolving stream URL...", duration=1500)
+                    if _had_load_failure:
+                        # The TLS-off retry of a dud manifest is still the
+                        # same url. Drop the failure mark so that retry
+                        # cannot re-apply it over the page we are about
+                        # to ask for again.
+                        try:
+                            _retry_state.pop(file_path, None)
+                            self._remote_playback_retry_state = _retry_state
+                        except Exception:
+                            pass
+                        try:
+                            if self._is_ok_host(urlparse(file_path).netloc or ''):
+                                print('[OKRU] the stream already failed to '
+                                      f'play -- asking the page again for '
+                                      f'{file_path[:80]}', flush=True)
+                        except Exception:
+                            pass
                     # Clear any previous failure record so double-clicking a
                     # previously-failed URL immediately retries instead of
                     # silently doing nothing for 5 minutes.
@@ -50097,6 +50177,8 @@ try {
                     self.play_button.setEnabled(False)
                     self._remote_autoplay_after_resolve.add(file_path)
                     self._resolve_remote_stream_async(file_path, force=True)
+                    if getattr(self, '_user_abandoned_playback', None) == file_path:
+                        self._user_abandoned_playback = None
                     return
                 else:
                     self._apply_media_request_headers({})
@@ -54696,6 +54778,15 @@ try {
 
     def _handle_playback_load_failed(self, playback_url='', error_message=''):
         current = getattr(self, 'current_file', None)
+        # The user already double-clicked to abandon this load. stop() is
+        # what raised this signal. Do not start a proxy retry of the url
+        # they just gave up on; set_media is about to ask the page again.
+        if getattr(self, '_user_abandoned_playback', None) == current:
+            return
+        # set_media already asked the page again. A loadFailed queued by
+        # the stop() before that must not start a second retry.
+        if current in getattr(self, '_remote_stream_resolve_pending', set()):
+            return
         if self._is_ftp_url(current or ''):
             self._handle_ftp_stream_failed(current, playback_url, error_message)
             return

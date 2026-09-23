@@ -13336,5 +13336,103 @@ for _h128, _want128 in [('ok.ru', True), ('m.ok.ru', True), ('www.ok.ru', True),
        f'got {_got128}')
 
 
+
+# ── 136. a failed ok.ru load can be double-clicked again ────────────────────
+# Field: the first pasted URL showed a name and a duration, then a TLS
+# failure, then a verify-off retry that never finished. Further
+# double-clicks did nothing until another link was pasted. The hung
+# retry was still "playing", so the click was swallowed, and the dud
+# page (one preview, one refused file, one manifest) was never re-asked.
+
+class _PS136:
+    PlayingState = 'playing'
+    StoppedState = 'stopped'
+    PausedState = 'paused'
+
+class _MS136:
+    LoadedMedia = 'loaded'
+    BufferedMedia = 'buffered'
+    BufferingMedia = 'buffering'
+    LoadingMedia = 'loading'
+    InvalidMedia = 'invalid'
+    NoMedia = 'none'
+
+class _QMP136:
+    PlaybackState = _PS136
+    MediaStatus = _MS136
+
+G['QMediaPlayer'] = _QMP136
+
+
+class _Keep136(object):
+    _keep_in_flight_remote_playback = lift(
+        'VideoPlayer', '_keep_in_flight_remote_playback')
+
+    def __init__(self, state, status, retry=None, pending=False):
+        self.current_file = 'https://ok.ru/video/8512056593051'
+        self._remote_playback_retry_state = retry or {}
+        self._remote_stream_resolve_pending = (
+            {self.current_file} if pending else set())
+        self.media_player = _Keep136._Player(state, status)
+
+    def _is_remote_url(self, path):
+        return str(path).startswith('http')
+
+    class _Player(object):
+        def __init__(self, state, status):
+            self._state = state
+            self._status = status
+        def playbackState(self):
+            return self._state
+        def mediaStatus(self):
+            return self._status
+
+
+_url136 = 'https://ok.ru/video/8512056593051'
+_hung136 = _Keep136('playing', 'buffering',
+                    retry={_url136: {'tls_retry_tried': True}})
+report(not _hung136._keep_in_flight_remote_playback(_url136),
+       'a double-click during a failed ok.ru load is not swallowed')
+_playing136 = _Keep136('playing', 'loaded')
+report(_playing136._keep_in_flight_remote_playback(_url136),
+       'a double-click does not restart a video that is actually playing')
+_loading136 = _Keep136('playing', 'loading')
+report(not _loading136._keep_in_flight_remote_playback(_url136),
+       'a load that has not opened a file yet can be clicked again')
+_pending136 = _Keep136('playing', 'loading', pending=True)
+report(_pending136._keep_in_flight_remote_playback(_url136),
+       'a click does not start a second resolve while one is already running')
+
+
+class _Title136(TitleStub):
+    _OKRU_TITLE_NOISE = lift_attr('VideoPlayer', '_OKRU_TITLE_NOISE')
+    _okru_page_title = lift('VideoPlayer', '_okru_page_title')
+
+
+_title136 = _Title136()
+report(_title136._okru_page_title(
+    '<meta property="og:title" content="Подробнее">',
+    fallback='6858302687913') == '6858302687913',
+    'Подробнее is a button, not a video title')
+report(_title136._okru_page_title(
+    '<meta property="og:title" content="The Prince (2019) | English Subtitles">',
+    fallback='8512056593051').startswith('The Prince'),
+    'a real ok.ru title is still kept')
+
+_src136 = open('main.py', encoding='utf-8').read()
+_okru_fn136 = _src136[_src136.find('def _detect_voe_and_resolve'):
+                      _src136.find('def _detect_voe_and_resolve') + 25000]
+report(_okru_fn136.find('this page carries no real')
+       < _okru_fn136.find('falling back to the signed HLS')
+       and 'falling back to the signed HLS' in _okru_fn136,
+       'a dud ok.ru page is asked again before the ct=8 manifest is played')
+report('and not self._is_ok_host(host)' in _src136
+       and 'not opening' in _src136,
+       'ok.ru does not open the generic capture browser')
+report('_had_load_failure' in _src136
+       and '_user_abandoned_playback' in _src136,
+       'a failed stream is dropped from the cache so the click re-asks the page')
+
+
 print('FAILURES:', FAILS)
 raise SystemExit(1 if FAILS else 0)
