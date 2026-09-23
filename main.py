@@ -38769,6 +38769,23 @@ try {
                 # the name lookup has failed and the page needs a closer
                 # look -- otherwise the row just silently says "858843...".
                 print(f'[OKRU] page title: {page_title!r}', flush=True)
+                # Name the row now, not when playback starts. The title is
+                # known whether or not the stream ever loads, and a row
+                # that is only named on success keeps the numeric id out
+                # of the url in exactly the case where the name matters
+                # most: a long video that is slow to arrive, where the
+                # user has clicked something else before it resolves and
+                # the result is then discarded.
+                try:
+                    _cache = getattr(self, '_stream_resolution_cache', None)
+                    if isinstance(_cache, dict) and page_title:
+                        entry = dict(_cache.get(source_url) or {})
+                        entry['title'] = page_title
+                        _cache[source_url] = entry
+                        self._stream_resolution_cache = _cache
+                        self._refresh_playlist_row_metadata(source_url)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -38847,9 +38864,16 @@ try {
                         return _progressive
                 print('[VOE-mirror] OK.ru: no progressive rendition '
                       'answered, falling back to the signed HLS manifest')
+                # Same browser-shaped headers as the progressive retry
+                # above. The manifest is signed with the same srcAg, so
+                # asking for it with the default agent is the one request
+                # in this ladder that contradicts the client it was minted
+                # for -- and it is the one that keeps answering 400.
                 _hls_probe = self._voe_probe_candidates(
                     hls_urls, page_url, page_title, source_url,
-                    hls=True, require_probe=True)
+                    hls=True, require_probe=True,
+                    headers_for=lambda u: self._okru_request_headers(
+                        u, page_url))
                 if _hls_probe:
                     return _hls_probe
                 _answers = self._voe_report_refused_candidates(
