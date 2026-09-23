@@ -3606,6 +3606,19 @@ class MpvMediaPlayerAdapter(QObject):
         except Exception:
             return False
 
+    def _is_local_mega_proxy_source(self):
+        """Whether the current source is the decrypting MEGA stream proxy."""
+        try:
+            source = self._source.toString()
+            parsed = urlparse(source)
+            return (
+                parsed.scheme.lower() == 'http'
+                and (parsed.hostname or '').lower() in {'127.0.0.1', 'localhost', '::1'}
+                and (parsed.path or '').startswith('/mega/')
+            )
+        except Exception:
+            return False
+
     def _is_local_hls_proxy_source(self):
         """Whether the current source is our rewritten HLS proxy (/hls/…)."""
         try:
@@ -3633,14 +3646,14 @@ class MpvMediaPlayerAdapter(QObject):
         Keeping mpv's normal 60/90-second network cache for this source can make
         it read a large portion of an MP4 before showing the first frame.
         """
-        if self._is_local_ftp_proxy_source():
+        if self._is_local_ftp_proxy_source() or self._is_local_mega_proxy_source():
             return {
                 'cache': 'yes',
-                'cache-secs': 3,
+                'cache-secs': 3 if self._is_local_ftp_proxy_source() else 20,
                 'cache-pause-initial': False,
-                'demuxer-max-bytes': '16MiB',
-                'demuxer-max-back-bytes': '4MiB',
-                'demuxer-readahead-secs': 0.25,
+                'demuxer-max-bytes': '16MiB' if self._is_local_ftp_proxy_source() else '48MiB',
+                'demuxer-max-back-bytes': '4MiB' if self._is_local_ftp_proxy_source() else '16MiB',
+                'demuxer-readahead-secs': 0.25 if self._is_local_ftp_proxy_source() else 8,
                 # Lets libmpv use the proxy's Accept-Ranges support to fetch an
                 # MP4 index near the end instead of sequentially reading there.
                 'force-seekable': True,
@@ -4447,6 +4460,10 @@ class MpvMediaPlayerAdapter(QObject):
                 )
                 _is_gofile_cdn = 'gofile' in _target_host or 'srv' in _target_host
                 _is_direct_mp4 = _target_path.endswith(('.mp4', '.mkv', '.webm', '.mov', '.avi'))
+                _is_mega_proxy = (
+                    _target_path.startswith('/mega/')
+                    and _target_host in {'127.0.0.1', 'localhost'}
+                )
                 if _is_bunkr_share:
                     _is_direct_mp4 = False
                 _is_streamtape_direct = (
@@ -4469,7 +4486,8 @@ class MpvMediaPlayerAdapter(QObject):
                         or _is_bunkr_cdn or _is_gofile_cdn
                         or _is_direct_mp4 or _is_streamtape_direct
                         or _query_points_to_media
-                        or _is_cloudatacdn or _is_tapecontent):
+                        or _is_cloudatacdn or _is_tapecontent
+                        or _is_mega_proxy):
                     # Raw HLS/DASH CDN URL or Bunkr CDN — play natively; disable yt-dlp entirely
                     # so mpv never tries to invoke it on a CDN manifest URL.
                     # Reset ytdl-format too so any stale site-specific selector
@@ -45402,8 +45420,9 @@ try {
         # Kick off a background download to a temp dir; once done, load the
         # local file through the normal path.
         if stream_info.get('use_mega_download'):
-            # The page URL is not a video. Decrypt into a local file, or
-            # expand a folder into its files. Do not fall through to yt-dlp.
+            # The page URL is not a video. A folder is expanded into its
+            # files. A file is decrypted on the fly through a local range
+            # proxy — mpv never waits for the whole file to be saved.
             if stream_info.get('mega_error'):
                 self.play_button.setEnabled(True)
                 self.show_osd(str(stream_info.get('mega_error')), duration=5000)
@@ -45413,8 +45432,32 @@ try {
                     file_path, stream_info.get('mega_folder_entries') or [],
                     autoplay=autoplay)
                 return True
-            self._download_and_play(file_path, stream_info, autoplay=autoplay)
-            return True
+            try:
+                import mega_client
+                proxy_url = mega_client.stream_playback_url(
+                    file_id=str(stream_info.get('mega_file_id') or ''),
+                    file_key=str(stream_info.get('mega_file_key') or ''),
+                    folder_id=str(stream_info.get('mega_folder_id') or ''),
+                    title=str(stream_info.get('title') or ''),
+                    source_url=file_path,
+                )
+            except Exception as exc:
+                print(f'[MEGA] stream failed: {exc}', flush=True)
+                self.play_button.setEnabled(True)
+                self.show_osd(str(exc), duration=5000)
+                return True
+            stream_info = dict(stream_info)
+            stream_info['playback_url'] = proxy_url
+            stream_info['download_url'] = ''
+            stream_info['use_mega_download'] = False
+            stream_info['use_ytdlp_download'] = False
+            stream_info['pre_resolved_playback_url'] = True
+            stream_info['resolver_provider'] = 'mega'
+            stream_info['headers'] = {}
+            self.show_osd(
+                f"Streaming: {stream_info.get('title') or 'MEGA'}",
+                duration=2500)
+            print(f'[MEGA] play {proxy_url}', flush=True)
         if stream_info.get('use_ytdlp_download'):
             self._download_and_play(file_path, stream_info, autoplay=autoplay)
             return True
@@ -47903,6 +47946,16 @@ try {
         playback_url = str(cached.get('playback_url') or '').strip()
         if not playback_url:
             return 0.0
+        # A MEGA stream is decrypted on demand. ffprobe would pull the file
+        # just to fill the duration column, which is the download the user
+        # refused. Duration shows once playback itself reads the index.
+        try:
+            probed = urlparse(playback_url)
+            if ((probed.hostname or '').lower() in {'127.0.0.1', 'localhost'}
+                    and (probed.path or '').startswith('/mega/')):
+                return 0.0
+        except Exception:
+            pass
         try:
             startupinfo = None
             if os.name == 'nt':

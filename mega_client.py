@@ -12,12 +12,17 @@ built-in AES-128. A movie is slow only on that last path.
 from __future__ import annotations
 
 import base64
+import http.server
 import json
 import os
 import random
 import re
+import secrets
+import socket
 import struct
 import sys
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1169,6 +1174,379 @@ def _looks_like_media(head, filename):
     return False
 
 
+_FETCH_BACKEND = ''
+
+
+def _fetch_range(url, start, end):
+    """Read encrypted bytes start..end inclusive from a MEGA storage URL.
+
+    Tries a browser TLS fingerprint first. The storage nodes reset a plain
+    Python connection (WinError 10054) even when the API call itself works.
+    A 200 that ignores Range is cut off after the requested length so a
+    seek never turns into a full-file download.
+    """
+    want = end - start + 1
+    if want <= 0:
+        return 206, b'', ''
+    headers = {
+        'User-Agent': _UA,
+        'Accept': '*/*',
+        'Accept-Encoding': 'identity',
+        'Referer': 'https://mega.nz/',
+        'Origin': 'https://mega.nz',
+        'Range': f'bytes={start}-{end}',
+        'Connection': 'close',
+    }
+    errors = []
+
+    def _take(status, iterator, content_range, close):
+        buf = bytearray()
+        try:
+            for chunk in iterator:
+                if not chunk:
+                    continue
+                buf.extend(chunk)
+                if len(buf) >= want:
+                    break
+        finally:
+            close()
+        return int(status), bytes(buf[:want]), str(content_range or '')
+
+    global _FETCH_BACKEND
+    try:
+        import curl_cffi.requests as cfreq
+        for impersonate in ('chrome131', 'chrome124'):
+            try:
+                response = cfreq.get(
+                    url, headers=headers, impersonate=impersonate,
+                    timeout=40, allow_redirects=True, stream=True)
+            except Exception as exc:
+                errors.append(f'{impersonate}: {exc}')
+                continue
+            status = int(getattr(response, 'status_code', 0) or 0)
+            if status in (200, 206):
+                _FETCH_BACKEND = 'curl_cffi'
+                return _take(
+                    status, response.iter_content(65536),
+                    response.headers.get('Content-Range'), response.close)
+            errors.append(f'{impersonate}: HTTP {status}')
+            try:
+                response.close()
+            except Exception:
+                pass
+    except ImportError:
+        errors.append('curl_cffi not installed')
+
+    try:
+        import requests
+        response = requests.get(
+            url, headers=headers, timeout=40, allow_redirects=True, stream=True)
+        status = int(response.status_code or 0)
+        if status in (200, 206):
+            _FETCH_BACKEND = 'requests'
+            return _take(
+                status, response.iter_content(65536),
+                response.headers.get('Content-Range'), response.close)
+        errors.append(f'requests: HTTP {status}')
+        response.close()
+    except ImportError:
+        errors.append('requests not installed')
+    except Exception as exc:
+        errors.append(f'requests: {exc}')
+
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        resp = urllib.request.urlopen(req, timeout=40)
+    except Exception as exc:
+        errors.append(f'urllib: {exc}')
+        detail = '; '.join(errors[-3:])
+        hint = ''
+        if any('curl_cffi not installed' in item for item in errors):
+            hint = ' Install curl_cffi (pip install curl_cffi) and try the link again.'
+        raise MegaError('MEGA closed the storage connection (' + detail + ').' + hint)
+    _FETCH_BACKEND = 'urllib'
+
+    def _iter():
+        while True:
+            piece = resp.read(65536)
+            if not piece:
+                break
+            yield piece
+
+    return _take(getattr(resp, 'status', 200), _iter(), resp.headers.get('Content-Range'), resp.close)
+
+
+class MegaStream(object):
+    """One public file, decrypted in whatever range the player asks for."""
+
+    def __init__(self, file_id, file_key, folder_id='', title=''):
+        self.file_id = file_id
+        self.file_key = file_key
+        self.folder_id = folder_id or ''
+        self.title = title or ''
+        self.url = ''
+        self.size = 0
+        self.name = title or file_id
+        self.key_bytes = b''
+        self.counter0 = 0
+        self.content_type = 'application/octet-stream'
+        self.refreshed_at = 0.0
+        self.logged = False
+        self.lock = threading.Lock()
+        self.refresh(force=True)
+
+    def refresh(self, force=False):
+        with self.lock:
+            # Coalesce the parallel range requests mpv opens. A dead URL is
+            # refreshed, but not on every retry in the same second.
+            if self.url and (time.time() - self.refreshed_at) < (1 if force else 3):
+                return
+            if self.folder_id:
+                data = _api(
+                    {'a': 'g', 'g': 1, 'n': self.file_id, 'ssl': 2},
+                    node=self.folder_id)
+            else:
+                data = _api({'a': 'g', 'g': 1, 'p': self.file_id, 'ssl': 2})
+            url = str(data.get('g') or '')
+            if not url:
+                raise MegaError('MEGA did not give a download URL for this file')
+            size = int(data.get('s') or 0)
+            if size <= 0:
+                raise MegaError('MEGA reported an empty file')
+            key_ints = _base64_to_a32(self.file_key)
+            k, iv, _mac = split_file_key(key_ints)
+            name = self.title or self.file_id
+            try:
+                attrs = decrypt_attr(_base64_url_decode(data.get('at') or ''), k)
+                name = attrs.get('n') or name
+            except Exception:
+                pass
+            self.url = url
+            self.size = size
+            self.name = _safe_name(name, self.file_id)
+            self.key_bytes = _a32_to_bytes(k)
+            self.counter0 = ((int(iv[0]) << 32) + int(iv[1])) << 64
+            self.content_type = _content_type(self.name)
+            self.refreshed_at = time.time()
+            if force:
+                print(f'[MEGA] streaming {self.name} ({format_size(self.size)}) '
+                      f'— not saving the file', flush=True)
+
+    def read(self, start, length):
+        if start >= self.size or length <= 0:
+            return b''
+        length = min(int(length), self.size - int(start))
+        skip = int(start) % 16
+        fetch_start = int(start) - skip
+        fetch_len = min(skip + length, self.size - fetch_start)
+        encrypted = self._get(fetch_start, fetch_start + fetch_len - 1)
+        if len(encrypted) <= skip:
+            return b''
+        cipher = _cipher(self.key_bytes)
+        try:
+            plain, _next = cipher.ctr_xor(self.counter0 + (fetch_start // 16), encrypted)
+        finally:
+            cipher.close()
+        return plain[skip:skip + length]
+
+    def _get(self, start, end):
+        last = None
+        for attempt in range(4):
+            try:
+                status, data, _cr = _fetch_range(self.url, start, end)
+            except Exception as exc:
+                last = exc if isinstance(exc, MegaError) else MegaError(
+                    f'MEGA closed the storage connection ({exc})')
+                try:
+                    self.refresh(force=True)
+                except Exception:
+                    pass
+                time.sleep(0.3 * (attempt + 1))
+                continue
+            if status == 200 and start > 0:
+                last = MegaError('MEGA storage ignored the range request')
+                time.sleep(0.3 * (attempt + 1))
+                continue
+            if status == 206 or (status == 200 and start == 0):
+                if not data and (end >= start):
+                    last = MegaError('MEGA storage returned an empty range')
+                    time.sleep(0.3 * (attempt + 1))
+                    continue
+                if not self.logged:
+                    self.logged = True
+                    print(f'[MEGA] storage connected via {_FETCH_BACKEND or "urllib"}',
+                          flush=True)
+                return data
+            if status in (403, 429, 500, 502, 503, 509):
+                last = MegaError(f'MEGA storage HTTP {status}')
+                try:
+                    self.refresh(force=True)
+                except Exception as exc:
+                    last = exc
+                time.sleep(0.3 * (attempt + 1))
+                continue
+            raise MegaError(f'MEGA storage HTTP {status}')
+        raise last or MegaError('MEGA closed the storage connection')
+
+
+def _content_type(name):
+    ext = _ext(name)
+    return {
+        '.mp4': 'video/mp4',
+        '.m4v': 'video/mp4',
+        '.mkv': 'video/x-matroska',
+        '.webm': 'video/webm',
+        '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo',
+        '.ts': 'video/mp2t',
+        '.mp3': 'audio/mpeg',
+        '.m4a': 'audio/mp4',
+        '.flac': 'audio/flac',
+    }.get(ext, 'application/octet-stream')
+
+
+_PROXY_LOCK = threading.Lock()
+_PROXY_SERVER = None
+_PROXY_PORT = 0
+_STREAMS = {}
+
+
+class _MegaProxyHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+
+    def log_message(self, fmt, *args):
+        return
+
+    def do_HEAD(self):
+        self._serve(head_only=True)
+
+    def do_GET(self):
+        self._serve(head_only=False)
+
+    def _stream(self):
+        parts = [part for part in self.path.split('?')[0].split('/') if part]
+        if len(parts) < 2 or parts[0] != 'mega':
+            return None
+        return _STREAMS.get(parts[1])
+
+    def _serve(self, head_only):
+        stream = self._stream()
+        if stream is None:
+            self.send_error(404, 'Unknown MEGA stream')
+            return
+        span = _parse_range(self.headers.get('Range'), stream.size)
+        if span is None:
+            self.send_response(416)
+            self.send_header('Content-Range', f'bytes */{stream.size}')
+            self.send_header('Accept-Ranges', 'bytes')
+            self.end_headers()
+            return
+        start, end, ranged = span
+        length = end - start + 1
+        self.send_response(206 if ranged else 200)
+        self.send_header('Content-Type', stream.content_type)
+        self.send_header('Accept-Ranges', 'bytes')
+        self.send_header('Content-Length', str(length))
+        if ranged:
+            self.send_header('Content-Range', f'bytes {start}-{end}/{stream.size}')
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        if head_only:
+            return
+        pos = start
+        while pos <= end:
+            chunk = stream.read(pos, min(1024 * 1024, end - pos + 1))
+            if not chunk:
+                break
+            try:
+                self.wfile.write(chunk)
+            except Exception:
+                return
+            pos += len(chunk)
+
+
+def _parse_range(header, size):
+    if not header:
+        return 0, max(0, size - 1), False
+    text = str(header).strip()
+    if not text.lower().startswith('bytes='):
+        return 0, max(0, size - 1), False
+    spec = text.split('=', 1)[1].split(',', 1)[0].strip()
+    start_s, _, end_s = spec.partition('-')
+    try:
+        if start_s == '':
+            count = int(end_s)
+            start = max(0, size - count)
+            end = size - 1
+        else:
+            start = int(start_s)
+            end = int(end_s) if end_s else size - 1
+    except Exception:
+        return None
+    if start < 0 or start >= size or end < start:
+        return None
+    return start, min(end, size - 1), True
+
+
+def _ensure_proxy():
+    global _PROXY_SERVER, _PROXY_PORT
+    with _PROXY_LOCK:
+        if _PROXY_SERVER is not None:
+            return _PROXY_PORT
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind(('127.0.0.1', 0))
+            port = sock.getsockname()[1]
+        finally:
+            sock.close()
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', port), _MegaProxyHandler)
+        server.daemon_threads = True
+        thread = threading.Thread(
+            target=server.serve_forever, name='mega-stream-proxy', daemon=True)
+        thread.start()
+        _PROXY_SERVER = server
+        _PROXY_PORT = port
+        print(f'[MEGA] stream proxy on http://127.0.0.1:{port}', flush=True)
+        return port
+
+
+def stream_playback_url(file_id='', file_key='', folder_id='', title='', source_url=''):
+    """Return a local URL mpv can play. Nothing is written to disk."""
+    if source_url and (not file_id or not file_key):
+        link = parse_mega_url(source_url)
+        if link and link.kind == 'file':
+            file_id = file_id or link.file_id
+            file_key = file_key or link.file_key
+        elif link and link.kind == 'folder_file':
+            file_id = file_id or link.node_id
+            folder_id = folder_id or link.folder_id
+            if not file_key:
+                rec = describe(link)
+                file_id = rec.get('id') or file_id
+                file_key = rec.get('key') or ''
+                title = title or rec.get('name') or ''
+    if not file_id or not file_key:
+        raise MegaError('MEGA link is missing its decryption key')
+    key = (file_id, folder_id or '')
+    stream = _STREAMS.get(key)
+    if stream is None or stream.file_key != file_key:
+        stream = MegaStream(file_id, file_key, folder_id, title)
+        token = secrets.token_urlsafe(12)
+        _STREAMS[key] = stream
+        _STREAMS[token] = stream
+        stream.token = token
+    if getattr(stream, 'playback_url', ''):
+        return stream.playback_url
+    port = _ensure_proxy()
+    # The path has to end in the real extension. Otherwise mpv treats the
+    # local URL as a page and turns yt-dlp back on.
+    name = urllib.parse.quote(stream.name)
+    if not _ext(stream.name):
+        name += '.mp4'
+    stream.playback_url = f'http://127.0.0.1:{port}/mega/{stream.token}/{name}'
+    return stream.playback_url
+
+
 def self_test():
     """AES vector, URL parse, and a MEGA-shaped encrypt/decrypt round trip."""
     link = parse_mega_url(
@@ -1202,6 +1580,38 @@ def self_test():
             pieces.append(part)
             pos += size
         assert b''.join(pieces) == blob
+        # A seek must decrypt from the block that contains the offset, not
+        # from the start of the file.
+        start, length = 100, 50
+        skip = start % 16
+        aligned = blob[start - skip:start - skip + skip + length]
+        plain, _ = cipher.ctr_xor(counter + ((start - skip) // 16), aligned)
+        assert plain[skip:skip + length] == body[start:start + length]
     finally:
         cipher.close()
+    _proxy_self_test()
     return aes_backend_name()
+
+
+def _proxy_self_test():
+    """The local player URL must answer a range without reading past it."""
+    class _Fake(object):
+        size = 1000
+        name = 'clip.mp4'
+        content_type = 'video/mp4'
+        logged = True
+
+        def read(self, start, length):
+            length = min(length, self.size - start)
+            return bytes((start + i) & 0xff for i in range(length))
+
+    token = 'selftest'
+    _STREAMS[token] = _Fake()
+    port = _ensure_proxy()
+    url = f'http://127.0.0.1:{port}/mega/{token}/clip.mp4'
+    req = urllib.request.Request(url, headers={'Range': 'bytes=100-149'})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        assert resp.status == 206
+        body = resp.read()
+    assert body == bytes((100 + i) & 0xff for i in range(50))
+    assert resp.headers.get('Content-Range') == 'bytes 100-149/1000'
