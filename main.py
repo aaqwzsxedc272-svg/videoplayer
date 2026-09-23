@@ -38201,13 +38201,17 @@ try {
                 except Exception:
                     pass
                 answers.append((status, body))
-                print(f'[VOE-mirror] refused {url[:70]} -> HTTP {status} '
+                # The whole url, not the first 70 characters: everything
+                # that would explain a refusal -- srcIp, srcAg, expires --
+                # lives in the query, which is exactly what a truncated
+                # line cut off.
+                print(f'[VOE-mirror] refused {url} -> HTTP {status} '
                       f'{ctype or "(no content-type)"}'
                       f'{(" | " + detail) if detail else ""}'
                       f'{(" | " + body) if body else ""}', flush=True)
             except Exception as exc:
                 answers.append((0, type(exc).__name__))
-                print(f'[VOE-mirror] refused {str(url)[:70]} -> '
+                print(f'[VOE-mirror] refused {str(url)} -> '
                       f'{type(exc).__name__}: {exc}', flush=True)
         return answers
 
