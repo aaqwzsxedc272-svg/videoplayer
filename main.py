@@ -30690,13 +30690,118 @@ try {
             existing.append(path)
         return existing
 
+    # Browsers worth asking, in the order the app already prefers them for
+    # capture (Brave first, then Chrome).
+    _COOKIE_BROWSERS = ('brave', 'chrome', 'edge', 'chromium', 'firefox',
+                        'opera')
+
+    def _profile_cookie_loader(self):
+        """A callable(browser) -> cookie jar, or None when neither is there.
+
+        yt-dlp already ships the extraction this app relies on elsewhere
+        through --cookies-from-browser, so use its own code rather than
+        grow a second, worse copy of the same decryption. browser_cookie3
+        is the fallback on installs where yt-dlp is absent.
+        """
+        try:
+            from yt_dlp.cookies import extract_cookies_from_browser as _extract
+
+            def _load(browser):
+                try:
+                    return _extract(browser)
+                except TypeError:
+                    # Older signatures take the profile explicitly.
+                    return _extract(browser, None)
+            return _load
+        except Exception:
+            pass
+        try:
+            import browser_cookie3 as _bc3
+
+            def _load3(browser):
+                getter = getattr(_bc3, str(browser).lower(), None)
+                return getter() if getter else None
+            return _load3
+        except Exception:
+            pass
+        return None
+
+    def _profile_cookies_for(self, domains):
+        """Cookies for *domains*, read out of the installed browser profiles.
+
+        The Netscape files this app reads are opt-in: a site only works
+        once somebody has exported cookies for it by hand. ok.ru is the
+        case that proves it. The page is fetched anonymously, so ok.ru
+        hands back a config holding no playable rendition at all, and
+        every signed url in it then answers 400 -- while the same video
+        plays in the browser the user is logged in to.
+
+        Best effort in every direction. No extractor installed, a running
+        browser holding a lock, a profile with no session in it: all of
+        them return nothing, and the caller carries on without cookies
+        exactly as it did before.
+        """
+        wanted = tuple(str(d or '').lower().lstrip('.')
+                       for d in (domains or []) if str(d or '').strip())
+        if not wanted:
+            return []
+        loader = self._profile_cookie_loader()
+        if loader is None:
+            return []
+        # Only successes are cached. Reading a cookie store means
+        # decrypting it, which is slow enough to notice when it happens
+        # for every video; but a transient failure -- a browser holding
+        # its lock, most often -- must not be remembered, or logging in
+        # mid-session would never be picked up.
+        cache = getattr(self, '_profile_cookie_cache', None)
+        if cache is None:
+            cache = self._profile_cookie_cache = {}
+        hit = cache.get(wanted)
+        if hit and time.time() - hit[0] < 600:
+            return list(hit[1])
+
+        found, seen = [], set()
+        for browser in self._COOKIE_BROWSERS:
+            try:
+                jar = loader(browser)
+            except Exception:
+                continue
+            try:
+                for cookie in jar or ():
+                    try:
+                        cdomain = str(getattr(cookie, 'domain', '') or ''
+                                      ).lower().lstrip('.')
+                        name = str(getattr(cookie, 'name', '') or '')
+                        if not cdomain or not name:
+                            continue
+                        if not any(cdomain == d or cdomain.endswith('.' + d)
+                                   for d in wanted):
+                            continue
+                        key = (cdomain, name)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        found.append(cookie)
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+            if found:
+                break
+        if found:
+            cache[wanted] = (time.time(), list(found))
+        return found
+
     def _get_browser_cookies_session(self, domains=None):
         """
         Build a requests.Session loaded with generic and site-specific Netscape
         cookie files (for example cookies.txt and streamtape.com_cookies.txt).
         This allows the app to pass the user's real browser cookies to remote
         servers so they see an authenticated/verified session instead of a bot.
-        Returns a plain Session if no matching cookie file is found.
+
+        When no file covers the domain, falls back to the cookie jar of the
+        installed browser, which is where a logged-in session actually lives.
+        Returns a plain Session if neither source has anything.
         """
         import requests
         session = requests.Session()
@@ -30728,7 +30833,24 @@ try {
                 total_count += loaded_here
                 print(f'[COOKIES] Loaded {loaded_here} cookies from {cookies_path}')
             if total_count <= 0:
-                print(f"[COOKIES] No matching cookies found for domains={domains!r}")
+                # Nothing on disk covers these domains. The session the
+                # user is logged in with is in their browser, not in a
+                # file they have to export first -- so ask for it before
+                # concluding there is nothing to send.
+                for cookie in self._profile_cookies_for(domain_tokens):
+                    try:
+                        session.cookies.set_cookie(cookie)
+                        total_count += 1
+                    except Exception:
+                        continue
+                if total_count > 0:
+                    print(f'[COOKIES] {total_count} cookie(s) read from the '
+                          f'browser profile for {domain_tokens}')
+            if total_count <= 0:
+                print(f"[COOKIES] No matching cookies found for "
+                      f"domains={domains!r} -- export this site's cookies "
+                      "to <domain>_cookies.txt to let the app use your "
+                      "logged-in session")
         except Exception as e:
             print(f'[COOKIES] Failed to load Netscape cookies: {e}')
         return session

@@ -12949,6 +12949,68 @@ report('Windows' in _win130.get('User-Agent', ''),
 
 
 # -----------------------------------------------------------------------
+# 131. ok.ru plays in the browser the user is logged in to, and not in
+#      the app, because the page is fetched anonymously: ok.ru answers an
+#      anonymous request with a config holding no playable rendition at
+#      all, and every signed url in it then returns 400. The session is
+#      in the browser profile, not in a cookies.txt nobody has exported,
+#      so the cookie loader has to be able to look there.
+# -----------------------------------------------------------------------
+class _Cookie131(object):
+    def __init__(self, domain, name, value='v'):
+        self.domain = domain
+        self.name = name
+        self.value = value
+
+
+class _Profile131(object):
+    _profile_cookies_for = lift('VideoPlayer', '_profile_cookies_for')
+    _profile_cookie_loader = lift('VideoPlayer', '_profile_cookie_loader')
+    _COOKIE_BROWSERS = lift_attr('VideoPlayer', '_COOKIE_BROWSERS')
+
+    def __init__(self, jar):
+        self._jar = jar
+
+    def _profile_cookie_loader(self):
+        if self._jar is _RAISE131:
+            def _boom(browser):
+                raise OSError('browser is running')
+            return _boom
+        return lambda browser: self._jar
+
+
+_RAISE131 = object()
+_JAR131 = [
+    _Cookie131('.ok.ru', 'AUTHCODE', 'a1'),
+    _Cookie131('ok.ru', 'JSESSIONID', 'j1'),
+    _Cookie131('.other.example', 'AUTHCODE', 'nope'),
+    _Cookie131('.ok.ru', '', 'no name'),
+]
+_got131 = _Profile131(_JAR131)._profile_cookies_for(['ok.ru', 'voe.sx'])
+_names131 = sorted(c.name for c in _got131)
+report(_names131 == ['AUTHCODE', 'JSESSIONID'],
+   'the session cookies for the domain are read out of the browser profile',
+   repr(_names131))
+report(all(c.value in ('a1', 'j1') for c in _got131),
+   'and only those: another site\'s session is never sent to this one',
+   repr(sorted((c.domain, c.name) for c in _got131)))
+
+report(_Profile131(None)._profile_cookies_for(['ok.ru']) == [],
+   'a browser with no cookies in it yields nothing rather than failing')
+report(_Profile131(_RAISE131)._profile_cookies_for(['ok.ru']) == [],
+   'and a browser holding a lock on its cookie store is survived -- the '
+   'caller carries on without cookies instead of losing the resolution')
+report(_Profile131(_JAR131)._profile_cookies_for([]) == [],
+   'with nothing asked for, nothing is read')
+
+# Neither extractor is installed here, so the loader must say so rather
+# than raise -- the caller treats "no extractor" as "no cookies".
+report(_Profile131(_JAR131)._profile_cookie_loader() is None
+       or callable(_Profile131(_JAR131)._profile_cookie_loader()),
+   'the loader is either missing or callable, never broken')
+
+
+# -----------------------------------------------------------------------
 # 128. OK.ru is not a VOE host. It only ever reached the VOE decoder
 #      because /video/<digits> looks like an embed slug. Match it on its
 #      own name -- exactly, because a bare 'ok.ru' substring also catches
