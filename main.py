@@ -786,6 +786,13 @@ _GOFILE_CONTENTS_CAPTURE_JS = r"""
 })();
 """
 
+_GOFILE_PASSWORD_FIELD_JS = r"""
+(function() {
+    var inputs = document.querySelectorAll('input[type="password"]');
+    return (inputs && inputs.length) ? 'yes' : 'no';
+})()
+"""
+
 # Injected into the Eporner page BEFORE its own scripts run, for the same
 # reason as the GoFile capture script above. Eporner's own player fetches
 # its real source list from /xhr/video/<slug>?hash=... — we don't call this
@@ -7796,6 +7803,7 @@ class VideoPlayer(QMainWindow):
     voe_capture_failed = pyqtSignal(str, str)             # source_url, error_message
     prepared_url_addition_ready = pyqtSignal(object)
     gofile_share_page_requested = pyqtSignal(str)
+    gofile_password_listing_ready = pyqtSignal(str, object)
     favicon_ready = pyqtSignal(str, bytes)  # domain, raw image bytes
     # R42: live link-analysis panel updates. (url, status, detail) -
     # safe to emit from any thread; the slot updates the panel on the
@@ -8119,6 +8127,7 @@ class VideoPlayer(QMainWindow):
         self.voe_capture_failed.connect(self._on_voe_capture_failed)
         self.prepared_url_addition_ready.connect(self._on_prepared_url_addition_ready)
         self.gofile_share_page_requested.connect(self._on_gofile_share_page_requested)
+        self.gofile_password_listing_ready.connect(self._on_gofile_password_listing_ready)
         self.link_flow_note.connect(self._on_link_flow_note)
         self.clipboard_history_ready.connect(self._on_clipboard_history_ready)
         self.favicon_ready.connect(self._on_favicon_ready)
@@ -24991,6 +25000,8 @@ try {
             label_lines.append(f"Name: {display}")
         label_lines.append(f"URL: {source_url}")
         label_lines.append("")
+        label_lines.append("It is saved for this link and its playlist files, so it is not asked again.")
+        label_lines.append("")
         label_lines.append("Password:")
         password, ok = QInputDialog.getText(
             self,
@@ -25015,51 +25026,196 @@ try {
             if event is not None:
                 event.set()
 
-    def _remote_password_for_url(self, provider, source_url, force_prompt=False, reason=''):
+    def _clean_remote_password(self, password):
+        return re.sub(r'[\x00-\x08\x0b-\x1f\x7f]+', '', str(password or '')).strip()
+
+    def _remote_password_alias_keys(self, provider, source_url):
+        """Stable ids so a folder password also matches its playlist files."""
+        provider_key = str(provider or 'remote').strip().lower()
+        keys = []
+        try:
+            if provider_key == 'gofile':
+                content_id = self._gofile_content_id_from_url(source_url)
+                if content_id:
+                    keys.append(f'gofile:id:{str(content_id).strip().lower()}')
+            elif provider_key == 'filester':
+                parsed = urlparse(str(source_url or ''))
+                match = re.match(
+                    r'^/(?:d|f|file|download|v|dl)/([^/?#]+)',
+                    parsed.path or '',
+                    re.IGNORECASE,
+                )
+                if match:
+                    keys.append(f'filester:slug:{match.group(1).strip().lower()}')
+        except Exception:
+            pass
+        return keys
+
+    def _lookup_cached_remote_password(self, provider, source_url):
+        store = getattr(self, '_remote_url_passwords', None)
+        if not isinstance(store, dict):
+            return ''
+        keys = []
+        primary = self._remote_password_cache_key(provider, source_url)
+        if primary:
+            keys.append(primary)
+        keys.extend(self._remote_password_alias_keys(provider, source_url))
+        for key in keys:
+            cached = self._clean_remote_password(store.get(key))
+            if cached:
+                return cached
+        provider_key = str(provider or 'remote').strip().lower()
+        try:
+            if provider_key == 'gofile':
+                content_id = self._gofile_content_id_from_url(source_url)
+                if content_id:
+                    pattern = re.compile(
+                        r'/d/' + re.escape(str(content_id)) + r'(?:[/?#]|$)',
+                        re.IGNORECASE,
+                    )
+                    for key, value in store.items():
+                        if not str(key).startswith('gofile:'):
+                            continue
+                        if pattern.search(str(key)):
+                            cached = self._clean_remote_password(value)
+                            if cached:
+                                return cached
+                # A GoFile password belongs to one /d/ id. Never borrow another.
+                return ''
+            if provider_key == 'filester':
+                parsed = urlparse(str(source_url or ''))
+                match = re.match(
+                    r'^/(?:d|f|file|download|v|dl)/([^/?#]+)',
+                    parsed.path or '',
+                    re.IGNORECASE,
+                )
+                slug = match.group(1) if match else ''
+                if slug:
+                    pattern = re.compile(
+                        r'/(?:d|f|file|download|v|dl)/' + re.escape(slug) + r'(?:[/?#]|$)',
+                        re.IGNORECASE,
+                    )
+                    for key, value in store.items():
+                        if not str(key).startswith('filester:'):
+                            continue
+                        if pattern.search(str(key)) or str(key) == f'filester:slug:{slug.lower()}':
+                            cached = self._clean_remote_password(value)
+                            if cached:
+                                return cached
+        except Exception:
+            if provider_key == 'gofile':
+                return ''
+        # One saved password for this host can be reused. Several are
+        # folder-specific, and guessing would unlock the wrong playlist.
+        try:
+            host = (urlparse(str(source_url or '')).netloc or '').lower().strip()
+            if host.startswith('www.'):
+                host = host[4:]
+        except Exception:
+            return ''
+        if not host:
+            return ''
+        matches = []
+        prefix = f'{provider_key}:'
+        for key, value in store.items():
+            key_text = str(key or '')
+            if not key_text.startswith(prefix):
+                continue
+            if key_text.startswith((f'{provider_key}:id:', f'{provider_key}:slug:')):
+                continue
+            cached = self._clean_remote_password(value)
+            if not cached:
+                continue
+            try:
+                key_host = (urlparse(key_text[len(prefix):]).netloc or '').lower().strip()
+                if key_host.startswith('www.'):
+                    key_host = key_host[4:]
+            except Exception:
+                continue
+            if key_host == host and cached not in matches:
+                matches.append(cached)
+        if len(matches) == 1:
+            return matches[0]
+        return ''
+
+    def _remember_remote_password(self, provider, source_url, password, extra_urls=None):
+        password = self._clean_remote_password(password)
+        if not password:
+            return False
+        if not isinstance(getattr(self, '_remote_url_passwords', None), dict):
+            self._remote_url_passwords = {}
+        urls = []
+        for url in [source_url, *(extra_urls or [])]:
+            url = str(url or '').strip()
+            if url and url not in urls:
+                urls.append(url)
+        changed = False
+        for url in urls or [source_url]:
+            for key in [self._remote_password_cache_key(provider, url), *self._remote_password_alias_keys(provider, url)]:
+                if key and self._remote_url_passwords.get(key) != password:
+                    self._remote_url_passwords[key] = password
+                    changed = True
+        if changed:
+            self._save_remote_passwords()
+            print(f'[PASSWORDS] remembered {provider} password for {len(urls) or 1} link(s)')
+        return True
+
+    def _remote_password_for_url(self, provider, source_url, force_prompt=False, reason='', remember=True):
         if not hasattr(self, '_remote_url_passwords') or not isinstance(self._remote_url_passwords, dict):
             self._remote_url_passwords = {}
-        key = self._remote_password_cache_key(provider, source_url)
-        if key and not force_prompt:
-            cached_raw = str(self._remote_url_passwords.get(key) or '')
-            cached = re.sub(r'[\x00-\x08\x0b-\x1f\x7f]+', '', cached_raw).strip()
+        if not force_prompt:
+            cached = self._lookup_cached_remote_password(provider, source_url)
             if cached:
-                if cached != cached_raw:
-                    self._remote_url_passwords[key] = cached
-                    self._save_remote_passwords()
                 return cached
-            provider_key = str(provider or 'remote').strip().lower()
-            if provider_key != 'gofile':
-                # Domain-level fallback is useful for hosts where folder child
-                # URLs do not share a stable parent id. GoFile passwords are
-                # folder-specific, so never reuse them across different /d/ ids.
-                try:
-                    from urllib.parse import urlparse as _up
-                    _host = (_up(str(source_url or '')).netloc or '').lower().strip()
-                    if _host:
-                        _prefix = f"{provider_key}:"
-                        for _k, _v in self._remote_url_passwords.items():
-                            if not _v or not str(_k).startswith(_prefix):
-                                continue
-                            _k_host = (_up(str(_k)[len(_prefix):]).netloc or '').lower().strip()
-                            if _k_host and _k_host == _host:
-                                return str(_v).strip()
-                except Exception:
-                    pass
-            return ''
 
-        if QThread.currentThread() == self.thread():
-            password = self._prompt_remote_password(provider, source_url, reason)
-        else:
-            event = threading.Event()
-            request = {'event': event, 'password': '', 'reason': reason}
-            self.remote_password_requested.emit(str(provider or 'remote'), str(source_url or ''), request)
-            event.wait(180)
-            password = re.sub(r'[\x00-\x08\x0b-\x1f\x7f]+', '', str(request.get('password') or '')).strip()
+        key = self._remote_password_cache_key(provider, source_url) or ''
+        if not key:
+            aliases = self._remote_password_alias_keys(provider, source_url)
+            key = aliases[0] if aliases else str(source_url or '')
+        lock = getattr(self, '_remote_password_lock', None)
+        if lock is None:
+            lock = threading.Lock()
+            self._remote_password_lock = lock
+        pending = getattr(self, '_remote_password_pending', None)
+        if not isinstance(pending, dict):
+            pending = {}
+            self._remote_password_pending = pending
+        with lock:
+            slot = pending.get(key)
+            if slot is None:
+                slot = {'event': threading.Event(), 'password': ''}
+                pending[key] = slot
+                owner = True
+            else:
+                owner = False
+        if not owner:
+            # Another file in this playlist is already asking. Wait for that
+            # answer instead of opening a second dialog. The GUI thread cannot
+            # wait: it is the thread that shows the dialog.
+            if QThread.currentThread() == self.thread():
+                return self._lookup_cached_remote_password(provider, source_url)
+            slot['event'].wait(180)
+            return slot.get('password') or self._lookup_cached_remote_password(provider, source_url)
 
-        if password and key:
-            self._remote_url_passwords[key] = password
-            self._save_remote_passwords()
-        return password
+        try:
+            if QThread.currentThread() == self.thread():
+                password = self._prompt_remote_password(provider, source_url, reason)
+            else:
+                event = threading.Event()
+                request = {'event': event, 'password': '', 'reason': reason}
+                self.remote_password_requested.emit(str(provider or 'remote'), str(source_url or ''), request)
+                event.wait(180)
+                password = self._clean_remote_password(request.get('password'))
+            password = self._clean_remote_password(password)
+            if password and remember:
+                self._remember_remote_password(provider, source_url, password)
+            slot['password'] = password
+            return password
+        finally:
+            slot['event'].set()
+            with lock:
+                if pending.get(key) is slot:
+                    pending.pop(key, None)
 
     def _save_remote_passwords(self):
         try:
@@ -25074,14 +25230,66 @@ try {
     def _clear_remote_password_for_url(self, provider, source_url):
         if not hasattr(self, '_remote_url_passwords') or not isinstance(self._remote_url_passwords, dict):
             self._remote_url_passwords = {}
-        key = self._remote_password_cache_key(provider, source_url)
         removed = False
-        if key in self._remote_url_passwords:
-            self._remote_url_passwords.pop(key, None)
-            removed = True
+        for key in [self._remote_password_cache_key(provider, source_url), *self._remote_password_alias_keys(provider, source_url)]:
+            if key and key in self._remote_url_passwords:
+                self._remote_url_passwords.pop(key, None)
+                removed = True
         if removed:
             self._save_remote_passwords()
         return removed
+
+    def _remote_password_was_rejected(self, provider, data=None, text=''):
+        parts = []
+        if isinstance(data, dict):
+            for key in ('status', 'message', 'error', 'code', 'description'):
+                if data.get(key) is not None:
+                    parts.append(str(data.get(key)))
+        elif data is not None:
+            parts.append(str(data))
+        if text:
+            parts.append(str(text)[:1200])
+        haystack = ' '.join(parts).lower()
+        return any(token in haystack for token in (
+            'wrong password', 'invalid password', 'incorrect password',
+            'error-passwordwrong', 'passwordwrong', 'bad password',
+        ))
+
+    def _filester_password_for_attempt(self, source_url, password, prompted, rejected=False, reason=''):
+        """Return (password, prompted). Ask only when nothing is saved, or once to replace a rejected one."""
+        password = self._clean_remote_password(password)
+        if rejected:
+            if prompted:
+                return '', True
+            self._clear_remote_password_for_url('filester', source_url)
+            replacement = self._remote_password_for_url(
+                'filester',
+                source_url,
+                force_prompt=True,
+                reason=reason or 'That Filester password was rejected.',
+            )
+            return self._clean_remote_password(replacement), True
+        if password:
+            return password, prompted
+        if prompted:
+            return '', True
+        entered = self._remote_password_for_url(
+            'filester',
+            source_url,
+            force_prompt=True,
+            reason=reason or 'This Filester link is password protected.',
+        )
+        return self._clean_remote_password(entered), True
+
+    def _publish_filester_password(self, source_url, password, entries):
+        password = self._clean_remote_password(password)
+        if not password:
+            return
+        urls = []
+        for entry in entries or []:
+            if isinstance(entry, dict) and entry.get('source_url'):
+                urls.append(entry.get('source_url'))
+        self._remember_remote_password('filester', source_url, password, urls)
 
     def _gofile_password_candidates(self, password):
         password = str(password or '').strip()
@@ -34805,6 +35013,8 @@ try {
         # matches GoFile's real page structure before wiring it into the
         # playlist UI.
         self.gofile_web_view.page().runJavaScript(_GOFILE_FOLDER_SCRAPE_JS, self._on_gofile_folder_metadata_scraped)
+        QTimer.singleShot(800, lambda url=current_url: self._consider_gofile_page_password(url))
+        QTimer.singleShot(2500, lambda url=current_url: self._consider_gofile_page_password(url))
         # R41/R42: page is up - its /contents API request (and our pull
         # of it) lands within the next second or two; that will shorten
         # this countdown. This 20s backstop only fires when contents
@@ -34987,6 +35197,10 @@ try {
         if not page_source_url:
             print('[GOFILE][CONTENTS] No current GoFile page URL to attach parsed entries to.')
             return
+        if self._gofile_captures_need_password(captures):
+            print('[GOFILE][CONTENTS] Password required; asking once instead of reloading the page')
+            self._offer_gofile_page_password(page_source_url)
+            return
 
         folder_entries = []
         seen_ids = set()
@@ -35032,37 +35246,7 @@ try {
             return
 
         print(f'[GOFILE][CONTENTS] Parsed {len(folder_entries)} entrie(s); wiring into the playlist.')
-
-        cache_key = self._gofile_folder_cache_key(page_source_url)
-        if not hasattr(self, '_gofile_entries_cache') or not isinstance(self._gofile_entries_cache, dict):
-            self._gofile_entries_cache = {}
-        self._gofile_entries_cache[cache_key] = {
-            'entries': [dict(e) for e in folder_entries],
-            'expires': time.time() + 900,
-        }
-
-        folder_path = self._make_remote_folder_entry_path(page_source_url)
-        file_count = sum(1 for e in folder_entries if e.get('entry_type') != 'remote_folder')
-        folder_count = sum(1 for e in folder_entries if e.get('entry_type') == 'remote_folder')
-        meta = dict(self._remote_folder_meta(folder_path))
-        meta['provider'] = 'gofile'
-        meta.setdefault('source_url', page_source_url)
-        if folder_title:
-            meta['title'] = folder_title
-        meta['file_count'] = file_count
-        meta['folder_count'] = folder_count
-        meta['item_count'] = file_count + folder_count
-        self._remote_folder_metadata[folder_path] = meta
-
-        if folder_path in getattr(self, 'playlist', []):
-            self._insert_remote_folder_children(folder_path, folder_entries)
-        else:
-            # Row isn't in the playlist yet (unusual, but possible if the
-            # in-app browser was opened directly). Just cache the children
-            # on the metadata so the row picks them up whenever it's added.
-            meta['children'] = folder_entries
-            self._remote_folder_metadata[folder_path] = meta
-        self._refresh_playlist_row_metadata(folder_path)
+        file_count, folder_count = self._install_gofile_folder_listing(page_source_url, folder_entries, folder_title)
         # R42: contents are IN THE PLAYLIST now - this is the moment the
         # "don't move to the next link until the current one is fully
         # listed" rule waits for. Advance to the next queued page shortly
@@ -35104,6 +35288,244 @@ try {
             print(f'[GOFILE][WEB][ERROR] Could not read load failure details: {exc}')
 
     @pyqtSlot(str)
+    def _mark_gofile_skip_share_page(self, source_url, seconds=45):
+        skips = getattr(self, '_gofile_skip_share_until', None)
+        if not isinstance(skips, dict):
+            skips = {}
+            self._gofile_skip_share_until = skips
+        key = self._gofile_folder_cache_key(source_url)
+        if not key:
+            return
+        skips[key] = time.time() + max(5, float(seconds or 45))
+        reasons = getattr(self, '_gofile_browser_failure_reason', None)
+        if not isinstance(reasons, dict):
+            reasons = {}
+            self._gofile_browser_failure_reason = reasons
+        reasons[key] = 'password'
+
+    def _gofile_share_page_blocked(self, source_url):
+        key = self._gofile_folder_cache_key(source_url)
+        until = float((getattr(self, '_gofile_skip_share_until', {}) or {}).get(key) or 0)
+        return bool(key) and until > time.time()
+
+    def _note_gofile_password_attempt(self, source_url):
+        attempts = getattr(self, '_gofile_password_attempt_at', None)
+        if not isinstance(attempts, dict):
+            attempts = {}
+            self._gofile_password_attempt_at = attempts
+        key = self._gofile_folder_cache_key(source_url)
+        if key:
+            attempts[key] = time.time()
+
+    def _gofile_captures_need_password(self, captures):
+        for capture in captures or []:
+            if not isinstance(capture, dict):
+                continue
+            status = str(capture.get('status') or '').strip()
+            if status in ('error-passwordRequired', 'error-passwordWrong'):
+                return True
+        return False
+
+    def _gofile_folder_entries_from_api_data(self, data, source_url):
+        folder_entries = []
+        seen_ids = set()
+        raw_data = data.get('data') if isinstance(data, dict) else None
+        if not isinstance(raw_data, dict):
+            return folder_entries
+        children = raw_data.get('children')
+        if isinstance(children, dict):
+            raw_items = list(children.values())
+        elif isinstance(children, list):
+            raw_items = children
+        elif raw_data.get('type') == 'file':
+            raw_items = [raw_data]
+        else:
+            raw_items = []
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict):
+                continue
+            item_id = str(raw_item.get('id') or '').strip()
+            if item_id and item_id in seen_ids:
+                continue
+            entry = self._gofile_entry_from_capture(raw_item, source_url)
+            if not entry:
+                continue
+            if item_id:
+                seen_ids.add(item_id)
+            folder_entries.append(entry)
+            print(
+                f"[GOFILE][API]   name={raw_item.get('name')!r} "
+                f"size={raw_item.get('size')!r} type={raw_item.get('type')!r} "
+                f"link={raw_item.get('link')!r}"
+            )
+        return folder_entries
+
+    def _bind_gofile_folder_password(self, source_url, entries):
+        password = self._lookup_cached_remote_password('gofile', source_url)
+        if not password:
+            return
+        # File rows share this folder's content id (#file= is not part of the
+        # cache key). Subfolders are different /d/ ids and keep their own password.
+        child_urls = []
+        for entry in entries or []:
+            if not isinstance(entry, dict) or entry.get('entry_type') == 'remote_folder':
+                continue
+            url = entry.get('source_url')
+            if url:
+                child_urls.append(url)
+        self._remember_remote_password('gofile', source_url, password, child_urls)
+
+    def _install_gofile_folder_listing(self, page_source_url, folder_entries, folder_title=''):
+        page_source_url = self._canonicalize_remote_source_url(self._sanitize_url(page_source_url or ''))
+        cache_key = self._gofile_folder_cache_key(page_source_url)
+        if not hasattr(self, '_gofile_entries_cache') or not isinstance(self._gofile_entries_cache, dict):
+            self._gofile_entries_cache = {}
+        self._gofile_entries_cache[cache_key] = {
+            'entries': [dict(e) for e in folder_entries if isinstance(e, dict)],
+            'expires': time.time() + 900,
+        }
+        self._bind_gofile_folder_password(page_source_url, folder_entries)
+        folder_path = self._make_remote_folder_entry_path(page_source_url)
+        file_count = sum(1 for e in folder_entries if e.get('entry_type') != 'remote_folder')
+        folder_count = sum(1 for e in folder_entries if e.get('entry_type') == 'remote_folder')
+        meta = dict(self._remote_folder_meta(folder_path))
+        meta['provider'] = 'gofile'
+        meta.setdefault('source_url', page_source_url)
+        if folder_title:
+            meta['title'] = folder_title
+        meta['file_count'] = file_count
+        meta['folder_count'] = folder_count
+        meta['item_count'] = file_count + folder_count
+        meta['children'] = folder_entries
+        self._remote_folder_metadata[folder_path] = meta
+        if folder_path in getattr(self, 'playlist', []):
+            self._insert_remote_folder_children(folder_path, folder_entries)
+        self._refresh_playlist_row_metadata(folder_path)
+        return file_count, folder_count
+
+    def _consider_gofile_page_password(self, source_url):
+        source_url = self._canonicalize_remote_source_url(self._sanitize_url(source_url or ''))
+        if not self._is_gofile_folder_page_url(source_url):
+            return
+        view = getattr(self, 'gofile_web_view', None)
+        if view is None:
+            return
+        try:
+            current = self._canonicalize_remote_source_url(self._sanitize_url(view.url().toString()))
+        except Exception:
+            current = ''
+        if current and self._gofile_folder_cache_key(current) != self._gofile_folder_cache_key(source_url):
+            return
+        if self._lookup_cached_remote_password('gofile', source_url):
+            self._start_gofile_saved_password_unlock(source_url)
+            return
+        view.page().runJavaScript(
+            _GOFILE_PASSWORD_FIELD_JS,
+            lambda result, url=source_url: self._on_gofile_password_field(url, result),
+        )
+
+    def _on_gofile_password_field(self, source_url, result):
+        if str(result or '').strip().lower() != 'yes':
+            return
+        self._offer_gofile_page_password(source_url)
+
+    def _offer_gofile_page_password(self, source_url):
+        key = self._gofile_folder_cache_key(source_url)
+        if not key:
+            return
+        offered = getattr(self, '_gofile_password_offer_ids', None)
+        if not isinstance(offered, set):
+            offered = set()
+            self._gofile_password_offer_ids = offered
+        if key in offered:
+            return
+        if self._lookup_cached_remote_password('gofile', source_url):
+            self._start_gofile_saved_password_unlock(source_url)
+            return
+        offered.add(key)
+        try:
+            timer = getattr(self, '_gofile_page_advance_timer', None)
+            if timer is not None:
+                timer.stop()
+        except Exception:
+            pass
+        password = self._remote_password_for_url(
+            'gofile',
+            source_url,
+            force_prompt=True,
+            remember=False,
+            reason='This GoFile folder is password protected.',
+        )
+        if not password:
+            return
+        self._start_gofile_password_unlock(source_url, password)
+
+    def _start_gofile_saved_password_unlock(self, source_url):
+        if float(getattr(self, '_gofile_api_skip_until', 0.0) or 0.0) > time.time():
+            self.show_osd('GoFile is rate-limited. The site was not opened again.', duration=3500)
+            return
+        key = self._gofile_folder_cache_key(source_url)
+        recent = float((getattr(self, '_gofile_password_attempt_at', {}) or {}).get(key) or 0)
+        if key and time.time() - recent < 20:
+            return
+        self._start_gofile_password_unlock(source_url)
+
+    def _start_gofile_password_unlock(self, source_url, password=None):
+        key = self._gofile_folder_cache_key(source_url) or str(source_url or '')
+        inflight = getattr(self, '_gofile_password_unlock_inflight', None)
+        if not isinstance(inflight, set):
+            inflight = set()
+            self._gofile_password_unlock_inflight = inflight
+        if key in inflight:
+            return
+        inflight.add(key)
+        self._note_gofile_password_attempt(source_url)
+
+        def work(url=source_url, pw=password):
+            try:
+                data, _token = self._fetch_gofile_contents(url, password=pw, allow_prompt=pw is None)
+                entries = self._gofile_folder_entries_from_api_data(data, url) if data else []
+                title = ''
+                raw = data.get('data') if isinstance(data, dict) else None
+                if isinstance(raw, dict):
+                    title = self._clean_remote_title(raw.get('name'))
+                self.gofile_password_listing_ready.emit(url, {
+                    'entries': entries,
+                    'title': title,
+                    'ok': bool(entries),
+                })
+            except Exception as exc:
+                print(f'[GOFILE] Password unlock failed: {exc}')
+                self.gofile_password_listing_ready.emit(url, {'entries': [], 'title': '', 'ok': False})
+            finally:
+                inflight.discard(key)
+
+        threading.Thread(target=work, name='gofile-password-unlock', daemon=True).start()
+
+    def _request_gofile_share_page(self, source_url):
+        if self._gofile_share_page_blocked(source_url):
+            print(f'[GOFILE] Not opening the share page for {source_url}')
+            return
+        if self._lookup_cached_remote_password('gofile', source_url):
+            print(f'[GOFILE] Saved password is enough for {source_url}; not opening the share page')
+            self._start_gofile_saved_password_unlock(source_url)
+            return
+        self.gofile_share_page_requested.emit(source_url)
+
+    @pyqtSlot(str, object)
+    def _on_gofile_password_listing_ready(self, source_url, payload):
+        payload = payload if isinstance(payload, dict) else {}
+        entries = payload.get('entries') or []
+        if not entries:
+            self.show_osd('That GoFile password was not accepted', duration=3000)
+            return
+        self._install_gofile_folder_listing(source_url, entries, payload.get('title') or '')
+        self._hide_gofile_share_page()
+        self.show_osd('GoFile password saved for this folder', duration=2500)
+        target = getattr(self, '_gofile_last_requested_url', None) or source_url
+        if self._gofile_selected_file_id_from_url(target):
+            QTimer.singleShot(0, lambda t=target: self.set_media(t, force_reload=True))
+
     def _on_gofile_share_page_requested(self, source_url):
         """Receive an uncached GoFile page from a resolver worker on the GUI thread."""
         source_url = self._sanitize_url(source_url)
@@ -35111,6 +35533,14 @@ try {
         is_gofile = self._is_gofile_folder_page_url(source_url)
         is_eporner = any(t in source_url for t in ('eporner.com', 'eporner.eu'))
         if not (is_gofile or is_eporner):
+            return
+        if is_gofile and self._gofile_share_page_blocked(source_url):
+            print('[GOFILE] Not opening the share page after the password attempt')
+            self.show_osd('GoFile was not opened again. The saved password is the unlock path.', duration=3500)
+            return
+        if is_gofile and self._lookup_cached_remote_password('gofile', source_url):
+            print('[GOFILE] Saved password is enough; not opening the share page')
+            self._start_gofile_saved_password_unlock(source_url)
             return
         if (
             self.gofile_web_view is not None
@@ -35349,7 +35779,7 @@ try {
                 return str(values[0] or '').strip()
         return ''
 
-    def _fetch_gofile_contents(self, source_url, force_new_token=False, page=1, page_size=1000, skip_account_token=False):
+    def _fetch_gofile_contents(self, source_url, force_new_token=False, page=1, page_size=1000, skip_account_token=False, password=None, allow_prompt=True):
         """Fetch a GoFile folder listing via the REST API.
 
         Uses an official account token from gofile_token.txt if available.
@@ -35400,64 +35830,114 @@ try {
         if _requests.__name__ == 'curl_cffi.requests':
             req_kwargs['impersonate'] = 'chrome'
 
+        password_plain = self._clean_remote_password(password) or self._lookup_cached_remote_password('gofile', source_url)
+        prompted = False
         try:
             self._gofile_polite_delay('folder contents fetch', interval=4.0)
             url = f"https://api.gofile.io/contents/{content_id}"
-            params = {
-                'contentFilter': '',
-                'page': page,
-                'pageSize': page_size,
-                'sortField': 'createTime',
-                'sortDirection': -1,
-            }
-            if wt != "SKIPPED_CUSTOM_TOKEN":
-                params['wt'] = wt
+            for _attempt in range(2):
+                params = {
+                    'contentFilter': '',
+                    'page': page,
+                    'pageSize': page_size,
+                    'sortField': 'createTime',
+                    'sortDirection': -1,
+                }
+                if wt != "SKIPPED_CUSTOM_TOKEN":
+                    params['wt'] = wt
+                sent_password = ''
+                if password_plain:
+                    hashed = self._gofile_password_candidates(password_plain)
+                    if hashed:
+                        # The contents API wants the SHA-256 hex, not the raw password.
+                        params['password'] = hashed[0]
+                        sent_password = password_plain
+                        print(f"[GOFILE] Sending password hash for {content_id}")
+                        self._note_gofile_password_attempt(source_url)
 
-            response = _requests.get(url, headers=headers, params=params, **req_kwargs)
+                response = _requests.get(url, headers=headers, params=params, **req_kwargs)
 
-            if response.status_code == 401:
-                print("[GOFILE] HTTP 401 Unauthorized fetching contents. Token/WT rejected.")
-                if custom_token:
-                    # Account token from gofile_token.txt is rejected - fall through to guest token
-                    print("[GOFILE] Account token rejected; falling back to guest token path...")
-                    return self._fetch_gofile_contents(source_url, force_new_token=False, page=page, page_size=page_size, skip_account_token=True)
-                if not force_new_token:
-                    print("[GOFILE] Guest token rejected; retrying with a fresh guest token...")
-                    return self._fetch_gofile_contents(source_url, force_new_token=True, page=page, page_size=page_size, skip_account_token=True)
-                # Both account token and fresh guest token failed - don't cooldown the whole API,
-                # just give up for this call so the browser fallback can still work
-                print("[GOFILE] All token strategies exhausted; giving up on direct API for this request.")
-                return None, None
+                if response.status_code == 401:
+                    print("[GOFILE] HTTP 401 Unauthorized fetching contents. Token/WT rejected.")
+                    if custom_token:
+                        print("[GOFILE] Account token rejected; falling back to guest token path...")
+                        return self._fetch_gofile_contents(
+                            source_url, force_new_token=False, page=page, page_size=page_size,
+                            skip_account_token=True, password=password_plain,
+                            allow_prompt=allow_prompt and not prompted,
+                        )
+                    if not force_new_token:
+                        print("[GOFILE] Guest token rejected; retrying with a fresh guest token...")
+                        return self._fetch_gofile_contents(
+                            source_url, force_new_token=True, page=page, page_size=page_size,
+                            skip_account_token=True, password=password_plain,
+                            allow_prompt=allow_prompt and not prompted,
+                        )
+                    print("[GOFILE] All token strategies exhausted; giving up on direct API for this request.")
+                    if password_plain:
+                        self._mark_gofile_skip_share_page(source_url)
+                    return None, None
 
-            if response.status_code == 429:
-                retry_after = response.headers.get('Retry-After') or response.headers.get('X-RateLimit-Reset')
-                cooldown = 60.0
-                try:
-                    if retry_after:
-                        value = float(retry_after)
-                        cooldown = max(cooldown, value - time.time() if value > 1e6 else value)
-                except Exception:
-                    cooldown = 300.0
-                cooldown = min(max(cooldown, 30.0), 900.0)
-                print(f"[GOFILE] HTTP 429 Too Many Requests - backing off for {int(cooldown)}s.")
-                self._gofile_api_skip_until = time.time() + cooldown
-                return None, None
+                if response.status_code == 429:
+                    retry_after = response.headers.get('Retry-After') or response.headers.get('X-RateLimit-Reset')
+                    cooldown = 60.0
+                    try:
+                        if retry_after:
+                            value = float(retry_after)
+                            cooldown = max(cooldown, value - time.time() if value > 1e6 else value)
+                    except Exception:
+                        cooldown = 300.0
+                    cooldown = min(max(cooldown, 30.0), 900.0)
+                    print(f"[GOFILE] HTTP 429 Too Many Requests - backing off for {int(cooldown)}s.")
+                    self._gofile_api_skip_until = time.time() + cooldown
+                    if password_plain or self._lookup_cached_remote_password('gofile', source_url):
+                        self._mark_gofile_skip_share_page(source_url, seconds=max(60, int(cooldown)))
+                    return None, None
 
-            if not response.ok:
-                print(f"[GOFILE] HTTP {response.status_code} fetching contents.")
-                return None, None
+                if not response.ok:
+                    print(f"[GOFILE] HTTP {response.status_code} fetching contents.")
+                    if password_plain:
+                        self._mark_gofile_skip_share_page(source_url)
+                    return None, None
 
-            data = response.json()
-            status = str((data or {}).get('status') or '').strip()
-            if status == 'error-passwordRequired':
-                print("[GOFILE] Folder requires a password.")
-                return None, None
-            if status != 'ok':
-                print(f"[GOFILE] API returned error status: {status}")
-                return None, None
-            return data, token
+                data = response.json()
+                status = str((data or {}).get('status') or '').strip()
+                if status in ('error-passwordRequired', 'error-passwordWrong'):
+                    if sent_password:
+                        print(f"[GOFILE] Password rejected for {content_id} ({status})")
+                        self._clear_remote_password_for_url('gofile', source_url)
+                        password_plain = ''
+                    else:
+                        print(f"[GOFILE] Folder requires a password ({content_id})")
+                    if prompted or not allow_prompt:
+                        self._mark_gofile_skip_share_page(source_url)
+                        return None, None
+                    prompted = True
+                    password_plain = self._remote_password_for_url(
+                        'gofile',
+                        source_url,
+                        force_prompt=True,
+                        remember=False,
+                        reason='This GoFile folder is password protected.',
+                    )
+                    if not password_plain:
+                        self._mark_gofile_skip_share_page(source_url)
+                        return None, None
+                    continue
+                if status != 'ok':
+                    print(f"[GOFILE] API returned error status: {status}")
+                    if password_plain:
+                        self._mark_gofile_skip_share_page(source_url)
+                    return None, None
+                if sent_password:
+                    self._remember_remote_password('gofile', source_url, sent_password)
+                return data, token
+            self._mark_gofile_skip_share_page(source_url)
+            return None, None
         except Exception as e:
             print(f"[GOFILE] Exception fetching contents: {e}")
+            if password_plain:
+                self._mark_gofile_skip_share_page(source_url)
             return None, None
 
     def _iter_gofile_content_nodes(self, node):
@@ -35814,57 +36294,37 @@ try {
 
         try:
             gofile_method = str((self.settings or {}).get('gofile_extraction_method', 'browser')).strip().lower()
-
-            if gofile_method == 'api':
-                print(f"[GOFILE] Direct API extraction selected; calling _fetch_gofile_contents for {cache_key}")
+            saved_password = self._lookup_cached_remote_password('gofile', source_url)
+            # Ordinary browser-mode pastes stay off the contents API. A saved
+            # folder password is the exception: one hashed call, and do not
+            # open the share page (that is what locks the IP).
+            if gofile_method == 'api' or saved_password:
+                if saved_password and gofile_method != 'api':
+                    print(f"[GOFILE] Saved password for {cache_key}; unlocking via API")
+                else:
+                    print(f"[GOFILE] Direct API extraction selected; calling _fetch_gofile_contents for {cache_key}")
                 data, token = self._fetch_gofile_contents(source_url)
                 if not data:
-                    print(f"[GOFILE] API extraction returned no data for {cache_key}; falling back to browser")
+                    if saved_password or self._gofile_share_page_blocked(source_url):
+                        self._mark_gofile_skip_share_page(source_url)
+                        print(f"[GOFILE] Saved password could not unlock {cache_key}; not opening the share page")
+                    else:
+                        print(f"[GOFILE] API extraction returned no data for {cache_key}; falling back to browser")
                     return []
 
-                # Parse folder entries from the API response (same shape as web-captured API)
-                folder_entries = []
-                seen_ids = set()
-                raw_data = data.get('data') if isinstance(data, dict) else None
-                if isinstance(raw_data, dict):
-                    children = raw_data.get('children')
-                    if isinstance(children, dict):
-                        raw_items = list(children.values())
-                    elif isinstance(children, list):
-                        raw_items = children
-                    elif isinstance(raw_data, dict) and raw_data.get('type') == 'file':
-                        raw_items = [raw_data]
-                    else:
-                        raw_items = []
-                    for raw_item in raw_items:
-                        if not isinstance(raw_item, dict):
-                            continue
-                        item_id = str(raw_item.get('id') or '').strip()
-                        if item_id and item_id in seen_ids:
-                            continue
-                        entry = self._gofile_entry_from_capture(raw_item, source_url)
-                        if not entry:
-                            continue
-                        if item_id:
-                            seen_ids.add(item_id)
-                        folder_entries.append(entry)
-                        print(
-                            f"[GOFILE][API]   name={raw_item.get('name')!r} "
-                            f"size={raw_item.get('size')!r} type={raw_item.get('type')!r} "
-                            f"link={raw_item.get('link')!r}"
-                        )
-
+                folder_entries = self._gofile_folder_entries_from_api_data(data, source_url)
                 if folder_entries:
-                    # Cache so subsequent calls are instant
                     self._gofile_entries_cache[cache_key] = {
                         'entries': [dict(e) for e in folder_entries],
                         'expires': time.time() + 900,
                     }
+                    self._bind_gofile_folder_password(source_url, folder_entries)
                     print(f"[GOFILE][API] Resolved {len(folder_entries)} entries for {cache_key}")
                     return folder_entries
-                else:
-                    print(f"[GOFILE][API] No playable entries found via API for {cache_key}")
-                    return []
+                print(f"[GOFILE][API] No playable entries found via API for {cache_key}")
+                if saved_password:
+                    self._mark_gofile_skip_share_page(source_url)
+                return []
             else:
                 print(f"[GOFILE] No cached listing for {cache_key}; no API request will be made.")
                 return []
@@ -35886,7 +36346,7 @@ try {
             # This resolver normally runs in a worker.  Use a signal so an
             # uncached GoFile link still opens in the embedded page on the GUI
             # thread instead of silently failing after the safe API hard-stop.
-            self.gofile_share_page_requested.emit(source_url)
+            self._request_gofile_share_page(source_url)
             cache_key = self._gofile_folder_cache_key(source_url)
             failure_reason = ''
             try:
@@ -35931,7 +36391,7 @@ try {
                 f"[GOFILE] Matched entry for {source_url} has no usable "
                 f"playback_url; opening the share page instead."
             )
-            self.gofile_share_page_requested.emit(source_url)
+            self._request_gofile_share_page(source_url)
             return None
 
         if selected_id:
@@ -35976,22 +36436,39 @@ try {
             if page_response.ok:
                 html = page_response.text or ''
                 if self._remote_response_needs_password('filester', None, html):
-                    filester_password_prompted = True
                     if not filester_password:
-                        filester_password = self._remote_password_for_url(
-                            'filester',
+                        filester_password, filester_password_prompted = self._filester_password_for_attempt(
                             source_url,
-                            force_prompt=True,
+                            filester_password,
+                            filester_password_prompted,
                             reason="This Filester file is password protected.",
                         )
-                    unlocked = self._submit_remote_password_form(
-                        request_session,
-                        page_response.url or source_url,
-                        html,
-                        filester_password,
-                        headers=request_headers,
-                    )
-                    if unlocked is not None:
+                    unlocked = None
+                    if filester_password:
+                        unlocked = self._submit_remote_password_form(
+                            request_session,
+                            page_response.url or source_url,
+                            html,
+                            filester_password,
+                            headers=request_headers,
+                        )
+                        if unlocked is None or self._remote_response_needs_password('filester', None, unlocked.text or ''):
+                            filester_password, filester_password_prompted = self._filester_password_for_attempt(
+                                source_url,
+                                filester_password,
+                                filester_password_prompted,
+                                rejected=True,
+                                reason="That Filester password was rejected.",
+                            )
+                            if filester_password:
+                                unlocked = self._submit_remote_password_form(
+                                    request_session,
+                                    page_response.url or source_url,
+                                    html,
+                                    filester_password,
+                                    headers=request_headers,
+                                )
+                    if unlocked is not None and not self._remote_response_needs_password('filester', None, unlocked.text or ''):
                         html = unlocked.text or ''
                 title = self._html_page_title(html)
                 name_match = re.search(r'window\.fileName\s*=\s*["\']([^"\']+)["\']', html, re.IGNORECASE)
@@ -36112,14 +36589,14 @@ try {
                     except Exception:
                         v2_data = {}
                 if self._remote_response_needs_password('filester', v2_data, v2_response.text) and not filester_password_prompted:
-                    filester_password_prompted = True
-                    if not filester_password:
-                        filester_password = self._remote_password_for_url(
-                            'filester',
-                            source_url,
-                            force_prompt=True,
-                            reason="This Filester file is password protected.",
-                        )
+                    rejected = bool(filester_password) and self._remote_password_was_rejected('filester', v2_data, v2_response.text)
+                    filester_password, filester_password_prompted = self._filester_password_for_attempt(
+                        source_url,
+                        filester_password,
+                        filester_password_prompted,
+                        rejected=rejected,
+                        reason="That Filester password was rejected." if rejected else "This Filester file is password protected.",
+                    )
                     if filester_password:
                         retry_payload = {'file_slug': slug, 'password': filester_password}
                         v2_response = request_session.post(
@@ -36154,14 +36631,14 @@ try {
             if token_response.ok:
                 data = token_response.json()
                 if self._remote_response_needs_password('filester', data, token_response.text) and not filester_password_prompted:
-                    filester_password_prompted = True
-                    if not filester_password:
-                        filester_password = self._remote_password_for_url(
-                            'filester',
-                            source_url,
-                            force_prompt=True,
-                            reason="This Filester file is password protected.",
-                        )
+                    rejected = bool(filester_password) and self._remote_password_was_rejected('filester', data, token_response.text)
+                    filester_password, filester_password_prompted = self._filester_password_for_attempt(
+                        source_url,
+                        filester_password,
+                        filester_password_prompted,
+                        rejected=rejected,
+                        reason="That Filester password was rejected." if rejected else "This Filester file is password protected.",
+                    )
                     if filester_password:
                         token_response = request_session.post(
                             f"{parsed.scheme or 'https'}://{parsed.netloc}/api/public/view",
@@ -36522,12 +36999,27 @@ try {
                     except Exception:
                         continue
                     if self._remote_response_needs_password('filester', _data, resp.text):
-                        if not filester_password_prompted:
-                            filester_password_prompted = True
-                            filester_password = self._remote_password_for_url(
-                                'filester',
+                        # A spray of album endpoints can mention a password without
+                        # having rejected the one we already sent. Only a wrong-password
+                        # response replaces the saved one.
+                        rejected = (
+                            bool(filester_password)
+                            and not filester_password_prompted
+                            and self._remote_password_was_rejected('filester', _data, resp.text)
+                        )
+                        if rejected:
+                            filester_password, filester_password_prompted = self._filester_password_for_attempt(
                                 source_url,
-                                force_prompt=True,
+                                filester_password,
+                                filester_password_prompted,
+                                rejected=True,
+                                reason="That Filester password was rejected.",
+                            )
+                        elif not filester_password and not filester_password_prompted:
+                            filester_password, filester_password_prompted = self._filester_password_for_attempt(
+                                source_url,
+                                filester_password,
+                                filester_password_prompted,
                                 reason="This Filester folder is password protected.",
                             )
                         if not filester_password:
@@ -36611,6 +37103,8 @@ try {
                         if sub_slug and sub_slug in _visited:
                             continue
                         if recursive:
+                            if filester_password:
+                                self._remember_remote_password('filester', file_url, filester_password)
                             sub_entries = self._expand_filester_album_source(
                                 file_url,
                                 _visited,
@@ -36667,6 +37161,7 @@ try {
 
         if _api_succeeded:
             print(f"[FILESTER] API: {len(entries)} entries for {source_url!r}")
+            self._publish_filester_password(source_url, filester_password, entries)
             return self._decorate_filester_folder_entries(entries) if decorate_folders else entries
 
         # ── 2. Fallback: scrape the folder HTML page ──────────────────────────
@@ -36736,12 +37231,11 @@ try {
                     break
                 html = page_resp.text or ''
                 if self._remote_response_needs_password('filester', None, html):
-                    if not filester_password or not filester_password_prompted:
-                        filester_password_prompted = True
-                        filester_password = self._remote_password_for_url(
-                            'filester',
+                    if not filester_password:
+                        filester_password, filester_password_prompted = self._filester_password_for_attempt(
                             source_url,
-                            force_prompt=True,
+                            filester_password,
+                            filester_password_prompted,
                             reason="This Filester folder is password protected.",
                         )
                     if not filester_password:
@@ -36753,11 +37247,34 @@ try {
                         filester_password,
                         headers=self._stream_request_headers(source_url),
                     )
-                    if unlocked is not None:
-                        html = unlocked.text or ''
-                        page_resp = unlocked
-                    else:
+                    still_locked = (
+                        unlocked is None
+                        or self._remote_response_needs_password('filester', None, unlocked.text or '')
+                    )
+                    if still_locked and not filester_password_prompted:
+                        filester_password, filester_password_prompted = self._filester_password_for_attempt(
+                            source_url,
+                            filester_password,
+                            filester_password_prompted,
+                            rejected=True,
+                            reason="That Filester password was rejected.",
+                        )
+                        if filester_password:
+                            unlocked = self._submit_remote_password_form(
+                                scrape_session,
+                                page_resp.url or page_url,
+                                html,
+                                filester_password,
+                                headers=self._stream_request_headers(source_url),
+                            )
+                            still_locked = (
+                                unlocked is None
+                                or self._remote_response_needs_password('filester', None, unlocked.text or '')
+                            )
+                    if still_locked:
                         break
+                    html = unlocked.text or ''
+                    page_resp = unlocked
                 if scrape_page == 1:
                     folder_title = self._clean_remote_title(self._html_page_title(html))
                     if folder_title:
@@ -36883,6 +37400,8 @@ try {
                         continue
                     found_on_page += 1
                     if recursive:
+                        if filester_password:
+                            self._remember_remote_password('filester', sub_url, filester_password)
                         sub_entries = self._expand_filester_album_source(
                             sub_url,
                             _visited,
@@ -36914,6 +37433,7 @@ try {
             pass
 
         print(f"[FILESTER] scrape: {len(entries)} entries for {source_url!r}")
+        self._publish_filester_password(source_url, filester_password, entries)
         return self._decorate_filester_folder_entries(entries) if decorate_folders else entries
 
     def _filester_folder_playlist_entry(self, source_url, level=0, title=None):
@@ -50236,8 +50756,11 @@ try {
                 and float(cached.get('expires') or 0) > time.time()
             )
             if not cache_is_current:
-                self._open_gofile_share_page(file_path)
-                return
+                if self._lookup_cached_remote_password('gofile', file_path):
+                    print(f"[GOFILE] Saved password for {file_path}; not opening the share page")
+                else:
+                    self._open_gofile_share_page(file_path)
+                    return
         self._hide_gofile_share_page()
         # Guard: ignore if already loading this exact file
         if getattr(self, '_set_media_loading', False):
