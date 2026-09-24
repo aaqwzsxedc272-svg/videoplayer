@@ -41270,6 +41270,8 @@ try {
       '[role="button"]',
       '.play-overlay',
       '.vjs-big-play-button',
+      '.fluid_initial_play_button',
+      '.fluid_initial_play',
       '.jw-display-icon-container',
       '.plyr__control--overlaid',
       '.play',
@@ -42726,7 +42728,7 @@ try {
                 if any(token in lower_url for token in (
                     'bkcdn', '/library/', 'adnetwork', 'popunder', 'popcash',
                     'exoclick', 'juicyads', 'trafficjunky', '/ads/', '/advert',
-                    'trailerhg', '/trailer', 'preview', 'sample.m3u8',
+                    'trailerhg', '/trailer', 'preview', 'sample.m3u8', 'mediabook',
                 )):
                     score -= 8
                 _md = _measured_duration(url)
@@ -42747,7 +42749,12 @@ try {
             # successful plain-HTTP probe: the browser was literally playing
             # it, so anti-bot blocks against requests.get() (which would
             # reject the REAL video while an ad sails through) don't matter.
-            _verified_in_order = [c for c in normalized_candidates if c in verified_normalized]
+            _verified_in_order = [
+                c for c in normalized_candidates
+                if c in verified_normalized
+                and not self._media_url_looks_like_preview(c)
+                and not (0.1 <= _measured_duration(c) < 90.0)
+            ]
             if _verified_in_order:
                 best_verified = _verified_in_order[0]
                 probe_headers_v = _with_browser_ua({'Accept': '*/*'})
@@ -42779,6 +42786,9 @@ try {
 
             for candidate in normalized_candidates[:6]:
                 _m_dur = _measured_duration(candidate)
+                if self._media_url_looks_like_preview(candidate):
+                    print(f"[AD_SKIP] rejecting preview capture: {candidate[:140]}")
+                    continue
                 if 0.1 <= _m_dur < 45:
                     # The page itself measured this as a few seconds long —
                     # it is a pre-roll ad, not the video. Never hand it to
@@ -42833,6 +42843,7 @@ try {
                 c for c in _non_ad
                 if self._capture_candidate_has_media_shape(c)
             ]
+            _non_ad = [c for c in _non_ad if not self._media_url_looks_like_preview(c)]
             if _non_ad:
                 print(f"[MIXDROP_CLICK] probe rejected all {len(_non_ad)} candidate(s) for {page_url}; using best-scoring non-ad capture anyway")
                 result_dict = _mixdrop_browser_result(_non_ad[0])
@@ -43771,7 +43782,12 @@ try {
                         except Exception:
                             pass
                     elif line.startswith('VERIFIED_MEDIA::') and _pw_verified_at is None:
-                        _pw_verified_at = time.time()
+                        # A 720p mediabook is still a 20s trailer. Closing on
+                        # that line used to abandon the page before Load video
+                        # could ask for the film.
+                        _verified_value = line.split('::', 1)[-1].strip()
+                        if not self._media_url_looks_like_preview(_verified_value):
+                            _pw_verified_at = time.time()
                     elif line.startswith('VOE_M3U8::') and _pw_m3u8_at is None:
                         _pw_m3u8_at = time.time()
                         if _pw_media_at is None:
@@ -43910,6 +43926,7 @@ try {
         media_candidates = []
         verified_candidates = set()
         measured_media = {}
+        popup_urls = []
         browser_ua = ''
         browser_cookies = ''
         html_b64 = None
@@ -44020,6 +44037,11 @@ try {
                 continue
             if line.startswith('PAGE_TITLE::'):
                 page_title_from_child = line[len('PAGE_TITLE::'):].strip()
+                continue
+            if line.startswith(('POPUP_URL::', 'NAV_URL::')):
+                _offsite = line.split('::', 1)[-1].strip()
+                if _offsite and _offsite not in popup_urls and len(popup_urls) < 12:
+                    popup_urls.append(_offsite)
                 continue
             if line.startswith('PAGE_HTML_B64::'):
                 html_b64 = line[len('PAGE_HTML_B64::'):]
@@ -44295,6 +44317,7 @@ try {
                 if any(token in lower_url for token in (
                     'bkcdn', '/library/', 'adnetwork', 'popunder', 'popcash',
                     'exoclick', 'juicyads', 'trafficjunky', '/ads/', '/advert',
+                    'mediabook',
                 )):
                     score -= 3
                 return score
@@ -44311,7 +44334,12 @@ try {
             # literally playing this URL as a long video, so a probe rejection
             # (anti-bot against requests.get) says nothing against it — the
             # probe happily accepts ad media while the real CDN blocks it.
-            _verified_in_order = [c for c in normalized_candidates if c in verified_normalized]
+            _verified_in_order = [
+                c for c in normalized_candidates
+                if c in verified_normalized
+                and not self._media_url_looks_like_preview(c)
+                and not (0.1 <= _measured_duration(c) < 90.0)
+            ]
             if _verified_in_order:
                 best_verified = _verified_in_order[0]
                 playback_headers_v = _with_browser_ua(self._media_playback_headers(source_url, best_verified))
@@ -44372,6 +44400,9 @@ try {
 
             for candidate in normalized_candidates[:6]:
                 _m_dur = _measured_duration(candidate)
+                if self._media_url_looks_like_preview(candidate):
+                    print(f"[AD_SKIP] rejecting preview capture: {candidate[:140]}")
+                    continue
                 if 0.1 <= _m_dur < 45:
                     # The page itself measured this as a few seconds long —
                     # it is a pre-roll ad, not the video. Never hand it to
@@ -44387,6 +44418,9 @@ try {
                     headers=probe_headers,
                     title=clicked_title,
                 )
+                if resolved and self._media_url_looks_like_preview(resolved.get('playback_url')):
+                    print(f"[AD_SKIP] rejecting preview probe: {str(resolved.get('playback_url') or '')[:140]}")
+                    continue
                 if resolved:
                     # Full browser-like playback headers with the page as
                     # Referer — mpv replays them on every segment request.
@@ -44440,6 +44474,7 @@ try {
                 print(f"[BROWSER_CLICK] dropped {len(_shapeless)} candidate(s) "
                       f"with no media shape (unverified fallback): "
                       f"{str(_shapeless[0])[:140]}")
+            _non_ad = [c for c in _non_ad if not self._media_url_looks_like_preview(c)]
             if _non_ad:
                 best = _non_ad[0]
                 print(f"[BROWSER_CLICK] probe rejected all {len(normalized_candidates)} candidate(s) for {source_url}; using best-ranked capture anyway")
@@ -44469,9 +44504,25 @@ try {
                 return _remember_browser_result(result_dict)
 
         if clicked_html:
-            return self._extract_direct_media_from_clicked_html(
+            clicked_resolved = self._extract_direct_media_from_clicked_html(
                 clicked_html, source_url, clicked_title, subtitle_tracks
             )
+            if clicked_resolved:
+                return clicked_resolved
+        _hoster_popups = []
+        for _offsite in popup_urls:
+            try:
+                _offsite_path = urlparse(_offsite).path or ''
+            except Exception:
+                continue
+            if re.search(r'/(?:v|e|embed|d|f|w|watch)/[^/?#]{4,}', _offsite_path, re.IGNORECASE):
+                _hoster_popups.append(_offsite)
+        if _hoster_popups:
+            print(f'[BROWSER_CLICK] trying {len(_hoster_popups)} hoster page(s) opened by the click', flush=True)
+            popup_resolved = self._resolve_embedded_hoster_urls(
+                _hoster_popups, source_url, clicked_title, subtitle_tracks)
+            if popup_resolved:
+                return popup_resolved
         return None
 
     def _extract_direct_media_from_clicked_html(self, html, page_url, page_title='', subtitle_tracks=None):
@@ -44516,33 +44567,81 @@ try {
             for match in re.finditer(pattern, html, re.IGNORECASE):
                 _remember(match.group(1))
 
+        hoster_urls = self._anchor_hoster_urls(html, page_url)
+        if hoster_urls:
+            hoster_resolved = self._resolve_embedded_hoster_urls(
+                hoster_urls, page_url, page_title, subtitle_tracks)
+            if hoster_resolved:
+                return hoster_resolved
+        try:
+            embed_resolved = self._resolve_known_hoster_embed_from_html(
+                html, page_url, page_title, subtitle_tracks)
+        except Exception:
+            embed_resolved = None
+        if embed_resolved:
+            return embed_resolved
+        short_limit = int(getattr(self, '_HTML_SHORT_FILE_BYTES', 4 * 1024 * 1024) or 0)
+        playable = []
         for candidate in candidates[:8]:
+            if (
+                self._media_url_looks_like_preview(candidate)
+                or self._media_url_looks_like_ad(candidate)
+                or self._media_url_is_site_promo(candidate)
+                or self._media_url_is_trailer(candidate)
+            ):
+                print(f"[BROWSER_CLICK] post-click HTML skipped preview {candidate[:160]}")
+                continue
             resolved = self._probe_remote_media_candidate(
                 candidate,
                 referer=page_url,
                 headers={'Accept': '*/*'},
                 title=page_title,
             )
-            if resolved:
-                playback_headers = self._media_playback_headers(page_url, candidate)
-                resolved['headers'] = dict(playback_headers or resolved.get('headers') or {})
-                resolved['title'] = page_title or resolved.get('title')
-                resolved['source_url'] = page_url
-                resolved['embed_url'] = page_url
-                resolved['resolver_provider'] = 'browser_click'
-                resolved.setdefault('resolved_at_ms', int(time.time() * 1000))
-                if subtitle_tracks:
-                    resolved['subtitle_tracks'] = subtitle_tracks
-                print(f"[BROWSER_CLICK] post-click HTML scan found stream for {page_url}: {candidate[:160]}")
-                return resolved
-        return None
+            if not resolved:
+                continue
+            if self._media_url_looks_like_preview(resolved.get('playback_url')):
+                print(f"[BROWSER_CLICK] post-click HTML skipped preview {str(resolved.get('playback_url') or '')[:160]}")
+                continue
+            try:
+                size_bytes = int(resolved.get('size_bytes') or 0)
+            except Exception:
+                size_bytes = 0
+            if (
+                size_bytes
+                and short_limit
+                and size_bytes < short_limit
+                and not self._is_hls_stream_url(resolved.get('playback_url') or candidate)
+            ):
+                print(f"[BROWSER_CLICK] post-click HTML skipped {size_bytes} byte file {candidate[:160]}")
+                continue
+            playback_headers = self._media_playback_headers(page_url, candidate)
+            resolved['headers'] = dict(playback_headers or resolved.get('headers') or {})
+            resolved['title'] = page_title or resolved.get('title')
+            resolved['source_url'] = page_url
+            resolved['embed_url'] = page_url
+            resolved['resolver_provider'] = 'browser_click'
+            resolved.setdefault('resolved_at_ms', int(time.time() * 1000))
+            if subtitle_tracks:
+                resolved['subtitle_tracks'] = subtitle_tracks
+            print(f"[BROWSER_CLICK] post-click HTML candidate {size_bytes} bytes {candidate[:160]}")
+            playable.append((size_bytes, resolved, candidate))
+        if not playable:
+            return None
+        playable.sort(key=lambda item: item[0], reverse=True)
+        _size, resolved, candidate = playable[0]
+        print(f"[BROWSER_CLICK] post-click HTML scan found stream for {page_url}: {candidate[:160]}")
+        return resolved
 
     # Page scans pick up a teaser/preview stream alongside the real video.
     # Same token family _candidate_score penalises for browser captures.
     _PREVIEW_MEDIA_URL_TOKENS = (
         'preview', 'previewclip', '/trailer', 'trailerhg', 'teaser',
-        'sample.m3u8', '/sample/',
+        'sample.m3u8', '/sample/', 'mediabook',
     )
+    # Article pages list a few-hundred-KB hover trailer next to the film.
+    # Field: pornmz mediabook_320p.mp4 was 956 KB / 20s and won on pattern
+    # order because an mp4 has no playlist duration to measure.
+    _HTML_SHORT_FILE_BYTES = 4 * 1024 * 1024
 
     def _media_url_looks_like_preview(self, url):
         low = str(url or '').lower()
@@ -45673,10 +45772,9 @@ try {
             r'<a[^>]+href=["\']([^"\']+\.(?:mp4|m3u8|webm|mkv|mov|avi|m4v)[^"\']*)["\']',
             r'<a[^>]+href=["\']([^"\']+(?:download|/file/)[^"\']*)["\']',
         ]
-        # Collect every candidate first, then rank. Returning the first
-        # pattern match that probes OK meant a page listing a teaser before
-        # the film resolved to the teaser (field: noodlemagazine played the
-        # preview). Order within a pattern still breaks ties.
+        # Collect every candidate first, then rank by probed size. Returning
+        # the first pattern match that probed OK played a teaser (field:
+        # noodlemagazine preview, pornmz mediabook_320p.mp4).
         candidates = []
         seen_candidates = set()
         for pattern_index, pattern in enumerate(patterns):
@@ -45693,14 +45791,18 @@ try {
         # A tube page often puts a short same-host clip (or an ad mp4) in the
         # player and the film on a server button. Do not play that clip when
         # a hoster link is on the page.
+        for _pattern_index, _candidate_url in candidates:
+            print(f'[HTML_RESOLVE] page candidate {_candidate_url[:180]}', flush=True)
         hoster_urls = self._anchor_hoster_urls(html, page_url)
         full_candidates = [
             item for item in candidates
             if self._direct_candidate_is_full_video(item[1], page_url, bool(hoster_urls))
         ]
+        probed_urls = set()
         if full_candidates:
             direct = self._probe_ranked_html_candidates(
                 full_candidates, page_url, page_title, subtitle_tracks)
+            probed_urls = {str(item[1] or '').lower() for item in full_candidates}
             if direct:
                 return direct
         if hoster_urls:
@@ -45710,41 +45812,60 @@ try {
                 return hoster_resolved
         if not candidates:
             return None
-        # Prefer anything that is not obviously a preview; only fall back to
-        # preview URLs when the page offered nothing else.
+        # A preview-only page (pornmz mediabook_320p.mp4, 20s / 956 KB) used
+        # to be restored here and played as the film. Leave it unplayed so
+        # the browser-click rung can open the real player instead.
         ordered = [
             item for item in candidates
             if not self._media_url_looks_like_preview(item[1])
             and not self._media_url_looks_like_ad(item[1])
-        ] or [
-            item for item in candidates
-            if not self._media_url_looks_like_ad(item[1])
-        ] or candidates
+            and str(item[1] or '').lower() not in probed_urls
+        ]
+        if not ordered:
+            leftover = [
+                item for item in candidates
+                if str(item[1] or '').lower() not in probed_urls
+            ]
+            if leftover:
+                self._probe_ranked_html_candidates(
+                    leftover, page_url, page_title, subtitle_tracks)
+            else:
+                print(
+                    f'[HTML_RESOLVE] no full video among {len(candidates)} '
+                    f'page candidate(s); not playing a preview',
+                    flush=True,
+                )
+            return None
         return self._probe_ranked_html_candidates(
             ordered, page_url, page_title, subtitle_tracks)
 
     def _probe_ranked_html_candidates(self, ordered, page_url, page_title='', subtitle_tracks=None):
+        """Probe page media URLs and play the largest real file, never a trailer.
+
+        Pattern order used to return the first probe that succeeded. An mp4
+        has no playlist duration, so a 20s / 956 KB mediabook_320p.mp4 beat
+        any later film. Log every candidate and its size, and return None
+        when the page only offered a short clip.
+        """
         ordered = list(ordered or [])
         if not ordered:
             return None
+        short_limit = int(getattr(self, '_HTML_SHORT_FILE_BYTES', 4 * 1024 * 1024) or 0)
         durations = {}
-        if len(ordered) > 1:
-            for _pattern_index, candidate in ordered[:6]:
-                if not self._is_hls_stream_url(candidate):
-                    continue
-                measured = self._hls_playlist_duration_seconds(
-                    candidate,
-                    self._media_playback_headers(page_url, candidate),
-                    page_url,
-                )
-                if measured > 0.0:
-                    durations[candidate] = measured
+        for _pattern_index, candidate in ordered[:8]:
+            if not self._is_hls_stream_url(candidate):
+                continue
+            measured = self._hls_playlist_duration_seconds(
+                candidate,
+                self._media_playback_headers(page_url, candidate),
+                page_url,
+            )
+            if measured > 0.0:
+                durations[candidate] = measured
 
-        def _rank(item):
-            return self._html_candidate_rank_score(
-                item[0], item[1], durations)
-
-        for _pattern_index, resolved_url in sorted(ordered, key=_rank, reverse=True):
+        playable = []
+        for pattern_index, resolved_url in ordered[:8]:
+            measured = float(durations.get(resolved_url) or 0.0)
             playback_headers = self._media_playback_headers(page_url, resolved_url)
             probe_headers = {'Accept': playback_headers.get('Accept') or '*/*'}
             if playback_headers.get('Origin'):
@@ -45755,19 +45876,66 @@ try {
                 headers=probe_headers,
                 title=page_title,
             )
+            size_bytes = 0
             if direct:
-                direct['headers'] = playback_headers
-                direct['title'] = page_title
-                direct['resolver_provider'] = 'html'
-                direct['resolved_at_ms'] = int(time.time() * 1000)
-                if subtitle_tracks:
-                    direct['subtitle_tracks'] = subtitle_tracks
-                if len(ordered) > 1:
-                    print(f"[HTML_RESOLVE] chose {resolved_url[:130]} "
-                          f"({durations.get(resolved_url, 0.0):.0f}s) from "
-                          f"{len(ordered)} candidate(s)", flush=True)
-                return direct
-        return None
+                try:
+                    size_bytes = int(direct.get('size_bytes') or 0)
+                except Exception:
+                    size_bytes = 0
+            rejected = ''
+            if not direct:
+                rejected = 'probe failed'
+            elif (
+                self._media_url_looks_like_preview(resolved_url)
+                or self._media_url_looks_like_preview((direct or {}).get('playback_url'))
+                or self._media_url_looks_like_ad(resolved_url)
+                or self._media_url_is_site_promo(resolved_url)
+                or self._media_url_is_trailer(resolved_url)
+            ):
+                rejected = 'preview/ad'
+            elif measured and measured < 90.0:
+                rejected = f'{measured:.0f}s clip'
+            elif (
+                size_bytes
+                and short_limit
+                and size_bytes < short_limit
+                and not self._is_hls_stream_url(resolved_url)
+                and not self._is_hls_stream_url((direct or {}).get('playback_url'))
+            ):
+                rejected = 'short file'
+            print(
+                f'[HTML_RESOLVE] candidate {size_bytes} bytes {measured:.0f}s'
+                + (f' skip {rejected}' if rejected else '')
+                + f' {resolved_url[:160]}',
+                flush=True,
+            )
+            if rejected or not direct:
+                continue
+            direct['headers'] = playback_headers
+            direct['title'] = page_title
+            direct['resolver_provider'] = 'html'
+            direct['resolved_at_ms'] = int(time.time() * 1000)
+            if subtitle_tracks:
+                direct['subtitle_tracks'] = subtitle_tracks
+            try:
+                height = int(self._media_url_height_hint(resolved_url) or 0)
+            except Exception:
+                height = 0
+            playable.append((size_bytes, height, measured, -pattern_index, direct, resolved_url))
+        if not playable:
+            print(
+                f'[HTML_RESOLVE] no full video among {len(ordered)} page candidate(s)',
+                flush=True,
+            )
+            return None
+        playable.sort(key=lambda item: (item[0], item[1], item[2], item[3]), reverse=True)
+        size_bytes, _height, measured, _pattern, direct, resolved_url = playable[0]
+        print(
+            f'[HTML_RESOLVE] chose {resolved_url[:130]} '
+            f'({size_bytes} bytes, {measured:.0f}s) from {len(ordered)} candidate(s)',
+            flush=True,
+        )
+        return direct
 
     def _resolve_stream_source(self, source_url):
         source_url = self._canonicalize_remote_source_url(self._sanitize_url(source_url))
@@ -63225,6 +63393,48 @@ if __name__ == "__main__":
                                         pass
                         except Exception:
                             pass
+
+                        def _announce_offsite(dest, kind='NAV_URL'):
+                            dest = str(dest or '').split('#')[0].strip()
+                            if not dest.startswith('http'):
+                                return
+                            try:
+                                _src_host = (urlparse(url).netloc or '').lower().replace('www.', '')
+                                _dst_host = (urlparse(dest).netloc or '').lower().replace('www.', '')
+                            except Exception:
+                                return
+                            if not _dst_host or _dst_host == _src_host:
+                                return
+                            print(kind + '::' + dest)
+                            sys.stdout.flush()
+
+                        def _on_popup(popup):
+                            try:
+                                _announce_offsite(getattr(popup, 'url', ''), 'POPUP_URL')
+                                popup.on(
+                                    'framenavigated',
+                                    lambda frame: _announce_offsite(getattr(frame, 'url', ''), 'POPUP_URL')
+                                    if frame == popup.main_frame else None,
+                                )
+                            except Exception:
+                                pass
+
+                        try:
+                            page.context.on('page', _on_popup)
+                        except Exception:
+                            pass
+
+                        def _on_main_nav(frame):
+                            try:
+                                if frame == page.main_frame:
+                                    _announce_offsite(getattr(frame, 'url', ''), 'NAV_URL')
+                            except Exception:
+                                pass
+
+                        try:
+                            page.on('framenavigated', _on_main_nav)
+                        except Exception:
+                            pass
                         found_url = None
                         # R44: when the FIRST capture fires, for file-host
                         # pages (--click-download) the loop can close early
@@ -63571,6 +63781,8 @@ if __name__ == "__main__":
                                 # and nothing was ever captured. Those ad-layer
                                 # selectors stay last as a fallback only.
                                 ".vjs-big-play-button",
+                                ".fluid_initial_play_button",
+                                ".fluid_initial_play",
                                 # JW Player 8 (sextb's playmate.to and the
                                 # hglink family) draws its own display layer
                                 # over the <video>, so the button has to be
@@ -63593,7 +63805,99 @@ if __name__ == "__main__":
                                 ".player-overlay",
                             ]
 
+                            _clicked_load_video = False
+
+                            def _click_load_video():
+                                # Fluid Player pages (pornmz) put "Load video"
+                                # over a trailer <video>. Clicking the element
+                                # plays mediabook_320p.mp4 and never asks for
+                                # the film. Hit the overlay first.
+                                nonlocal _clicked_load_video
+                                try:
+                                    _contexts = [page] + [
+                                        _frame for _frame in page.frames if _frame is not page
+                                    ]
+                                except Exception:
+                                    _contexts = [page]
+                                _js = """() => {
+                                    const want = (el) => {
+                                        try {
+                                            const txt = (el.innerText || el.textContent || el.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+                                            let cls = '';
+                                            try { cls = String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || '').toLowerCase(); } catch (e) {}
+                                            const id = String(el.id || '').toLowerCase();
+                                            if (txt.indexOf('load video') !== -1 || txt === 'play video')
+                                                return true;
+                                            if (cls.indexOf('fluid_initial_play') !== -1 || id.indexOf('fluid_initial_play') !== -1)
+                                                return true;
+                                            return false;
+                                        } catch (e) { return false; }
+                                    };
+                                    const nodes = document.querySelectorAll('button, a, div, span, [role="button"]');
+                                    for (const el of nodes) {
+                                        if (!want(el)) continue;
+                                        const r = el.getBoundingClientRect();
+                                        if (r.width < 8 || r.height < 8) continue;
+                                        const st = getComputedStyle(el);
+                                        if (st.display === 'none' || st.visibility === 'hidden') continue;
+                                        el.click();
+                                        return String(el.innerText || el.className || 'load-video').slice(0, 80);
+                                    }
+                                    return '';
+                                }"""
+                                for _ctx in _contexts:
+                                    try:
+                                        _hit = _ctx.evaluate(_js)
+                                    except Exception:
+                                        continue
+                                    if _hit:
+                                        _clicked_load_video = True
+                                        print('[BROWSER_CLICK] clicked load-video control: %s' % _hit)
+                                        sys.stdout.flush()
+                                        return True
+                                return False
+
+                            def _click_hoster_anchor():
+                                # Server buttons are often plain anchors. Click
+                                # one known hoster once; the parent resolves
+                                # the popup or navigation, and ignores ads.
+                                try:
+                                    _contexts = [page] + [
+                                        _frame for _frame in page.frames if _frame is not page
+                                    ]
+                                except Exception:
+                                    _contexts = [page]
+                                _js = """() => {
+                                    const hosts = ['streamtape', 'strtape', 'doodstream', 'ds2play', 'mixdrop', 'mxdrop', 'voe.sx', 'lulustream', 'filemoon', 'vidara', 'turbovid', 'streamwish'];
+                                    for (const a of document.querySelectorAll('a[href]')) {
+                                        const href = String(a.href || '');
+                                        const low = href.toLowerCase();
+                                        if (!href || low.indexOf('javascript:') === 0)
+                                            continue;
+                                        if (!hosts.some((h) => low.indexOf(h) !== -1))
+                                            continue;
+                                        const r = a.getBoundingClientRect();
+                                        if (r.width < 4 || r.height < 4)
+                                            continue;
+                                        a.click();
+                                        return href.slice(0, 180);
+                                    }
+                                    return '';
+                                }"""
+                                for _ctx in _contexts:
+                                    try:
+                                        _hit = _ctx.evaluate(_js)
+                                    except Exception:
+                                        continue
+                                    if _hit:
+                                        print('[BROWSER_CLICK] clicked hoster anchor: %s' % _hit)
+                                        sys.stdout.flush()
+                                        return True
+                                return False
+
                             def _click_play():
+                                if _click_load_video():
+                                    return True
                                 # The element-picker route often lands inside
                                 # the player iframe, so try the top page and
                                 # every child frame before giving up.
@@ -63671,7 +63975,7 @@ if __name__ == "__main__":
                             # hasn't finished initializing its player.
                             try:
                                 page.wait_for_selector(
-                                    ".vjs-big-play-button, video, button.play, .jw-display-icon-container",
+                                    ".vjs-big-play-button, .fluid_initial_play_button, .fluid_initial_play, video, button.play, .jw-display-icon-container",
                                     timeout=8000,
                                 )
                             except Exception:
@@ -63971,6 +64275,14 @@ if __name__ == "__main__":
                                         or (_h >= 480 and _dur >= 20.0)
                                         or (_w >= 960 and _dur >= 20.0)
                                     )
+                                    _low_u = _u.lower()
+                                    if any(tok in _low_u for tok in (
+                                        'mediabook', 'previewclip', '/trailer', 'trailerhg',
+                                        'teaser', 'sample.m3u8', '/sample/', 'preview',
+                                    )):
+                                        # A 720p hover trailer still measures as
+                                        # HD. Do not close the capture on it.
+                                        _is_long_content = False
                                     if _is_long_content and _verified_media_url is None:
                                         _verified_media_url = _u
                                         _announce_media_url(_u, prefix='VERIFIED_MEDIA::')
@@ -64041,6 +64353,14 @@ if __name__ == "__main__":
                                         _playing = False
                                     if not _playing:
                                         _click_play()
+                                # A trailer can already be playing in <video>
+                                # while Load video is what swaps in the film.
+                                # Keep trying that control even when the
+                                # trailer element reports itself as playing.
+                                if _i in (0, 2, 5, 9, 14, 22):
+                                    _click_load_video()
+                                if _clicked_load_video and _i in (3, 8, 16):
+                                    _click_hoster_anchor()
                                 time.sleep(1)
 
                             # Nothing showed up on the network or in the DOM —
