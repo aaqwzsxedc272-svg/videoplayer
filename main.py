@@ -34515,7 +34515,7 @@ try {
         except Exception:
             return False
 
-    def _open_gofile_share_page(self, source_url):
+    def _open_gofile_share_page(self, source_url, user_requested=False):
         """Show GoFile's normal share page in-app, without automating it."""
         # Resolver workers can call this without first going through set_media,
         # so normalize pasted Markdown/quoted text at this final handoff too.
@@ -34525,11 +34525,11 @@ try {
             host = (urlparse(source_url).netloc or '').lower().replace('www.', '')
         except Exception:
             host = ''
-        if host in {'gofile.io', 'gofile.to'} or self._is_gofile_folder_page_url(source_url):
-            # Loading this page from the app is what got the IP blocked.
-            # A manual browser on a VPN is the user's choice; we do not load it.
-            print(f'[GOFILE] Refusing to open the share page for {source_url}; that load blocks the IP')
-            self.show_osd('GoFile site was not opened. Loading it blocks the IP.', duration=4000)
+        if (
+            not user_requested
+            and (host in {'gofile.io', 'gofile.to'} or self._is_gofile_folder_page_url(source_url))
+        ):
+            print(f'[GOFILE] Refusing an automatic share-page load for {source_url}')
             return False
         if not _QT_WEBENGINE_AVAILABLE:
             print('[GOFILE] In-app browser unavailable: install PyQt6-WebEngine.')
@@ -34809,7 +34809,8 @@ try {
         if target:
             if self.gofile_reopen_button is not None:
                 self.gofile_reopen_button.hide()
-            self._open_gofile_share_page(target)
+            self._open_gofile_share_page(target, user_requested=True)
+            self._show_gofile_password_bar(target)
 
     def _ensure_gofile_reopen_button(self):
         if self.gofile_reopen_button is not None:
@@ -35601,6 +35602,137 @@ try {
         self._refresh_playlist_row_metadata(folder_path)
         return file_count, folder_count
 
+    def _gofile_password_fill_js(self, password):
+        payload = json.dumps(str(password or ''))
+        return (
+            "(function(){"
+            "var password=" + payload + ";"
+            "var input=document.querySelector('input[type=\"password\"]');"
+            "if(!input)return 'no-field';"
+            "try{"
+            "var setter=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;"
+            "setter.call(input,password);"
+            "}catch(e){input.value=password;}"
+            "input.focus();"
+            "input.dispatchEvent(new Event('input',{bubbles:true}));"
+            "input.dispatchEvent(new Event('change',{bubbles:true}));"
+            "var form=input.closest('form');"
+            "var button=form?form.querySelector('button,input[type=\"submit\"]'):null;"
+            "if(!button){"
+            "var nodes=document.querySelectorAll('button,input[type=\"submit\"],[role=\"button\"]');"
+            "for(var i=0;i<nodes.length;i++){"
+            "var t=((nodes[i].innerText||nodes[i].value||nodes[i].getAttribute('aria-label')||'')+'').toLowerCase();"
+            "if(t.indexOf('unlock')!==-1||t.indexOf('confirm')!==-1||t.indexOf('submit')!==-1||t.indexOf('continue')!==-1||t.indexOf('access')!==-1||t.indexOf('enter')!==-1||t==='ok'){button=nodes[i];break;}"
+            "}"
+            "}"
+            "if(button){button.click();return 'clicked';}"
+            "try{if(form){if(form.requestSubmit)form.requestSubmit();else form.submit();return 'submitted';}}catch(e){}"
+            "return 'filled';"
+            "})()"
+        )
+
+    def _ensure_gofile_password_bar(self):
+        view = getattr(self, 'gofile_web_view', None)
+        if view is None:
+            return None
+        bar = getattr(self, 'gofile_password_bar', None)
+        if bar is not None:
+            return bar
+        bar = QWidget(view)
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(8)
+        label = QLabel('GoFile password')
+        edit = QLineEdit()
+        edit.setReadOnly(True)
+        edit.setEchoMode(QLineEdit.EchoMode.Normal)
+        edit.setMinimumWidth(260)
+        copy_btn = QPushButton('Copy')
+        copy_btn.clicked.connect(self._copy_gofile_password_bar)
+        layout.addWidget(label)
+        layout.addWidget(edit, 1)
+        layout.addWidget(copy_btn)
+        bar.setStyleSheet(
+            'QWidget { background: rgba(20,20,20,235); color: white; '
+            'border: 1px solid #c9a227; border-radius: 4px; }'
+            'QLabel { color: white; border: none; }'
+            'QLineEdit { color: white; background: #111; border: 1px solid #888; padding: 4px; }'
+            'QPushButton { color: white; background: #333; border: 1px solid #888; padding: 4px 10px; }'
+        )
+        self.gofile_password_bar = bar
+        self.gofile_password_edit = edit
+        return bar
+
+    def _copy_gofile_password_bar(self):
+        edit = getattr(self, 'gofile_password_edit', None)
+        password = edit.text() if edit is not None else ''
+        if not password:
+            return
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(password)
+        self.show_osd('GoFile password copied', duration=1800)
+
+    def _show_gofile_password_bar(self, source_url):
+        password = self._lookup_cached_remote_password('gofile', source_url)
+        if not password:
+            return
+        bar = self._ensure_gofile_password_bar()
+        edit = getattr(self, 'gofile_password_edit', None)
+        if bar is None or edit is None:
+            return
+        edit.setText(password)
+        edit.selectAll()
+        bar.adjustSize()
+        bar.move(12, 48)
+        bar.show()
+        bar.raise_()
+
+    def _fill_gofile_page_password(self, source_url):
+        view = getattr(self, 'gofile_web_view', None)
+        if view is None:
+            return
+        password = self._lookup_cached_remote_password('gofile', source_url)
+        if not password or re.fullmatch(r'[0-9a-fA-F]{64}', password):
+            return
+        bar = getattr(self, 'gofile_password_bar', None)
+        if bar is not None:
+            bar.raise_()
+        view.page().runJavaScript(
+            self._gofile_password_fill_js(password),
+            lambda result, url=source_url: self._on_gofile_password_filled(url, result),
+        )
+
+    def _on_gofile_password_filled(self, source_url, result):
+        status = str(result or '').strip().lower()
+        if status == 'no-field':
+            return
+        print(f'[GOFILE] Password field on the page: {status}')
+
+    def _show_gofile_page_with_password(self, source_url):
+        source_url = self._canonicalize_remote_source_url(self._sanitize_url(source_url or ''))
+        if not self._is_gofile_folder_page_url(source_url):
+            return
+        if not self._lookup_cached_remote_password('gofile', source_url):
+            self._remote_password_for_url(
+                'gofile',
+                source_url,
+                force_prompt=True,
+                remember=True,
+                reason='This GoFile folder is password protected. The password will be shown on the page so you can paste it.',
+            )
+        if not self._lookup_cached_remote_password('gofile', source_url):
+            self.show_osd('No GoFile password to show. The site was not opened.', duration=3000)
+            return
+        print(f'[GOFILE] Opening the in-app page once for {source_url}. The contents API will not be called.')
+        if not self._open_gofile_share_page(source_url, user_requested=True):
+            self.show_osd('Could not open the GoFile page. The contents API was not called.', duration=4000)
+            return
+        self._show_gofile_password_bar(source_url)
+        self.show_osd('GoFile password is in the box on the page. Copy it if the field is not filled.', duration=5000)
+        for delay in (600, 1600, 3200):
+            QTimer.singleShot(delay, lambda url=source_url: self._fill_gofile_page_password(url))
+
     def _consider_gofile_page_password(self, source_url):
         source_url = self._canonicalize_remote_source_url(self._sanitize_url(source_url or ''))
         if not self._is_gofile_folder_page_url(source_url):
@@ -35615,9 +35747,8 @@ try {
         if current and self._gofile_folder_cache_key(current) != self._gofile_folder_cache_key(source_url):
             return
         if self._lookup_cached_remote_password('gofile', source_url):
-            if self._gofile_token_rejected(source_url):
-                return
-            self._start_gofile_saved_password_unlock(source_url)
+            self._show_gofile_password_bar(source_url)
+            self._fill_gofile_page_password(source_url)
             return
         view.page().runJavaScript(
             _GOFILE_PASSWORD_FIELD_JS,
@@ -35640,7 +35771,8 @@ try {
         if key in offered:
             return
         if self._lookup_cached_remote_password('gofile', source_url):
-            self._start_gofile_saved_password_unlock(source_url)
+            self._show_gofile_password_bar(source_url)
+            self._fill_gofile_page_password(source_url)
             return
         offered.add(key)
         try:
@@ -35653,12 +35785,13 @@ try {
             'gofile',
             source_url,
             force_prompt=True,
-            remember=False,
-            reason='This GoFile folder is password protected.',
+            remember=True,
+            reason='This GoFile folder is password protected. The password will be shown on the page so you can paste it.',
         )
         if not password:
             return
-        self._start_gofile_password_unlock(source_url, password)
+        self._show_gofile_password_bar(source_url)
+        self._fill_gofile_page_password(source_url)
 
     def _start_gofile_saved_password_unlock(self, source_url):
         if self._gofile_token_rejected(source_url):
@@ -35674,6 +35807,8 @@ try {
         self._start_gofile_password_unlock(source_url)
 
     def _start_gofile_password_unlock(self, source_url, password=None):
+        print('[GOFILE] Password unlock will not call the contents API')
+        return
         key = self._gofile_folder_cache_key(source_url) or str(source_url or '')
         inflight = getattr(self, '_gofile_password_unlock_inflight', None)
         if not isinstance(inflight, set):
@@ -35710,14 +35845,9 @@ try {
             print(f'[GOFILE] Not opening the share page for {source_url}')
             return
         saved = self._lookup_cached_remote_password('gofile', source_url)
-        token_rejected = self._gofile_token_rejected(source_url)
-        if saved and not token_rejected:
-            print(f'[GOFILE] Saved password is enough for {source_url}; not opening the share page')
-            self._start_gofile_saved_password_unlock(source_url)
+        if saved:
+            print(f'[GOFILE] Saved password for {source_url}; not calling the contents API')
             return
-        if saved and token_rejected:
-            print(f'[GOFILE] API token rejected for {source_url}; opening the share page once with the saved password')
-            self._gofile_play_after_page = source_url
         self.gofile_share_page_requested.emit(source_url)
 
     @pyqtSlot(str, object)
@@ -35747,8 +35877,7 @@ try {
         if not (is_gofile or is_eporner):
             return
         if is_gofile:
-            print(f'[GOFILE] Not opening the share page for {source_url}; that load blocks the IP')
-            self.show_osd('GoFile site was not opened. Loading it blocks the IP.', duration=4000)
+            print(f'[GOFILE] Ignoring an automatic page request for {source_url}')
             return
         if is_gofile and self._gofile_share_page_blocked(source_url):
             print('[GOFILE] Not opening the share page after the password attempt')
@@ -36004,6 +36133,10 @@ try {
         Otherwise falls back to a guest token with curl_cffi browser impersonation
         (required to bypass Cloudflare protection on the guest account endpoint).
         """
+        gofile_method = str((self.settings or {}).get('gofile_extraction_method', 'browser')).strip().lower()
+        if gofile_method != 'api':
+            print('[GOFILE] Contents API is disabled. The in-app page is the only GoFile path.')
+            return None, None
         content_id = self._gofile_content_id_from_url(source_url)
         if not content_id:
             print(f"[GOFILE] No content ID found in URL: {source_url}")
@@ -36517,10 +36650,9 @@ try {
         try:
             gofile_method = str((self.settings or {}).get('gofile_extraction_method', 'browser')).strip().lower()
             saved_password = self._lookup_cached_remote_password('gofile', source_url)
-            # Ordinary browser-mode pastes stay off the contents API. A saved
-            # folder password is the exception: one hashed call, and do not
-            # open the share page (that is what locks the IP).
-            if gofile_method == 'api' or saved_password:
+            # Browser mode never calls the contents API, even with a saved
+            # password. Those token retries are what blocked the IP.
+            if gofile_method == 'api':
                 if saved_password and self._gofile_token_rejected(source_url):
                     print(f"[GOFILE] API token was rejected for {cache_key}; not calling the contents API again")
                     return []
@@ -47687,31 +47819,25 @@ try {
                 return []
             return [self._pasted_folder_entry(source_url, 'filester', children)]
         if provider == 'gofile':
+            # Do not call the contents API. Those token retries blocked the IP.
+            # The UI opens the in-app page once and shows the saved password.
             if not self._lookup_cached_remote_password('gofile', source_url):
-                print(f'[GOFILE] No saved password for {source_url}; asking once. The site will not be opened.')
+                print(f'[GOFILE] No saved password for {source_url}; asking once, then opening the in-app page')
                 self._remote_password_for_url(
                     'gofile',
                     source_url,
                     force_prompt=True,
                     remember=True,
-                    reason='This GoFile folder is password protected. The site will not be opened.',
+                    reason='This GoFile folder is password protected. The password will be shown on the page so you can paste it.',
                 )
             if not self._lookup_cached_remote_password('gofile', source_url):
-                print(f'[GOFILE] No password for {source_url}; not opening the share page')
+                print(f'[GOFILE] No password for {source_url}; the site was not opened')
                 return []
-            print(f'[GOFILE] Saved password for {source_url}; listing files on paste without opening the site')
-            try:
-                children = self._gofile_media_entries(source_url)
-            except Exception as exc:
-                print(f'[GOFILE] Paste expand failed: {exc}')
-                return []
-            files = [
-                entry for entry in (children or [])
-                if isinstance(entry, dict) and entry.get('entry_type') != 'remote_folder'
-            ]
-            if not files:
-                return []
-            return [self._pasted_folder_entry(source_url, 'gofile', children)]
+            print(f'[GOFILE] Saved password for {source_url}; the in-app page will open once, with no API call')
+            entry = self._pasted_folder_entry(source_url, 'gofile', [])
+            entry['children'] = []
+            entry['open_in_browser'] = True
+            return [entry]
         return []
 
     def _expand_stream_album_source_probe(self, source_url):
@@ -47858,13 +47984,15 @@ try {
             self.apply_playlist_filtering()
         self._schedule_remote_duration_probes(remote_duration_candidates)
 
-        if not call_had_file and self._is_gofile_folder_page_url(source_url):
-            if self._gofile_token_rejected(source_url):
-                print(f'[GOFILE] API token rejected for {source_url}; the share page was not opened')
-                self.show_osd('GoFile rejected the app token. The site was not opened.', duration=4000)
-            else:
-                print(f'[GOFILE] {source_url} was not listed. The share page was not opened')
-                self.show_osd('GoFile folder was not listed. The site was not opened.', duration=3500)
+        open_browser = any(
+            isinstance(entry, dict) and entry.get('open_in_browser')
+            for entry in (entries or [])
+        )
+        if open_browser:
+            self._show_gofile_page_with_password(source_url)
+        elif not call_had_file and self._is_gofile_folder_page_url(source_url):
+            print(f'[GOFILE] {source_url} was not listed. The contents API was not called')
+            self.show_osd('GoFile folder was not listed. The site was not opened.', duration=3500)
 
         if is_final_job:
             total   = self._album_expand_batch_count
@@ -49453,10 +49581,18 @@ try {
         children = meta.get('children')
         if isinstance(children, list) and children:
             self._insert_remote_folder_children(folder_path, children)
+            folder_url = self._remote_folder_url(folder_path)
+            provider = meta.get('provider') or (self._remote_album_provider_for_url(folder_url) if folder_url else '')
+            if provider == 'gofile' and folder_url:
+                self._show_gofile_page_with_password(folder_url)
             return True
 
         folder_url = self._remote_folder_url(folder_path)
         if not folder_url:
+            return True
+        provider = meta.get('provider') or self._remote_album_provider_for_url(folder_url)
+        if provider == 'gofile':
+            self._show_gofile_page_with_password(folder_url)
             return True
         pending.add(folder_path)
         self._remote_folder_expand_pending = pending
@@ -63764,3 +63900,4 @@ if __name__ == "__main__":
         logging.error(f"Failed to start application: {e}\n{traceback.format_exc()}")
         print(f"Fatal error: {e}")
         raise
+
