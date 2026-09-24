@@ -30099,7 +30099,7 @@ try {
                 if _sess.get('prefer_cffi') and _serve_remote_via_curl_cffi(self, target_url, request_headers, session_key):
                     return
 
-                _prefer_curl_hosts = ('surrit.com', 'tulipvid.net', 'onlythot.net', 'streamhls.click', 'cdn-centaurus.com', 'centaurus', 'turboviplay', 'turboviplay.com', 'cdn3.turboviplay', 'turbosplayer', 'turtleviplay', 'javclan', 'vidara', 'emturbovid', 'cloudatacdn.com', 'o310ol.cloudatacdn.com')
+                _prefer_curl_hosts = ('surrit.com', 'tulipvid.net', 'onlythot.net', 'streamhls.click', 'cdn-centaurus.com', 'centaurus', 'turboviplay', 'turboviplay.com', 'cdn3.turboviplay', 'turbosplayer', 'turtleviplay', 'javclan', 'vidara', 'emturbovid', 'cloudatacdn.com', 'o310ol.cloudatacdn.com', '1024tera.com', '1024terabox.com', 'terabox.com', '4funbox.com', 'nephobox.com', 'mirrobox.com', 'dubox.com')
                 if any(h in target_host for h in _prefer_curl_hosts) and _serve_remote_via_curl(self, target_url, request_headers, session_key):
                     return
 
@@ -30379,6 +30379,13 @@ try {
         # these sessions with the cffi fetcher FIRST.
         if any(str(k) == '_fetchv_probed' for k in dict(headers or {})):
             sessions[session_key]['prefer_cffi'] = True
+        # TeraBox's CDN fingerprints plain urllib. Prefer the Chrome TLS
+        # client when it is installed; curl is the next rung.
+        try:
+            if self._terabox_streaming_url(playback_url) or self._is_terabox_host(playback_url):
+                sessions[session_key]['prefer_cffi'] = True
+        except Exception:
+            pass
         proxied = self._local_hls_proxy_url(playback_url, session_key)
         if proxied:
             print(f"[{label}] {playback_url[:120]} -> {proxied}")
@@ -31696,6 +31703,11 @@ try {
             parsed = urlparse(str(url or ''))
             path = unquote(parsed.path or '').lower()
             if path.endswith(('.m3u8', '.m3u')):
+                return True
+            # The TeraBox page player. No .m3u8 suffix; the body is the
+            # playlist. Without this, mpv is handed the URL as a file and
+            # the proxy will not rewrite its segments.
+            if path.rstrip('/').endswith('/share/streaming') or '/share/streaming' in path:
                 return True
             # doodstream-style multi-bitrate playlists travel as .txt
             # (…_,l,n,h,.urlset/index-f2-v1-a1.txt) - FetchV captures
@@ -38708,6 +38720,9 @@ try {
             # token goes stale, so always re-capture before playing unless the
             # capture is only a couple of minutes old (see the TTL below).
             or self._is_mixdrop_host(text)
+            # TeraBox file URLs are signed and die within minutes. Re-mint
+            # on the next play unless this one was just opened.
+            or self._is_terabox_host(text)
         )
 
     def _recent_signed_playback_cache_ttl_ms(self, host_or_url):
@@ -38727,6 +38742,8 @@ try {
         # expired and re-capture — delivery tokens outlive that.
         if self._is_mixdrop_host(text):
             return 150000
+        if self._is_terabox_host(text):
+            return 180000
         return 0
 
     def _can_reuse_recent_signed_playback(self, source_url, stream_info):
@@ -40227,6 +40244,324 @@ try {
         # Detected as VOE but couldn't decode — let outer chain try yt-dlp.
         print(f'[VOE-mirror] Decode failed for {source_url} — falling through to yt-dlp')
         return None
+
+    _TERABOX_HOST_SUFFIXES = (
+        'terabox.com',
+        'terabox.app',
+        'teraboxapp.com',
+        'terabox.fun',
+        'teraboxlink.com',
+        'terasharelink.com',
+        'teraboxshare.com',
+        '1024tera.com',
+        '1024terabox.com',
+        '1024tera.co',
+        '4funbox.com',
+        '4funbox.co',
+        'mirrobox.com',
+        'nephobox.com',
+        'momerybox.com',
+        'tibibox.com',
+        'freeterabox.com',
+        'dubox.com',
+    )
+
+    def _is_terabox_host(self, host):
+        # Local list first. The desktop copy that played the thumbnail did
+        # not have terabox_client.py, and an import failure must not hide
+        # the host — that is what skipped every TeraBox check in that log.
+        text = str(host or '').strip().lower()
+        try:
+            if '://' in text:
+                text = (urlparse(text).netloc or text).lower()
+        except Exception:
+            pass
+        text = text.split('/')[0].split(':')[0]
+        if text.startswith('www.'):
+            text = text[4:]
+        if text and any(
+            text == suffix or text.endswith('.' + suffix)
+            for suffix in self._TERABOX_HOST_SUFFIXES
+        ):
+            return True
+        try:
+            import terabox_client
+            return bool(terabox_client.is_terabox_host(text or host))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _terabox_url_is_thumbnail(url):
+        try:
+            path = unquote(urlparse(str(url or '')).path or '').lower()
+        except Exception:
+            path = str(url or '').lower()
+        return '/thumbnail/' in path
+
+    @staticmethod
+    def _terabox_streaming_url(url):
+        try:
+            path = unquote(urlparse(str(url or '')).path or '').lower()
+        except Exception:
+            path = str(url or '').lower()
+        return '/share/streaming' in path
+
+    def _terabox_streaming_rank(self, url):
+        try:
+            import terabox_client
+            return terabox_client.streaming_type_rank(url)
+        except Exception:
+            kind = ''
+            try:
+                values = parse_qs(urlparse(str(url or '')).query or '').get('type') or []
+                kind = str(values[0] if values else '').lower()
+            except Exception:
+                kind = ''
+            score = 1
+            for token, points in (('1080', 50), ('720', 40), ('480', 30), ('360', 20)):
+                if token in kind:
+                    score = points
+                    break
+            return score
+
+    def _terabox_playback_result(self, result, page_url, title, subtitle_tracks, fallback_headers=None):
+        playback_url = str((result or {}).get('playback_url') or '').strip()
+        if not playback_url:
+            return None
+        headers = dict((result or {}).get('headers') or fallback_headers or {})
+        if page_url and not any(str(key).lower() == 'referer' for key in headers):
+            headers['Referer'] = page_url
+        out = {
+            'playback_url': playback_url,
+            'download_url': playback_url,
+            'headers': headers,
+            'title': title or (result or {}).get('title') or '',
+            'source_url': page_url,
+            'embed_url': page_url,
+            'origin_page': page_url,
+            'resolver_provider': 'terabox',
+            'resolved_at_ms': int(time.time() * 1000),
+        }
+        if (result or {}).get('content_type'):
+            out['content_type'] = result.get('content_type')
+        if (result or {}).get('route_local_proxy'):
+            out['route_local_proxy'] = True
+        if (result or {}).get('size_bytes'):
+            out['size_bytes'] = int(result['size_bytes'])
+        if (result or {}).get('duration_ms'):
+            out['duration_ms'] = int(result['duration_ms'])
+        if subtitle_tracks:
+            out['subtitle_tracks'] = subtitle_tracks
+        return out
+
+    def _finish_terabox_streaming_capture(self, streaming_url, page_url, headers, title, subtitle_tracks):
+        """Play the page-player stream. Never the preview image.
+
+        A fresh file URL minted from the same uk/shareid/fid/sign is
+        preferred. A normal m3u8 is played. One random chunk is not.
+        """
+        headers = dict(headers or {})
+        page_url = str(page_url or '')
+        if page_url and not any(str(key).lower() == 'referer' for key in headers):
+            headers['Referer'] = page_url
+        cookie = ''
+        for key, value in headers.items():
+            if str(key).lower() == 'cookie' and value:
+                cookie = str(value)
+                break
+        result = None
+        try:
+            import terabox_client
+            print('[TERABOX] checking the captured player stream', flush=True)
+            result = terabox_client.playback_from_streaming(
+                streaming_url,
+                referer=page_url,
+                cookie_header=cookie,
+                timeout=8,
+            )
+        except Exception as exc:
+            print(f'[TERABOX] player stream check failed: {exc}', flush=True)
+            result = None
+        if isinstance(result, dict) and result.get('ok') and result.get('playback_url'):
+            return self._terabox_playback_result(
+                result, page_url, title, subtitle_tracks, fallback_headers=headers)
+        if isinstance(result, dict) and result.get('error_code') == 'fragment':
+            return {
+                'terabox_error': result.get('error') or 'TeraBox only returned a fragment of that video, not the file.',
+                'terabox_error_code': 'fragment',
+                'resolver_provider': 'terabox',
+                'title': title or '',
+            }
+        # Could not inspect the body. The page player asked for this URL.
+        # Play it as HLS with the capture Referer and Cookie rather than
+        # fall through to the thumbnail.
+        return self._terabox_playback_result(
+            {
+                'playback_url': streaming_url,
+                'headers': headers,
+                'content_type': 'application/vnd.apple.mpegurl',
+                'route_local_proxy': True,
+            },
+            page_url, title, subtitle_tracks, fallback_headers=headers)
+
+    def _terabox_cookie_header(self):
+        try:
+            session = self._get_browser_cookies_session(domains=[
+                'terabox.com', '1024tera.com', '1024terabox.com', '4funbox.com',
+                'nephobox.com', 'mirrobox.com', 'terabox.app', 'dubox.com',
+            ])
+        except Exception:
+            return ''
+        parts = []
+        try:
+            for cookie in session.cookies:
+                name = str(getattr(cookie, 'name', '') or '')
+                value = str(getattr(cookie, 'value', '') or '')
+                if name and value:
+                    parts.append(f'{name}={value}')
+        except Exception:
+            return ''
+        return '; '.join(parts)
+
+    def _resolve_terabox_source(self, source_url):
+        """Mint a fresh TeraBox file URL. Never hand the share page to mpv."""
+        import terabox_client
+        if not terabox_client.surl_from(source_url):
+            return None
+        print(f'[TERABOX] opening {str(source_url)[:160]}', flush=True)
+        try:
+            cookies = self._terabox_cookie_header()
+        except Exception:
+            cookies = ''
+        password = ''
+        try:
+            password = self._lookup_cached_remote_password('terabox', source_url) or ''
+        except Exception:
+            password = ''
+        try:
+            result = terabox_client.open_playback(
+                source_url, cookie_header=cookies, password=password)
+        except Exception as exc:
+            print(f'[TERABOX] {exc}', flush=True)
+            # The page player still has /share/streaming. Do not stop here.
+            return None
+        if result.get('error_code') == 'password' and not password:
+            try:
+                password = self._remote_password_for_url(
+                    'terabox', source_url, reason='TeraBox share')
+            except Exception as exc:
+                print(f'[TERABOX] password prompt failed: {exc}', flush=True)
+                password = ''
+            if password:
+                try:
+                    result = terabox_client.open_playback(
+                        source_url, cookie_header=cookies, password=password)
+                except Exception as exc:
+                    print(f'[TERABOX] {exc}', flush=True)
+                    result = {'ok': False, 'error': 'TeraBox did not answer.'}
+        if not result.get('ok') or not result.get('playback_url'):
+            code = str(result.get('error_code') or '')
+            message = str(result.get('error') or 'Could not open that TeraBox link.')
+            print(f'[TERABOX] {message}', flush=True)
+            # Password and a dead share are final. A missing file URL, or
+            # a one-chunk burst from the share API, is not: the capture
+            # finds /share/streaming after Play Video, which is the path
+            # that actually saw the film.
+            if code in ('password', 'empty', 'gone', 'invalid'):
+                return {
+                    'terabox_error': message,
+                    'terabox_error_code': code,
+                    'title': result.get('title') or '',
+                    'resolver_provider': 'terabox',
+                }
+            if code == 'fragment':
+                print('[TERABOX] share API returned a fragment; trying the page player', flush=True)
+            return None
+        out = {
+            'playback_url': result['playback_url'],
+            'headers': result.get('headers') or {},
+            'title': result.get('title') or '',
+            'resolver_provider': 'terabox',
+            'resolved_at_ms': int(time.time() * 1000),
+            'origin_page': result.get('page_url') or source_url,
+        }
+        if result.get('content_type'):
+            out['content_type'] = result['content_type']
+        if result.get('route_local_proxy'):
+            out['route_local_proxy'] = True
+        if result.get('size_bytes'):
+            out['size_bytes'] = int(result['size_bytes'])
+            try:
+                out['size_text'] = self._format_size_bytes(result['size_bytes'])
+            except Exception:
+                pass
+        if result.get('duration_ms'):
+            out['duration_ms'] = int(result['duration_ms'])
+        return out
+
+    def _prepare_terabox_playlist_entries(self, source_url):
+        """One playlist row per video in a TeraBox share. Empty if the list fails."""
+        import terabox_client
+        if not terabox_client.surl_from(source_url):
+            return []
+        try:
+            cookies = self._terabox_cookie_header()
+        except Exception:
+            cookies = ''
+        password = ''
+        try:
+            password = self._lookup_cached_remote_password('terabox', source_url) or ''
+        except Exception:
+            password = ''
+        if not password:
+            password = terabox_client.password_from_url(source_url)
+        listed = terabox_client.list_share(
+            source_url, cookie_header=cookies, password=password)
+        if not listed.get('ok'):
+            print(f"[TERABOX] paste list: {listed.get('error')}", flush=True)
+            return []
+        files = [
+            item for item in (listed.get('files') or [])
+            if not item.get('is_dir') and terabox_client._playable(item)
+        ]
+        if not files:
+            print('[TERABOX] paste list has no video', flush=True)
+            return []
+        surl = listed.get('surl') or terabox_client.surl_from(source_url)
+        entries = []
+        single = len(files) == 1
+        for item in files:
+            if single and not terabox_client.fs_id_from(source_url):
+                page = source_url
+            else:
+                page = terabox_client.file_page_url(
+                    source_url, surl, item.get('fs_id') or '', item.get('name') or '')
+            try:
+                page = self._canonicalize_remote_source_url(self._sanitize_url(page))
+            except Exception:
+                pass
+            title = item.get('name') or listed.get('title') or 'TeraBox'
+            entry = {
+                'source_url': page,
+                'title': title,
+                'resolver_provider': 'terabox',
+                'origin_page': listed.get('page_url') or source_url,
+            }
+            if item.get('size'):
+                entry['size_bytes'] = int(item['size'])
+                try:
+                    entry['size_text'] = self._format_size_bytes(item['size'])
+                except Exception:
+                    pass
+            if item.get('duration_ms'):
+                entry['duration_ms'] = int(item['duration_ms'])
+                try:
+                    self.video_durations[page] = int(item['duration_ms'])
+                except Exception:
+                    pass
+            entries.append(entry)
+        print(f'[TERABOX] paste listed {len(entries)} file(s)', flush=True)
+        return entries
 
     def _is_mega_host(self, host):
         host = str(host or '').lower()
@@ -44280,6 +44615,48 @@ try {
                 print(f"[BROWSER_CLICK] dropped {len(_self_pages)} candidate(s) "
                       f"that are the source page itself: {_self_pages[0][:120]}")
 
+            # TeraBox paints a JPEG into a <video> (data.*.com/thumbnail,
+            # ft=video) and also requests /share/streaming for the film.
+            # The field run measured that stream at 30s, the ad filters
+            # dropped it, and the thumbnail won because a long query looks
+            # like a signed file. The image is not the film. A short
+            # reading on /share/streaming is not an advert either.
+            try:
+                _terabox_page = self._is_terabox_host(source_url)
+            except Exception:
+                _terabox_page = False
+            if _terabox_page or any(
+                self._terabox_streaming_url(c) or self._terabox_url_is_thumbnail(c)
+                for c in normalized_candidates
+            ):
+                _thumbs = [c for c in normalized_candidates if self._terabox_url_is_thumbnail(c)]
+                if _thumbs:
+                    normalized_candidates = [
+                        c for c in normalized_candidates if c not in _thumbs]
+                    verified_normalized.difference_update(_thumbs)
+                    print(
+                        f"[TERABOX] dropped {len(_thumbs)} thumbnail candidate(s); "
+                        "that image is not the film"
+                    )
+                _streams = [c for c in normalized_candidates if self._terabox_streaming_url(c)]
+                if _streams:
+                    print("[TERABOX] page player stream, not the preview image")
+                    _fragment = None
+                    for _best_stream in sorted(_streams, key=self._terabox_streaming_rank, reverse=True):
+                        _stream_headers = _with_browser_ua(
+                            self._media_playback_headers(source_url, _best_stream))
+                        _prepared = self._finish_terabox_streaming_capture(
+                            _best_stream, source_url, _stream_headers,
+                            clicked_title, subtitle_tracks)
+                        if _prepared and _prepared.get('playback_url'):
+                            return _remember_browser_result(_prepared)
+                        if _prepared and _prepared.get('terabox_error'):
+                            _fragment = _prepared
+                    if _fragment:
+                        return _remember_browser_result(_fragment)
+                    normalized_candidates = [
+                        c for c in normalized_candidates if c not in _streams]
+
             # Same normalization for the measured-duration table so its keys
             # match the normalized candidates below.
             measured_normalized = {}
@@ -44322,15 +44699,25 @@ try {
                     # player script or an advert, and the promote fallback
                     # would otherwise hand one of those to mpv.
                     score += 6
+                if self._terabox_streaming_url(url):
+                    # The film. Must beat the preview image and any short ad.
+                    score += 12
+                if self._terabox_url_is_thumbnail(url):
+                    score -= 20
                 if '.m3u8' in lower_url:
                     score += 2
                 if re.search(r'[?&](s|token|sig|signature|expires?|exp|e)=', lower_url):
                     score += 1
                 if (url in verified_normalized
-                        and not (0.1 <= _measured_duration(url) < 45.0)):
+                        and (
+                            self._terabox_streaming_url(url)
+                            or not (0.1 <= _measured_duration(url) < 45.0)
+                        )):
                     # Duration-verified in the live browser: a <video> was
                     # playing this as real long-form content (pre-roll ads
                     # are seconds long / low-res). Beats any ad capture.
+                    # /share/streaming keeps the bonus even when the page
+                    # reported a short duration. That reading is not an ad.
                     # Verified is not the same as long: sextb's ad network
                     # (video.sacdnssedge.com) plays a 30-second spot through
                     # a real <video>, measured 30s, and won the ranking —
@@ -44432,10 +44819,12 @@ try {
                 if self._media_url_looks_like_preview(candidate):
                     print(f"[AD_SKIP] rejecting preview capture: {candidate[:140]}")
                     continue
-                if 0.1 <= _m_dur < 45:
+                if 0.1 <= _m_dur < 45 and not self._terabox_streaming_url(candidate):
                     # The page itself measured this as a few seconds long —
                     # it is a pre-roll ad, not the video. Never hand it to
-                    # the player even when it probes perfectly.
+                    # the player even when it probes perfectly. A TeraBox
+                    # /share/streaming URL is exempt: the field page reported
+                    # 30 seconds for the film itself.
                     print(f"[AD_SKIP] rejecting {int(_m_dur)}s ad-like capture: {candidate[:140]}")
                     continue
                 probe_headers = _with_browser_ua({'Accept': '*/*'})
@@ -46460,6 +46849,17 @@ try {
                 resolved = self._resolve_cyberfile_source(source_url)
             elif self._is_mega_host(host):
                 resolved = self._resolve_mega_source(source_url)
+            elif self._is_terabox_host(host):
+                # Prefer a fresh signed file URL. If the API withholds it,
+                # do not stop: the page player requests /share/streaming
+                # after Play Video, and that capture is what found the film.
+                try:
+                    resolved = self._resolve_terabox_source(source_url)
+                except Exception as exc:
+                    print(f'[TERABOX] {exc}', flush=True)
+                    resolved = None
+                if isinstance(resolved, dict) and resolved.get('terabox_error') and not resolved.get('playback_url'):
+                    return resolved
             elif self._is_sxyprn_host(host):
                 # The stream is not on the page: data-vnfo carries a relative
                 # path that has to be signed (digit sums + base64 token) and
@@ -46700,6 +47100,9 @@ try {
             # A mega.nz page is not a player. If the decrypt path failed,
             # a capture browser cannot recover the file either.
             and not self._is_mega_host(host)
+            # TeraBox share pages do have a player. The field capture found
+            # /share/streaming only after it clicked Play Video. Do not skip
+            # that path when the share API did not mint a file URL.
         ):
             # R47 standing rule: a capture browser is NEVER shown on
             # screen. This path runs whenever every static resolver
@@ -46851,6 +47254,11 @@ try {
                 self.play_button.setEnabled(True)
                 self.show_osd("Could not resolve a playable video stream from that URL", duration=3200)
             return
+        if stream_info.get('terabox_error') and not str(stream_info.get('playback_url') or '').strip():
+            if getattr(self, 'current_file', None) == source_url:
+                self.play_button.setEnabled(True)
+                self.show_osd(str(stream_info.get('terabox_error')), duration=5000)
+            return
         duration_ms = self._cache_resolved_remote_stream(source_url, dict(stream_info))
         # Always re-check mirrors after resolution — a newly-fetched title may
         # match another playlist entry. Don't restrict to only when 'mirrors'
@@ -46921,6 +47329,10 @@ try {
     def _apply_resolved_remote_stream(self, file_path, stream_info, autoplay=False):
         if not stream_info:
             return False
+        if stream_info.get('terabox_error') and not str(stream_info.get('playback_url') or '').strip():
+            self.play_button.setEnabled(True)
+            self.show_osd(str(stream_info.get('terabox_error')), duration=5000)
+            return True
         # mega.nz (and any other use_ytdlp_download source) cannot be streamed
         # directly — yt-dlp must download and decrypt the file first.
         # Kick off a background download to a temp dir; once done, load the
@@ -47179,9 +47591,15 @@ try {
                 # clicking ahead on the bar does nothing). The proxy's
                 # playlist rewrite marks it VOD so any timestamp is reachable.
                 or self._hls_needs_vod_playlist_proxy(playback_target, file_path)
+                # TeraBox /share/streaming has no .m3u8 suffix. Segments 403
+                # without the page Referer and the capture Cookie, which the
+                # proxy replays. A local playlist (127.0.0.1) is not this.
+                or self._terabox_streaming_url(playback_target)
             ):
                 _proxy_label = (
-                    'HLSVOD_PROXY'
+                    'TERABOX_PROXY'
+                    if self._terabox_streaming_url(playback_target)
+                    else 'HLSVOD_PROXY'
                     if self._hls_needs_vod_playlist_proxy(playback_target, file_path)
                     else 'PNGHLS_PROXY'
                     if (provider == 'browser_click'
@@ -47230,7 +47648,7 @@ try {
                     note=f'{playback_host} played direct (tulipvid-family host), tls_verify=False, no proxy',
                 )
         if (not self._is_hls_stream_url(playback_target, stream_info.get('content_type'))
-                and provider in ('fetchv_capture', 'javdock_capture', 'dood', 'embed_hls_unpack', 'voe_static', 'voe_browser', 'browser_click')):
+                and provider in ('fetchv_capture', 'javdock_capture', 'dood', 'embed_hls_unpack', 'voe_static', 'voe_browser', 'browser_click', 'terabox')):
             # Direct mp4/extensionless files from CDNs (cloudatacdn, tapecontent,
             # cdn-centaurus, cloudwindow-route, etc.): mpv/ffmpeg's bundled TLS
             # stack rejects some cert chains ("certificate verify failed" 0A000086)
@@ -47246,8 +47664,11 @@ try {
         # R57: dood and embed-HLS HLS also hit TLS 134 (cdn-centaurus, turboviplay,
         # cloudatacdn, cloudwindow-route) — set tls_verify=False for them too
         if self._is_hls_stream_url(playback_target, stream_info.get('content_type')):
-            if (provider in ('dood', 'embed_hls_unpack', 'voe_static', 'voe_browser', 'browser_click')
+            if (provider in ('dood', 'embed_hls_unpack', 'voe_static', 'voe_browser', 'browser_click', 'terabox')
                 or self._is_dood_host(playback_host)
+                or self._is_terabox_host(playback_host)
+                or self._is_terabox_host(urlparse(file_path).netloc or '')
+                or self._terabox_streaming_url(playback_target)
                 or self._is_embed_hls_host(urlparse(file_path).netloc or '')
                 or self._embed_hls_needs_adstrip_proxy(urlparse(file_path).netloc or '', playback_target)):
                 stream_info['tls_verify'] = False
@@ -47886,6 +48307,7 @@ try {
         roshy_entries = []
         eporner_entries = []
         mega_entries = []
+        terabox_entries = []
         remaining_urls = []
         for raw_url in urls:
             url = self._canonicalize_remote_source_url(self._sanitize_url(raw_url))
@@ -47938,11 +48360,31 @@ try {
                         if prepared_key:
                             existing_keys.add(prepared_key)
                     continue
+            elif self._is_terabox_host(host):
+                # List the share before the row is added so a folder becomes
+                # one row per video. A failure still leaves the URL in the
+                # playlist; Play asks TeraBox again.
+                try:
+                    prepared_list = self._prepare_terabox_playlist_entries(url)
+                except Exception as exc:
+                    print(f'[TERABOX] {exc}', flush=True)
+                    prepared_list = []
+                if prepared_list:
+                    for prepared in prepared_list:
+                        prepared_key = self._playlist_remote_url_key(prepared.get('source_url'))
+                        if prepared_key and prepared_key in existing_keys:
+                            print(f"[DUPLICATE] Skipped {prepared.get('source_url')} (already in playlist)")
+                            continue
+                        terabox_entries.append(prepared)
+                        if prepared_key:
+                            existing_keys.add(prepared_key)
+                    continue
             remaining_urls.append(url)
 
         payload['prepared_entries'].extend(eporner_entries)
         payload['prepared_entries'].extend(roshy_entries)
         payload['prepared_entries'].extend(mega_entries)
+        payload['prepared_entries'].extend(terabox_entries)
 
         mixed_entries, consumed_urls = self._mixed_remote_entries_from_urls(remaining_urls)
         for entry in mixed_entries:
@@ -63742,9 +64184,22 @@ if __name__ == "__main__":
                             except Exception:
                                 return False
 
+                        def _terabox_capture_path(req_url):
+                            try:
+                                return unquote(urlparse(req_url).path or '').lower()
+                            except Exception:
+                                return str(req_url or '').lower()
+
                         def handle_request(route, request):
                             req_url = request.url
-                            if '.m3u8' in req_url:
+                            _cap_path = _terabox_capture_path(req_url)
+                            # Preview JPEG on the share page. Announcing it
+                            # lets the image win when the film is filtered
+                            # as too short.
+                            if '/thumbnail/' in _cap_path:
+                                route.continue_()
+                                return
+                            if '/share/streaming' in _cap_path or '.m3u8' in req_url:
                                 _announce_media_url(req_url, prefix='VOE_M3U8::')
                             elif _media_ext_re.search(urlparse(req_url).path or ''):
                                 _announce_media_url(req_url)
@@ -64490,6 +64945,15 @@ if __name__ == "__main__":
                                         or (_w >= 960 and _dur >= 20.0)
                                     )
                                     _low_u = _u.lower()
+                                    if '/thumbnail/' in _low_u:
+                                        # TeraBox preview image. Do not announce
+                                        # it, and do not close the capture on it.
+                                        continue
+                                    if '/share/streaming' in _low_u:
+                                        # The page player. A 30s reading here is
+                                        # not a pre-roll; keep watching it as
+                                        # the film even when duration is short.
+                                        _is_long_content = True
                                     if any(tok in _low_u for tok in (
                                         'mediabook', 'previewclip', '/trailer', 'trailerhg',
                                         'teaser', 'sample.m3u8', '/sample/', 'preview',
@@ -64637,4 +65101,3 @@ if __name__ == "__main__":
         logging.error(f"Failed to start application: {e}\n{traceback.format_exc()}")
         print(f"Fatal error: {e}")
         raise
-
