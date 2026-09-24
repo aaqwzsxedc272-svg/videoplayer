@@ -3646,14 +3646,31 @@ class MpvMediaPlayerAdapter(QObject):
         Keeping mpv's normal 60/90-second network cache for this source can make
         it read a large portion of an MP4 before showing the first frame.
         """
-        if self._is_local_ftp_proxy_source() or self._is_local_mega_proxy_source():
+        if self._is_local_mega_proxy_source():
             return {
                 'cache': 'yes',
-                'cache-secs': 3 if self._is_local_ftp_proxy_source() else 20,
+                'cache-secs': 30,
+                # A far jump must not freeze the player in a pause that then
+                # ignores the next click. The range request is the wait.
+                'cache-pause': False,
                 'cache-pause-initial': False,
-                'demuxer-max-bytes': '16MiB' if self._is_local_ftp_proxy_source() else '48MiB',
-                'demuxer-max-back-bytes': '4MiB' if self._is_local_ftp_proxy_source() else '16MiB',
-                'demuxer-readahead-secs': 0.25 if self._is_local_ftp_proxy_source() else 8,
+                'demuxer-max-bytes': '64MiB',
+                'demuxer-max-back-bytes': '32MiB',
+                'demuxer-readahead-secs': 10,
+                'force-seekable': True,
+                'stream-lavf-o': (
+                    'reconnect=1,reconnect_streamed=1,'
+                    'reconnect_on_network_error=1,reconnect_delay_max=2'
+                ),
+            }
+        if self._is_local_ftp_proxy_source():
+            return {
+                'cache': 'yes',
+                'cache-secs': 3,
+                'cache-pause-initial': False,
+                'demuxer-max-bytes': '16MiB',
+                'demuxer-max-back-bytes': '4MiB',
+                'demuxer-readahead-secs': 0.25,
                 # Lets libmpv use the proxy's Accept-Ranges support to fetch an
                 # MP4 index near the end instead of sequentially reading there.
                 'force-seekable': True,
@@ -4090,7 +4107,19 @@ class MpvMediaPlayerAdapter(QObject):
         return int(self._position_ms)
 
     def duration(self):
-        return int(self._duration_ms)
+        cached = int(self._duration_ms or 0)
+        if cached > 0 or self._mpv is None or not self._file_loaded:
+            return cached
+        self._publish_duration()
+        return int(self._duration_ms or 0)
+
+    def _publish_duration(self):
+        if self._mpv is None:
+            return
+        try:
+            self._on_duration('duration', self._mpv.get_property('duration'))
+        except Exception:
+            pass
 
     def playbackState(self):
         return self._playback_state
@@ -4129,6 +4158,7 @@ class MpvMediaPlayerAdapter(QObject):
             self._apply_pending_video_state()
             self._apply_adaptive_performance_profile()
             QTimer.singleShot(250, self._apply_adaptive_performance_profile)
+            QTimer.singleShot(400, self._publish_duration)
             # Late enough that video-codec/width have settled, early enough
             # to be useful: a still image must be named before the row sits
             # on it for the duration the playlist claims.
@@ -4574,11 +4604,16 @@ class MpvMediaPlayerAdapter(QObject):
             src_l = src.lower()
             # HLS (esp. turtleviplay VOD-as-live): exact seeks often no-op
             # and the bar only advances ~1 min. Keyframe seek jumps.
-            if ('.m3u8' in src_l) or ('/hls/' in src_l) or src_l.endswith('.m3u'):
-                self._mpv.seek(position_ms / 1000.0, 'absolute')
+            # MEGA is the same shape: an exact seek asks for one sample and
+            # mpv drops it when that range is still on the way.
+            if ((('.m3u8' in src_l) or ('/hls/' in src_l) or src_l.endswith('.m3u'))
+                    or self._is_local_mega_proxy_source()):
+                if self._is_local_mega_proxy_source():
+                    print(f'[MEGA] seek to {position_ms}ms', flush=True)
+                self._issue_absolute_seek(position_ms, exact=False)
             else:
                 self._mpv.seek(position_ms / 1000.0, 'absolute', 'exact')
-            self._pending_seek_ms = None
+                self._pending_seek_ms = None
         except Exception as exc:
             print(f"[mpv] seek failed: {exc}")
 
@@ -4655,12 +4690,21 @@ class MpvMediaPlayerAdapter(QObject):
         total_ms = self.duration()
         if total_ms > 0:
             target_ms = min(target_ms, total_ms)
-        if self._issue_absolute_seek(target_ms, exact=True):
+        mega = self._is_local_mega_proxy_source()
+        # A long jump on MEGA has to fetch a new slice. Exact seek is dropped
+        # while that slice is still arriving, so land on the keyframe instead.
+        if mega:
+            print(f'[MEGA] seek to {target_ms}ms', flush=True)
+        large_mega = mega and abs(delta_ms) >= 15000
+        if self._issue_absolute_seek(target_ms, exact=not large_mega):
+            if large_mega:
+                return
             token = object()
             self._seek_verify_token = token
             try:
                 QTimer.singleShot(
-                    700, lambda: self._verify_seek_landed(target_ms, token))
+                    2500 if mega else 700,
+                    lambda: self._verify_seek_landed(target_ms, token))
             except Exception:
                 self._seek_verify_token = None
         elif not self._issue_absolute_seek(target_ms, exact=False):

@@ -1219,7 +1219,7 @@ def _fetch_range(url, start, end):
             try:
                 response = cfreq.get(
                     url, headers=headers, impersonate=impersonate,
-                    timeout=40, allow_redirects=True, stream=True)
+                    timeout=20, allow_redirects=True, stream=True)
             except Exception as exc:
                 errors.append(f'{impersonate}: {exc}')
                 continue
@@ -1240,7 +1240,7 @@ def _fetch_range(url, start, end):
     try:
         import requests
         response = requests.get(
-            url, headers=headers, timeout=40, allow_redirects=True, stream=True)
+            url, headers=headers, timeout=20, allow_redirects=True, stream=True)
         status = int(response.status_code or 0)
         if status in (200, 206):
             _FETCH_BACKEND = 'requests'
@@ -1256,7 +1256,7 @@ def _fetch_range(url, start, end):
 
     req = urllib.request.Request(url, headers=headers)
     try:
-        resp = urllib.request.urlopen(req, timeout=40)
+        resp = urllib.request.urlopen(req, timeout=20)
     except Exception as exc:
         errors.append(f'urllib: {exc}')
         detail = '; '.join(errors[-3:])
@@ -1293,7 +1293,17 @@ class MegaStream(object):
         self.refreshed_at = 0.0
         self.logged = False
         self.lock = threading.Lock()
+        self._blocks = {}
+        self._inflight = {}
+        self._block_lock = threading.Lock()
+        self._cache_bytes = 0
+        # MEGA often allows one storage connection. A seek must wait for the
+        # chunk already in flight, not open a second one and get reset.
+        self.fetch_lock = threading.Lock()
+        self.last_request_start = None
         self.refresh(force=True)
+        threading.Thread(
+            target=self._prefetch_index, name='mega-index', daemon=True).start()
 
     def refresh(self, force=False):
         with self.lock:
@@ -1332,61 +1342,146 @@ class MegaStream(object):
                 print(f'[MEGA] streaming {self.name} ({format_size(self.size)}) '
                       f'— not saving the file', flush=True)
 
+    def _prefetch_index(self):
+        """Warm the MP4 index. A time-bar jump needs it, and it sits at the end.
+
+        Wait so the playhead's first chunks are not stuck behind this fetch.
+        """
+        time.sleep(2)
+        try:
+            tail = min(2 * 1024 * 1024, self.size)
+            if tail > 0:
+                self.read(self.size - tail, tail)
+        except Exception as exc:
+            print(f'[MEGA] index prefetch failed: {exc}', flush=True)
+
     def read(self, start, length):
         if start >= self.size or length <= 0:
             return b''
         length = min(int(length), self.size - int(start))
-        skip = int(start) % 16
-        fetch_start = int(start) - skip
-        fetch_len = min(skip + length, self.size - fetch_start)
-        encrypted = self._get(fetch_start, fetch_start + fetch_len - 1)
-        if len(encrypted) <= skip:
-            return b''
-        cipher = _cipher(self.key_bytes)
+        out = bytearray()
+        pos = int(start)
+        end = pos + length
+        while pos < end:
+            index = pos // _BLOCK
+            block = self._block(index)
+            if not block:
+                break
+            offset = pos - index * _BLOCK
+            if offset >= len(block):
+                break
+            take = min(len(block) - offset, end - pos)
+            out.extend(block[offset:offset + take])
+            pos += take
+        return bytes(out)
+
+    def _block(self, index):
+        with self._block_lock:
+            cached = self._blocks.get(index)
+            if cached is not None:
+                return cached
+            waiter = self._inflight.get(index)
+            if waiter is None:
+                waiter = threading.Event()
+                self._inflight[index] = waiter
+                owner = True
+            else:
+                owner = False
+        if not owner:
+            waiter.wait(90)
+            with self._block_lock:
+                return self._blocks.get(index, b'')
         try:
-            plain, _next = cipher.ctr_xor(self.counter0 + (fetch_start // 16), encrypted)
+            start = index * _BLOCK
+            end = min(self.size, start + _BLOCK) - 1
+            encrypted = self._get(start, end)
+            skip = 0
+            cipher = _cipher(self.key_bytes)
+            try:
+                plain, _next = cipher.ctr_xor(self.counter0 + index * (_BLOCK // 16), encrypted)
+            finally:
+                cipher.close()
+            # The block is 16-byte aligned, so the plaintext is the file bytes.
+            data = plain[:end - start + 1]
+            with self._block_lock:
+                self._blocks[index] = data
+                self._cache_bytes += len(data)
+                self._evict_blocks()
+            return data
         finally:
-            cipher.close()
-        return plain[skip:skip + length]
+            with self._block_lock:
+                self._inflight.pop(index, None)
+            waiter.set()
+
+    def _evict_blocks(self):
+        # Keep the start and the index at the end. Those are what a seek re-reads.
+        tail = max(0, (self.size - 1) // _BLOCK - 4)
+        while self._cache_bytes > 96 * 1024 * 1024 and len(self._blocks) > 8:
+            victim = None
+            for index in list(self._blocks):
+                if index == 0 or index >= tail:
+                    continue
+                victim = index
+                break
+            if victim is None:
+                break
+            removed = self._blocks.pop(victim, b'')
+            self._cache_bytes -= len(removed)
 
     def _get(self, start, end):
+        """Encrypted bytes start..end inclusive. Retries a short or reset read."""
+        want = end - start + 1
+        buf = bytearray()
+        pos = int(start)
         last = None
-        for attempt in range(4):
+        attempt = 0
+        while len(buf) < want and attempt < 8:
+            piece_end = min(end, pos + _BLOCK - 1)
             try:
-                status, data, _cr = _fetch_range(self.url, start, end)
+                with self.fetch_lock:
+                    status, data, content_range = _fetch_range(self.url, pos, piece_end)
             except Exception as exc:
                 last = exc if isinstance(exc, MegaError) else MegaError(
                     f'MEGA closed the storage connection ({exc})')
+                attempt += 1
                 try:
                     self.refresh(force=True)
                 except Exception:
                     pass
-                time.sleep(0.3 * (attempt + 1))
+                time.sleep(min(2.0, 0.25 * attempt))
                 continue
-            if status == 200 and start > 0:
-                last = MegaError('MEGA storage ignored the range request')
-                time.sleep(0.3 * (attempt + 1))
+            ranged_ok = _content_range_matches(content_range, pos)
+            if content_range and not ranged_ok:
+                usable = False
+            else:
+                usable = status == 206 or (status == 200 and pos == 0) or ranged_ok
+            if not usable or not data:
+                last = MegaError(
+                    'MEGA storage ignored the range request'
+                    if status == 200 else f'MEGA storage HTTP {status}')
+                if status in (200, 403, 429, 500, 502, 503, 509) or not data:
+                    try:
+                        self.refresh(force=True)
+                    except Exception as exc:
+                        last = exc
+                attempt += 1
+                if attempt == 1 or attempt == 4:
+                    print(f'[MEGA] range {pos}-{piece_end} failed: {last}', flush=True)
+                time.sleep(min(2.0, 0.25 * attempt))
                 continue
-            if status == 206 or (status == 200 and start == 0):
-                if not data and (end >= start):
-                    last = MegaError('MEGA storage returned an empty range')
-                    time.sleep(0.3 * (attempt + 1))
-                    continue
-                if not self.logged:
-                    self.logged = True
-                    print(f'[MEGA] storage connected via {_FETCH_BACKEND or "urllib"}',
-                          flush=True)
-                return data
-            if status in (403, 429, 500, 502, 503, 509):
-                last = MegaError(f'MEGA storage HTTP {status}')
-                try:
-                    self.refresh(force=True)
-                except Exception as exc:
-                    last = exc
-                time.sleep(0.3 * (attempt + 1))
+            if not self.logged:
+                self.logged = True
+                print(f'[MEGA] storage connected via {_FETCH_BACKEND or "urllib"} '
+                      f'(HTTP {status})', flush=True)
+            buf.extend(data)
+            pos += len(data)
+            if len(data) < (piece_end - (pos - len(data)) + 1):
+                # Short 206: keep the bytes and ask for the rest. Not a failure.
                 continue
-            raise MegaError(f'MEGA storage HTTP {status}')
-        raise last or MegaError('MEGA closed the storage connection')
+            attempt = 0
+        if len(buf) < want:
+            raise last or MegaError('MEGA closed the storage connection')
+        return bytes(buf[:want])
 
 
 def _content_type(name):
@@ -1403,6 +1498,19 @@ def _content_type(name):
         '.m4a': 'audio/mp4',
         '.flac': 'audio/flac',
     }.get(ext, 'application/octet-stream')
+
+
+_BLOCK = 1024 * 1024
+
+
+def _content_range_matches(header, start):
+    text = str(header or '').strip().lower()
+    if not text.startswith('bytes'):
+        return False
+    try:
+        return int(text.split(' ', 1)[1].split('-', 1)[0]) == int(start)
+    except Exception:
+        return False
 
 
 _PROXY_LOCK = threading.Lock()
@@ -1443,6 +1551,25 @@ class _MegaProxyHandler(http.server.BaseHTTPRequestHandler):
             return
         start, end, ranged = span
         length = end - start + 1
+        previous = getattr(stream, 'last_request_start', None)
+        try:
+            stream.last_request_start = start
+        except Exception:
+            pass
+        if previous is None or abs(start - previous) > 2 * 1024 * 1024:
+            print(f'[MEGA] player range {start}-{end}', flush=True)
+            if previous is not None and hasattr(stream, 'refresh'):
+                try:
+                    stream.refresh(force=True)
+                except Exception as exc:
+                    print(f'[MEGA] refresh before seek failed: {exc}', flush=True)
+        self.close_connection = True
+        first = b''
+        if not head_only:
+            first = self._read_chunk(stream, start, min(_BLOCK, length))
+            if not first:
+                self.send_error(502, 'MEGA storage connection failed')
+                return
         self.send_response(206 if ranged else 200)
         self.send_header('Content-Type', stream.content_type)
         self.send_header('Accept-Ranges', 'bytes')
@@ -1450,19 +1577,39 @@ class _MegaProxyHandler(http.server.BaseHTTPRequestHandler):
         if ranged:
             self.send_header('Content-Range', f'bytes {start}-{end}/{stream.size}')
         self.send_header('Cache-Control', 'no-store')
+        self.send_header('Connection', 'close')
         self.end_headers()
         if head_only:
             return
-        pos = start
+        try:
+            self.wfile.write(first)
+        except Exception:
+            return
+        pos = start + len(first)
         while pos <= end:
-            chunk = stream.read(pos, min(1024 * 1024, end - pos + 1))
+            chunk = self._read_chunk(stream, pos, min(_BLOCK, end - pos + 1))
             if not chunk:
-                break
+                return
             try:
                 self.wfile.write(chunk)
             except Exception:
                 return
             pos += len(chunk)
+
+    def _read_chunk(self, stream, pos, length):
+        error = None
+        for attempt in range(6):
+            try:
+                chunk = stream.read(pos, length)
+            except Exception as exc:
+                error = exc
+                chunk = b''
+            if chunk:
+                return chunk
+            print(f'[MEGA] read retry {attempt + 1} at {pos}: {error or "empty"}', flush=True)
+            time.sleep(min(1.5, 0.2 * (attempt + 1)))
+        print(f'[MEGA] player range ended early at {pos}: {error}', flush=True)
+        return b''
 
 
 def _parse_range(header, size):
@@ -1615,3 +1762,10 @@ def _proxy_self_test():
         body = resp.read()
     assert body == bytes((100 + i) & 0xff for i in range(50))
     assert resp.headers.get('Content-Range') == 'bytes 100-149/1000'
+
+    req = urllib.request.Request(url, headers={'Range': 'bytes=800-'})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        assert resp.status == 206
+        body = resp.read()
+    assert body == bytes((800 + i) & 0xff for i in range(200))
+    assert resp.headers.get('Content-Range') == 'bytes 800-999/1000'
