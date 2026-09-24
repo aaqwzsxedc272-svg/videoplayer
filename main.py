@@ -7835,6 +7835,7 @@ class VideoPlayer(QMainWindow):
     # Emitted when background metadata probe (title + count) for a filester folder completes
     filester_folder_meta_ready = pyqtSignal(str, str, int, int, object)  # folder_path, title, file_count, folder_count, children
     remote_password_requested = pyqtSignal(str, str, object)  # provider, source_url, request dict
+    terabox_login_notice = pyqtSignal(str)
     missav_capture_ready = pyqtSignal(str, str, str, bool)  # source_url, playlist_url, title, play_first
     missav_capture_failed = pyqtSignal(str, str)  # source_url, error_message
     voe_capture_ready = pyqtSignal(str, str, str, bool)   # source_url, m3u8_url, title, play_first
@@ -8159,6 +8160,7 @@ class VideoPlayer(QMainWindow):
         self.remote_folder_expanded.connect(self._on_remote_folder_expanded)
         self.filester_folder_meta_ready.connect(self._on_filester_folder_meta_ready)
         self.remote_password_requested.connect(self._on_remote_password_requested)
+        self.terabox_login_notice.connect(self._on_terabox_login_notice)
         self.missav_capture_ready.connect(self._on_missav_capture_ready)
         self.missav_capture_failed.connect(self._on_missav_capture_failed)
         self.voe_capture_ready.connect(self._on_voe_capture_ready)
@@ -31710,13 +31712,6 @@ try {
                         total_count += 1
                     except Exception:
                         continue
-                if total_count <= 0 or not self._session_has_ndus(session):
-                    for cookie in self._live_browser_cookies_for(domain_tokens):
-                        try:
-                            session.cookies.set_cookie(cookie)
-                            total_count += 1
-                        except Exception:
-                            continue
                 if total_count > 0:
                     print(f'[COOKIES] {total_count} cookie(s) read from '
                           f'{self._profile_cookie_origin} for '
@@ -40720,6 +40715,227 @@ try {
             return ''
         return '; '.join(parts)
 
+    def _terabox_cookie_file(self):
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'terabox.com_cookies.txt')
+
+    def _terabox_login_profile_dir(self):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.terabox_login')
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception:
+            pass
+        return path
+
+    def _saved_terabox_cookie_header(self):
+        path = self._terabox_cookie_file()
+        if not os.path.isfile(path):
+            return ''
+        try:
+            import http.cookiejar
+            jar = http.cookiejar.MozillaCookieJar(path)
+            jar.load(ignore_discard=True, ignore_expires=True)
+        except Exception:
+            return ''
+        parts = []
+        for cookie in jar:
+            name = str(getattr(cookie, 'name', '') or '')
+            value = str(getattr(cookie, 'value', '') or '')
+            if name and value:
+                parts.append(f'{name}={value}')
+        return '; '.join(parts)
+
+    def _save_terabox_cookie_records(self, records):
+        """Remember the TeraBox session. The Gmail password is never written."""
+        import http.cookiejar
+        path = self._terabox_cookie_file()
+        jar = http.cookiejar.MozillaCookieJar(path)
+        kept = 0
+        for record in records or []:
+            cookie = self._cookie_from_browser_record(record)
+            if cookie is None:
+                continue
+            domain = str(cookie.domain or '').lower().lstrip('.')
+            if not any(domain == item or domain.endswith('.' + item) or item.endswith('.' + domain) for item in (
+                'terabox.com', '1024tera.com', '1024terabox.com', '4funbox.com',
+                'nephobox.com', 'mirrobox.com', 'dubox.com',
+            )):
+                continue
+            jar.set_cookie(cookie)
+            kept += 1
+        if not any(str(cookie.name or '').lower() == 'ndus' and cookie.value for cookie in jar):
+            return False
+        try:
+            jar.save(ignore_discard=True, ignore_expires=True)
+        except Exception as exc:
+            print(f'[TERABOX] could not save the login session ({type(exc).__name__})', flush=True)
+            return False
+        print(f'[TERABOX] login session saved ({kept} cookie(s))', flush=True)
+        return True
+
+    def _clear_terabox_cookie_file(self):
+        path = self._terabox_cookie_file()
+        try:
+            if os.path.isfile(path):
+                os.remove(path)
+        except Exception:
+            pass
+
+    @pyqtSlot(str)
+    def _on_terabox_login_notice(self, text):
+        text = str(text or '')
+        box = getattr(self, '_terabox_login_box', None)
+        if not text:
+            if box is not None:
+                box.hide()
+            return
+        self.show_osd(text, duration=12000)
+        if box is None:
+            box = QMessageBox(self)
+            box.setWindowTitle('TeraBox sign-in')
+            box.setIcon(QMessageBox.Icon.Information)
+            box.setText(
+                'Sign in with Google in the browser window.\n\n'
+                'That session is kept on this computer, so the next link is saved and played without asking again. '
+                'The Gmail password is not saved.'
+            )
+            box.setStandardButtons(QMessageBox.StandardButton.Cancel)
+            box.buttonClicked.connect(lambda _button: self._cancel_terabox_login())
+            box.setModal(False)
+            self._terabox_login_box = box
+        box.show()
+        box.raise_()
+        box.activateWindow()
+
+    def _cancel_terabox_login(self):
+        event = getattr(self, '_terabox_login_cancel', None)
+        if event is not None:
+            event.set()
+
+    def _open_terabox_login_window(self):
+        """Visible sign-in window. Returns cookie records once the account is logged in."""
+        exe = _find_installed_brave_executable() or self._browser_exe_for_user_data(
+            os.path.join(os.environ.get('LOCALAPPDATA') or '', 'Google', 'Chrome', 'User Data'))
+        if not exe:
+            print('[TERABOX] no Brave or Chrome found for sign-in', flush=True)
+            return []
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception:
+            print('[TERABOX] sign-in window needs playwright', flush=True)
+            return []
+        cancel = getattr(self, '_terabox_login_cancel', None)
+        if cancel is None:
+            cancel = threading.Event()
+            self._terabox_login_cancel = cancel
+        cancel.clear()
+        try:
+            self.terabox_login_notice.emit(
+                'Sign in with Google in the browser window. The password is not saved.'
+            )
+        except Exception:
+            pass
+        print('[TERABOX] sign-in window opened', flush=True)
+        profile = self._terabox_login_profile_dir()
+        ctx = None
+        records = []
+        try:
+            with sync_playwright() as playwright:
+                ctx = playwright.chromium.launch_persistent_context(
+                    profile,
+                    executable_path=exe,
+                    headless=False,
+                    timeout=30000,
+                    args=[
+                        '--window-position=80,60',
+                        '--window-size=1100,780',
+                        '--no-first-run',
+                        '--no-default-browser-check',
+                        '--disable-sync',
+                    ],
+                )
+                page = ctx.pages[0] if ctx.pages else ctx.new_page()
+                try:
+                    page.goto('https://www.terabox.com/', wait_until='domcontentloaded', timeout=30000)
+                except Exception:
+                    pass
+                for label in ('Log in', 'Sign in', 'Login', 'Continue with Google'):
+                    if cancel.is_set():
+                        break
+                    try:
+                        page.get_by_text(label, exact=False).first.click(timeout=2000)
+                        break
+                    except Exception:
+                        continue
+                deadline = time.time() + 180
+                while time.time() < deadline and not cancel.is_set():
+                    try:
+                        records = ctx.cookies() or []
+                    except Exception:
+                        records = []
+                        break
+                    if any(str(item.get('name') or '').lower() == 'ndus' and item.get('value') for item in records):
+                        print('[TERABOX] sign-in finished', flush=True)
+                        break
+                    records = []
+                    time.sleep(1.5)
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
+                ctx = None
+        except Exception as exc:
+            print(f'[TERABOX] sign-in window failed ({type(exc).__name__})', flush=True)
+            records = []
+        finally:
+            try:
+                if ctx is not None:
+                    ctx.close()
+            except Exception:
+                pass
+            try:
+                self.terabox_login_notice.emit('')
+            except Exception:
+                pass
+        return records
+
+    def _ensure_terabox_login(self):
+        """One Google sign-in, then the saved session is reused. No password is stored."""
+        import terabox_client
+        saved = self._saved_terabox_cookie_header()
+        if terabox_client.has_login_cookie(saved):
+            return saved
+        lock = getattr(self, '_terabox_login_lock', None)
+        if lock is None:
+            lock = threading.Lock()
+            self._terabox_login_lock = lock
+        pending = getattr(self, '_terabox_login_pending', None)
+        if not isinstance(pending, dict):
+            pending = {}
+            self._terabox_login_pending = pending
+        with lock:
+            slot = pending.get('login')
+            if slot is None:
+                slot = {'event': threading.Event(), 'header': ''}
+                pending['login'] = slot
+                owner = True
+            else:
+                owner = False
+        if not owner:
+            slot['event'].wait(200)
+            return slot.get('header') or self._saved_terabox_cookie_header()
+        try:
+            records = self._open_terabox_login_window()
+            header = ''
+            if self._save_terabox_cookie_records(records):
+                header = self._saved_terabox_cookie_header()
+            slot['header'] = header
+            return header
+        finally:
+            slot['event'].set()
+            with lock:
+                if pending.get('login') is slot:
+                    pending.pop('login', None)
+
     def _resolve_terabox_source(self, source_url):
         """Mint a fresh TeraBox file URL. Never hand the share page to mpv."""
         import terabox_client
@@ -40742,6 +40958,21 @@ try {
             print(f'[TERABOX] {exc}', flush=True)
             # The page player still has /share/streaming. Do not stop here.
             return None
+        if result.get('error_code') == 'login':
+            if terabox_client.has_login_cookie(cookies):
+                self._clear_terabox_cookie_file()
+            try:
+                cookies = self._ensure_terabox_login() or ''
+            except Exception as exc:
+                print(f'[TERABOX] sign-in failed: {exc}', flush=True)
+                cookies = ''
+            if terabox_client.has_login_cookie(cookies):
+                try:
+                    result = terabox_client.open_playback(
+                        source_url, cookie_header=cookies, password=password)
+                except Exception as exc:
+                    print(f'[TERABOX] {exc}', flush=True)
+                    result = {'ok': False, 'error': 'TeraBox did not answer.'}
         if result.get('error_code') == 'password' and not password:
             try:
                 password = self._remote_password_for_url(

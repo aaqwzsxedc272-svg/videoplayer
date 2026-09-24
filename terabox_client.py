@@ -484,10 +484,9 @@ def _headers(referer, accept):
 GUEST_PREVIEW_MAX_SECONDS = 36.0
 SAVE_DIR = '/Antigravity'
 LOGIN_MESSAGE = (
-    'TeraBox only plays 30 seconds until the file is saved to your account. '
-    'This player could not read a Brave, Chrome, or Edge login. If you are '
-    'already logged in, close that browser, restart this player, and play the '
-    'link again. Do not paste your password here.'
+    'TeraBox only plays the full video after the share is saved to your account. '
+    'Sign in with Google in the browser window. That session is kept for the next link. '
+    'The password is not saved. If you closed the window, play the link again.'
 )
 
 
@@ -1734,9 +1733,9 @@ def _play_from_account(session, listed, chosen, jar, timeout):
     fallback_js = str((listed.get('tokens') or {}).get('jsToken') or '')
     bases = []
     for candidate in (
+        'https://www.terabox.com',
         listed.get('api_base'),
         'https://www.1024tera.com',
-        'https://www.terabox.com',
         'https://www.1024terabox.com',
     ):
         if candidate and candidate not in bases:
