@@ -176,6 +176,10 @@ def test_guest_preview_is_not_played_as_the_film():
     assert terabox_client.looks_like_guest_preview(PREVIEW, size_bytes=500 * 1024 * 1024)
     assert terabox_client.looks_like_guest_preview(PREVIEW)
     assert not terabox_client.looks_like_guest_preview(PREVIEW, duration_ms=30000)
+    # The share page reports the preview's 30 seconds even when the file is
+    # hundreds of megabytes. Size is the film, not that duration.
+    assert terabox_client.looks_like_guest_preview(
+        PREVIEW, duration_ms=30000, size_bytes=959 * 1024 * 1024)
     # Six minutes of a ninety-minute file is still not the film.
     long_film = """#EXTM3U
 #EXTINF:120.0,

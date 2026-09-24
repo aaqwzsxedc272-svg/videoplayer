@@ -31249,6 +31249,56 @@ try {
 
         return _load
 
+    def _chromium_user_data_roots(self):
+        """Installed Chromium profile roots, Brave first."""
+        local = os.environ.get('LOCALAPPDATA') or ''
+        home = os.path.expanduser('~')
+        if os.name == 'nt':
+            pairs = (
+                ('brave', os.path.join(local, 'BraveSoftware', 'Brave-Browser', 'User Data')),
+                ('brave', os.path.join(local, 'BraveSoftware', 'Brave-Browser-Beta', 'User Data')),
+                ('chrome', os.path.join(local, 'Google', 'Chrome', 'User Data')),
+                ('edge', os.path.join(local, 'Microsoft', 'Edge', 'User Data')),
+            )
+        else:
+            pairs = (
+                ('brave', os.path.join(home, '.config', 'BraveSoftware', 'Brave-Browser')),
+                ('chrome', os.path.join(home, '.config', 'google-chrome')),
+                ('edge', os.path.join(home, '.config', 'microsoft-edge')),
+            )
+        found = []
+        for browser, path in pairs:
+            if path and os.path.isdir(path):
+                found.append((browser, path))
+        return found
+
+    def _chromium_profile_names(self, user_data):
+        names = []
+        try:
+            entries = os.listdir(user_data)
+        except Exception:
+            return names
+        for name in entries:
+            if name != 'Default' and not str(name).startswith('Profile'):
+                continue
+            profile = os.path.join(user_data, name)
+            if not os.path.isdir(profile):
+                continue
+            if os.path.isfile(os.path.join(profile, 'Network', 'Cookies')) or os.path.isfile(os.path.join(profile, 'Cookies')):
+                names.append(name)
+        return names
+
+    def _cookie_browser_attempts(self):
+        attempts = [(browser, None) for browser in self._COOKIE_BROWSERS]
+        seen = set(attempts)
+        for browser, root in self._chromium_user_data_roots():
+            for profile in self._chromium_profile_names(root):
+                item = (browser, profile)
+                if item not in seen:
+                    seen.add(item)
+                    attempts.append(item)
+        return attempts
+
     def _profile_cookie_loader(self):
         """(callable(browser) -> jar, what it is) or (None, why there isn't one).
 
@@ -31265,12 +31315,14 @@ try {
         try:
             from yt_dlp.cookies import extract_cookies_from_browser as _extract
 
-            def _load(browser):
+            def _load(browser, profile=None):
                 try:
+                    if profile:
+                        return _extract(browser, profile)
                     return _extract(browser)
                 except TypeError:
                     # Older signatures take the profile explicitly.
-                    return _extract(browser, None)
+                    return _extract(browser, profile)
             return _load, 'the yt-dlp module'
         except Exception:
             pass
@@ -31354,10 +31406,14 @@ try {
                             continue
                         seen.add(key)
                         found.append(cookie)
+                        matched_here += 1
                     except Exception:
                         continue
             except Exception:
                 continue
+            if profile is None or matched_here:
+                where = f'{browser}:{profile}' if profile else browser
+                print(f'[COOKIES] {where}: {matched_here} cookie(s) for this site')
             if found:
                 break
         if found:
@@ -31367,6 +31423,240 @@ try {
             # so the next video does not decrypt the same stores again.
             # A lock (loaded_any stays false) is not remembered.
             cache[wanted] = (time.time(), [])
+        return found
+
+    def _copy_shared_file(self, src, dst):
+        """Copy a file even when the browser still has it open."""
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+        except Exception:
+            return False
+        if os.name != 'nt':
+            try:
+                shutil.copy2(src, dst)
+                return True
+            except Exception:
+                return False
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.CreateFileW.argtypes = [
+            wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+            ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+        ]
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.ReadFile.argtypes = [
+            wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p,
+        ]
+        kernel.ReadFile.restype = wintypes.BOOL
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        handle = kernel.CreateFileW(
+            str(src), 0x80000000, 0x1 | 0x2 | 0x4, None, 3, 0x80, None)
+        invalid = wintypes.HANDLE(-1).value
+        if not handle or handle == invalid:
+            try:
+                shutil.copy2(src, dst)
+                return True
+            except Exception:
+                return False
+        try:
+            with open(dst, 'wb') as out:
+                buf = ctypes.create_string_buffer(1024 * 1024)
+                read = wintypes.DWORD(0)
+                while True:
+                    ok = kernel.ReadFile(handle, buf, len(buf), ctypes.byref(read), None)
+                    if not ok or not read.value:
+                        break
+                    out.write(buf.raw[:read.value])
+            return os.path.getsize(dst) > 0
+        except Exception:
+            return False
+        finally:
+            try:
+                kernel.CloseHandle(handle)
+            except Exception:
+                pass
+
+    def _browser_exe_for_user_data(self, user_data):
+        low = str(user_data or '').replace('\\', '/').lower()
+        if 'brave' in low:
+            return _find_installed_brave_executable()
+        if os.name != 'nt':
+            return ''
+        local = os.environ.get('LOCALAPPDATA') or ''
+        program = os.environ.get('ProgramFiles') or ''
+        names = ()
+        if 'chrome' in low:
+            names = (
+                os.path.join(program, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+                os.path.join(local, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+            )
+        elif 'edge' in low:
+            names = (
+                os.path.join(program, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+                os.path.join(local, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+            )
+        for candidate in names:
+            if candidate and os.path.isfile(candidate):
+                return candidate
+        return ''
+
+    def _snapshot_browser_profile(self, user_data, dest):
+        """A small copy the browser can open without locking the live profile."""
+        local_state = os.path.join(user_data, 'Local State')
+        if not os.path.isfile(local_state):
+            return False
+        if not self._copy_shared_file(local_state, os.path.join(dest, 'Local State')):
+            return False
+        copied = False
+        for name in self._chromium_profile_names(user_data):
+            profile = os.path.join(user_data, name)
+            for rel in (('Network', 'Cookies'), ('Cookies',), ('Preferences',)):
+                src = os.path.join(profile, *rel)
+                if not os.path.isfile(src):
+                    continue
+                try:
+                    if rel == ('Preferences',) and os.path.getsize(src) > 8 * 1024 * 1024:
+                        continue
+                except Exception:
+                    pass
+                if self._copy_shared_file(src, os.path.join(dest, name, *rel)):
+                    copied = True
+        return copied
+
+    def _cookie_from_browser_record(self, record):
+        import http.cookiejar
+        name = str(record.get('name') or '')
+        value = str(record.get('value') or '')
+        domain = str(record.get('domain') or '')
+        if not name or not value or not domain:
+            return None
+        try:
+            expires = int(record.get('expires') or 0)
+        except Exception:
+            expires = 0
+        if expires <= 0:
+            expires = None
+        return http.cookiejar.Cookie(
+            0, name, value, None, False,
+            domain, True, domain.startswith('.'),
+            str(record.get('path') or '/') or '/', True,
+            bool(record.get('secure')), expires, False,
+            None, None, {'HttpOnly': bool(record.get('httpOnly'))}, False,
+        )
+
+    def _domains_want_live_login(self, domains):
+        needles = (
+            'terabox.com', '1024tera.com', '1024terabox.com', 'dubox.com',
+            '4funbox.com', 'nephobox.com', 'mirrobox.com',
+        )
+        for token in domains or []:
+            host = str(token or '').lower().lstrip('.')
+            if any(host == item or host.endswith('.' + item) or item.endswith('.' + host) for item in needles):
+                return True
+        return False
+
+    def _read_login_via_installed_browser(self, domains):
+        """Ask the installed browser for its own cookies.
+
+        yt-dlp often cannot read a running Brave profile. Brave can. A
+        copy of the profile is opened off-screen, only the requested
+        site's cookies are kept, and the copy is deleted. Values are not
+        logged.
+        """
+        wanted = [str(item or '').lower().lstrip('.') for item in (domains or []) if str(item or '').strip()]
+        if not wanted:
+            return []
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception:
+            print('[COOKIES] installed-browser login needs playwright')
+            return []
+        for browser_name, root in self._chromium_user_data_roots():
+            exe = self._browser_exe_for_user_data(root)
+            if not exe:
+                continue
+            dest = tempfile.mkdtemp(prefix='vp-login-')
+            ctx = None
+            records = []
+            try:
+                if not self._snapshot_browser_profile(root, dest):
+                    print(f'[COOKIES] could not copy the {browser_name} cookie store')
+                    continue
+                print(f'[COOKIES] asking installed {browser_name} for the site login', flush=True)
+                with sync_playwright() as playwright:
+                    ctx = playwright.chromium.launch_persistent_context(
+                        dest,
+                        executable_path=exe,
+                        headless=False,
+                        timeout=25000,
+                        args=[
+                            '--window-position=-32000,-32000',
+                            '--window-size=800,600',
+                            '--no-first-run',
+                            '--no-default-browser-check',
+                            '--disable-extensions',
+                            '--disable-sync',
+                        ],
+                    )
+                    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+                    try:
+                        page.goto(
+                            'https://www.terabox.com/',
+                            wait_until='domcontentloaded',
+                            timeout=20000,
+                        )
+                    except Exception:
+                        pass
+                    records = ctx.cookies() or []
+                    ctx.close()
+                    ctx = None
+            except Exception as exc:
+                print(f'[COOKIES] {browser_name} login read failed ({type(exc).__name__})', flush=True)
+                records = []
+            finally:
+                try:
+                    if ctx is not None:
+                        ctx.close()
+                except Exception:
+                    pass
+                shutil.rmtree(dest, ignore_errors=True)
+            matched = []
+            for record in records:
+                domain = str(record.get('domain') or '').lower().lstrip('.')
+                if not any(domain == item or domain.endswith('.' + item) for item in wanted):
+                    continue
+                cookie = self._cookie_from_browser_record(record)
+                if cookie is not None:
+                    matched.append(cookie)
+            if any(str(cookie.name or '').lower() == 'ndus' and cookie.value for cookie in matched):
+                print(f'[COOKIES] login cookie read from installed {browser_name}', flush=True)
+                return matched
+            if records:
+                print(f'[COOKIES] installed {browser_name} has no TeraBox login cookie', flush=True)
+        return []
+
+    def _session_has_ndus(self, session):
+        try:
+            for cookie in session.cookies:
+                if str(getattr(cookie, 'name', '') or '').lower() == 'ndus' and str(getattr(cookie, 'value', '') or ''):
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def _live_browser_cookies_for(self, domains):
+        if not self._domains_want_live_login(domains):
+            return []
+        cache = getattr(self, '_live_login_cookie_cache', None)
+        if cache is None:
+            cache = self._live_login_cookie_cache = {}
+        key = tuple(str(item or '').lower() for item in (domains or []))
+        hit = cache.get(key)
+        if hit and time.time() - hit[0] < (600 if hit[1] else 45):
+            return list(hit[1])
+        found = self._read_login_via_installed_browser(domains)
+        cache[key] = (time.time(), list(found))
         return found
 
     def _get_browser_cookies_session(self, domains=None):
@@ -31420,6 +31710,13 @@ try {
                         total_count += 1
                     except Exception:
                         continue
+                if total_count <= 0 or not self._session_has_ndus(session):
+                    for cookie in self._live_browser_cookies_for(domain_tokens):
+                        try:
+                            session.cookies.set_cookie(cookie)
+                            total_count += 1
+                        except Exception:
+                            continue
                 if total_count > 0:
                     print(f'[COOKIES] {total_count} cookie(s) read from '
                           f'{self._profile_cookie_origin} for '

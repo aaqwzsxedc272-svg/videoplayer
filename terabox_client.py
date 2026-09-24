@@ -485,8 +485,9 @@ GUEST_PREVIEW_MAX_SECONDS = 36.0
 SAVE_DIR = '/Antigravity'
 LOGIN_MESSAGE = (
     'TeraBox only plays 30 seconds until the file is saved to your account. '
-    'Log in at terabox.com in Chrome, Edge, or Brave, then restart this player '
-    'and play the link again. Do not paste your password here.'
+    'This player could not read a Brave, Chrome, or Edge login. If you are '
+    'already logged in, close that browser, restart this player, and play the '
+    'link again. Do not paste your password here.'
 )
 
 
@@ -503,10 +504,12 @@ def playlist_seconds(text):
 
 
 def looks_like_guest_preview(text, duration_ms=0, size_bytes=0):
-    """True when this playlist is TeraBox's 30-second share preview."""
+    """True when this playlist is TeraBox's 30-second share preview.
+
+    The share list often reports the preview's own 30 seconds as the file
+    duration. A large file is still a long film; that size wins.
+    """
     seconds = playlist_seconds(text)
-    if seconds <= 0.5:
-        return False
     try:
         duration_ms = int(duration_ms or 0)
     except Exception:
@@ -515,12 +518,14 @@ def looks_like_guest_preview(text, duration_ms=0, size_bytes=0):
         size_bytes = int(size_bytes or 0)
     except Exception:
         size_bytes = 0
-    if duration_ms and duration_ms <= 45000 and seconds * 1000 >= duration_ms * 0.6:
-        return False
-    if duration_ms > 45000 and seconds * 1000 < duration_ms * 0.75:
-        return True
+    if seconds <= 0.5:
+        return bool(size_bytes > 20 * 1024 * 1024 or duration_ms > 45000)
     if size_bytes > 20 * 1024 * 1024 and seconds <= GUEST_PREVIEW_MAX_SECONDS:
         return True
+    if duration_ms > 45000 and seconds * 1000 < duration_ms * 0.75:
+        return True
+    if duration_ms and duration_ms <= 45000 and size_bytes <= 20 * 1024 * 1024 and seconds * 1000 >= duration_ms * 0.6:
+        return False
     if 18 <= seconds <= GUEST_PREVIEW_MAX_SECONDS and not duration_ms:
         return True
     return False
@@ -1844,7 +1849,12 @@ def _playlist_playback(session, streaming_url, body, referer, jar, duration_ms=0
     prepared = prepare_playback_playlist(body, streaming_url)
     local = _serve_m3u8(prepared)
     if local:
-        print(f'[TERABOX] playing playlist from {_redact_url(streaming_url)}', flush=True)
+        print(
+            f'[TERABOX] playing playlist {playlist_seconds(body):.0f}s '
+            f'listed={int(duration_ms or 0)}ms size={int(size_bytes or 0)} '
+            f'from {_redact_url(streaming_url)}',
+            flush=True,
+        )
         return _hls_result(local, referer, jar, session, remote=False)
     print(f'[TERABOX] playlist server unavailable, proxying {_redact_url(streaming_url)}', flush=True)
     return _hls_result(streaming_url, referer, jar, session, remote=True)
