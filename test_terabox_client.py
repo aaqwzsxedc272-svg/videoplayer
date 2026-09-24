@@ -90,8 +90,8 @@ def test_streaming_url_prefers_the_page_player_shape():
 
 
 def test_short_complete_playlist_is_the_film():
-    # The share page measured this player URL at 30 seconds. That is not
-    # an advert, and a finished playlist is not a one-chunk burst.
+    # Shape only. A finished 30-second playlist is not a one-chunk burst.
+    # It is still the guest preview when the listed file is longer.
     text = """#EXTM3U
 #EXT-X-TARGETDURATION:10
 #EXTINF:10.0,
@@ -157,3 +157,79 @@ https://data.1024tera.com/thumbnail/1d3b6bbb51f5f9ef5f9eb12e5bf08770?ft=video
 #EXT-X-ENDLIST
 """
     assert terabox_client.classify_playlist(text) == 'thumbnail'
+
+
+PREVIEW = """#EXTM3U
+#EXT-X-TARGETDURATION:10
+#EXTINF:10.0,
+https://cdn.example/a.ts
+#EXTINF:10.0,
+https://cdn.example/b.ts
+#EXTINF:10.0,
+https://cdn.example/c.ts
+#EXT-X-ENDLIST
+"""
+
+
+def test_guest_preview_is_not_played_as_the_film():
+    assert terabox_client.looks_like_guest_preview(PREVIEW, duration_ms=90 * 60 * 1000)
+    assert terabox_client.looks_like_guest_preview(PREVIEW, size_bytes=500 * 1024 * 1024)
+    assert terabox_client.looks_like_guest_preview(PREVIEW)
+    assert not terabox_client.looks_like_guest_preview(PREVIEW, duration_ms=30000)
+    # Six minutes of a ninety-minute file is still not the film.
+    long_film = """#EXTM3U
+#EXTINF:120.0,
+https://cdn.example/a.ts
+#EXTINF:120.0,
+https://cdn.example/b.ts
+#EXTINF:120.0,
+https://cdn.example/c.ts
+#EXT-X-ENDLIST
+"""
+    assert terabox_client.looks_like_guest_preview(long_film, duration_ms=90 * 60 * 1000)
+    assert not terabox_client.looks_like_guest_preview(long_film, duration_ms=360000)
+    refused = terabox_client._playlist_playback(
+        None,
+        'https://www.terabox.com/share/streaming?type=M3U8_FLV_264_480',
+        PREVIEW,
+        'https://www.terabox.com/',
+        {},
+        duration_ms=90 * 60 * 1000,
+        size_bytes=800 * 1024 * 1024,
+    )
+    assert refused['error_code'] == 'preview'
+    assert not refused.get('ok')
+    assert not refused.get('playback_url')
+
+
+def test_login_cookie_is_ndus_only():
+    assert terabox_client.has_login_cookie('lang=en; ndus=present')
+    assert not terabox_client.has_login_cookie('lang=en; csrfToken=abc')
+    assert not terabox_client.has_login_cookie('ndus=')
+    assert terabox_client.file_outlasts_preview({'duration_ms': 120000, 'size': 10})
+    assert terabox_client.file_outlasts_preview({'duration_ms': 0, 'size': 80 * 1024 * 1024})
+    assert not terabox_client.file_outlasts_preview({'duration_ms': 30000, 'size': 4 * 1024 * 1024})
+
+
+def test_logged_in_share_asks_the_pasted_host_first():
+    bases = terabox_client._api_bases(
+        'https://www.1024tera.com/s/1abc', prefer_pasted=True)
+    assert bases[0] == 'https://www.1024tera.com'
+    short = terabox_client._api_bases(
+        'https://teraboxlink.com/s/1abc', prefer_pasted=True)
+    assert short[0] == 'https://www.terabox.com'
+
+
+def test_saved_target_reads_the_transfer_path():
+    path, fs_id = terabox_client._saved_target({
+        'errno': 0,
+        'extra': {'list': [{'to': '/Antigravity/film.mp4', 'to_fs_id': 99}]},
+    })
+    assert path == '/Antigravity/film.mp4'
+    assert fs_id == '99'
+    path, fs_id = terabox_client._saved_target({
+        'errno': 0,
+        'info': [{'path': '/Antigravity/film.mp4', 'fs_id': '7'}],
+    })
+    assert path == '/Antigravity/film.mp4'
+    assert fs_id == '7'

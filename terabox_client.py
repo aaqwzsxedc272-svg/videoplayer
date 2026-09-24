@@ -1,15 +1,19 @@
 """Public TeraBox share links.
 
 yt-dlp has no TeraBox extractor. A share page is not a video file. This
-module asks TeraBox's own public share API for the file list and a fresh
-signed file URL — the same calls the official player makes. It does not
-log in, and it does not try to get past a verification wall.
+module asks TeraBox's own share API for the file list and a fresh signed
+file URL — the same calls the official player makes. It does not ask for
+a password and it does not log in.
+
+The free share player stops at about 30 seconds until the file is saved
+into the viewer's account. When the browser is already logged in, this
+module saves the share and plays that copy. It never reads or stores a
+password.
 
 Signed file URLs expire, so callers should mint one at play time rather
-than store it on the playlist row. The page player asks /share/streaming
-for an m3u8 when the download API does not hand back a file URL. A
-thumbnail URL is never that film, and a playlist that is one random
-chunk is not the film either.
+than store it on the playlist row. A thumbnail URL is never the film, a
+playlist that is one random chunk is not the film, and the 30-second
+guest preview is not the film when the listed file is longer.
 """
 
 from __future__ import annotations
@@ -68,6 +72,14 @@ STREAMING_TYPES = (
     'M3U8_FLV_264_480',
     'M3U8_FLV_264_720',
     'M3U8_FLV_264_1080',
+)
+# Owned files use the account streaming API. AUTO is what the official
+# player asks for; the share-page types are the fallback.
+ACCOUNT_STREAM_TYPES = (
+    'M3U8_AUTO_480',
+    'M3U8_FLV_264_480',
+    'M3U8_AUTO_720',
+    'M3U8_FLV_264_720',
 )
 _CHUNK_INDEX_RE = re.compile(r'_(\d+)_ts(?:/|$)')
 _playlist_servers = []
@@ -360,6 +372,25 @@ def _get(session, url, headers, timeout, stream=False):
     )
 
 
+def _post_form(session, url, data, referer, timeout):
+    headers = _headers(referer, 'application/json, text/plain, */*')
+    headers['Content-Type'] = 'application/x-www-form-urlencoded'
+    headers['X-Requested-With'] = 'XMLHttpRequest'
+    try:
+        origin = '{0.scheme}://{0.netloc}'.format(urlparse(referer or url))
+    except Exception:
+        origin = ''
+    if origin:
+        headers['Origin'] = origin
+    return session.post(
+        url,
+        data=data,
+        headers=headers,
+        timeout=timeout,
+        allow_redirects=True,
+    )
+
+
 def _json_errno(payload):
     if not isinstance(payload, dict):
         return -1, ''
@@ -447,14 +478,113 @@ def _headers(referer, accept):
     return headers
 
 
-def _api_bases(source_url):
+# The free share player stops at 30 seconds and asks the viewer to save
+# the file. A playlist of that length is the preview, not the film, unless
+# the file itself is about 30 seconds.
+GUEST_PREVIEW_MAX_SECONDS = 36.0
+SAVE_DIR = '/Antigravity'
+LOGIN_MESSAGE = (
+    'TeraBox only plays 30 seconds until the file is saved to your account. '
+    'Log in at terabox.com in Chrome, Edge, or Brave, then restart this player '
+    'and play the link again. Do not paste your password here.'
+)
+
+
+def playlist_seconds(text):
+    total = 0.0
+    found = False
+    for match in re.finditer(r'#EXTINF:\s*([0-9]*\.?[0-9]+)', str(text or '')):
+        try:
+            total += float(match.group(1))
+            found = True
+        except Exception:
+            continue
+    return total if found else 0.0
+
+
+def looks_like_guest_preview(text, duration_ms=0, size_bytes=0):
+    """True when this playlist is TeraBox's 30-second share preview."""
+    seconds = playlist_seconds(text)
+    if seconds <= 0.5:
+        return False
+    try:
+        duration_ms = int(duration_ms or 0)
+    except Exception:
+        duration_ms = 0
+    try:
+        size_bytes = int(size_bytes or 0)
+    except Exception:
+        size_bytes = 0
+    if duration_ms and duration_ms <= 45000 and seconds * 1000 >= duration_ms * 0.6:
+        return False
+    if duration_ms > 45000 and seconds * 1000 < duration_ms * 0.75:
+        return True
+    if size_bytes > 20 * 1024 * 1024 and seconds <= GUEST_PREVIEW_MAX_SECONDS:
+        return True
+    if 18 <= seconds <= GUEST_PREVIEW_MAX_SECONDS and not duration_ms:
+        return True
+    return False
+
+
+def has_login_cookie(cookie_header):
+    """True when the browser session has a TeraBox login cookie.
+
+    The value is never logged. A password is never accepted here.
+    """
+    for part in str(cookie_header or '').split(';'):
+        name, sep, value = part.strip().partition('=')
+        if sep and name.strip().lower() == 'ndus' and value.strip():
+            return True
+    return False
+
+
+def file_outlasts_preview(chosen):
+    """True when the listed file is longer than the 30-second guest cap."""
+    try:
+        duration_ms = int((chosen or {}).get('duration_ms') or 0)
+    except Exception:
+        duration_ms = 0
+    try:
+        size = int((chosen or {}).get('size') or 0)
+    except Exception:
+        size = 0
+    if duration_ms > 45000:
+        return True
+    if size > 20 * 1024 * 1024:
+        return True
+    return False
+
+
+_LOGIN_HOSTS = (
+    'terabox.com',
+    '1024tera.com',
+    '1024terabox.com',
+    '4funbox.com',
+    'nephobox.com',
+    'mirrobox.com',
+    'terabox.app',
+    'dubox.com',
+)
+
+
+def _login_host(host):
+    host = str(host or '').strip().lower().split(':')[0]
+    if host.startswith('www.'):
+        host = host[4:]
+    return any(host == item or host.endswith('.' + item) for item in _LOGIN_HOSTS)
+
+
+def _api_bases(source_url, prefer_pasted=False):
     # Canonical hosts first. Short-link domains (teraboxlink.com and the like)
     # only redirect; asking them for the file list just burns the timeout.
+    # A logged-in cookie belongs to the host the user signed in on, so that
+    # host has to be asked first or the save call is anonymous.
     bases = [
         'https://www.terabox.com',
         'https://www.1024terabox.com',
         'https://www.4funbox.com',
     ]
+    pasted = ''
     try:
         parsed = urlparse(str(source_url or ''))
         host = (parsed.netloc or '').lower()
@@ -462,8 +592,14 @@ def _api_bases(source_url):
             pasted = f"{parsed.scheme or 'https'}://{parsed.netloc}"
             if pasted not in bases:
                 bases.append(pasted)
+            # Short-link domains only redirect. Preferring them just burns
+            # the timeout and can drop the host the login cookie belongs to.
+            if not _login_host(host):
+                pasted = ''
     except Exception:
-        pass
+        pasted = ''
+    if prefer_pasted and pasted:
+        bases = [pasted] + [item for item in bases if item != pasted]
     return bases[:3]
 
 
@@ -738,7 +874,7 @@ def list_share(source_url, cookie_header='', password='', timeout=18):
         return _error('invalid', 'That does not look like a TeraBox share link.')
     password = str(password or '').strip() or password_from_url(source_url)
     last = _error('unreachable', 'TeraBox did not answer.')
-    for base in _api_bases(source_url):
+    for base in _api_bases(source_url, prefer_pasted=has_login_cookie(cookie_header)):
         # A fresh session per mirror. Cookies minted by a dead host must not
         # be sent to the next one.
         session, jar = _session(cookie_header)
@@ -865,6 +1001,61 @@ def _follow(session, dlink, referer, timeout):
     return final
 
 
+def _follow_file(session, dlink, referer, timeout, size_bytes=0):
+    """Follow a file URL. Reject a thumbnail and a body far shorter than the file."""
+    response = _get(
+        session,
+        dlink,
+        _headers(referer, '*/*'),
+        timeout,
+        stream=True,
+    )
+    final = str(getattr(response, 'url', '') or dlink)
+    status = int(getattr(response, 'status_code', 0) or 0)
+    try:
+        ctype = str(response.headers.get('content-type') or '')
+    except Exception:
+        ctype = ''
+    length = 0
+    try:
+        length = int(response.headers.get('content-length') or 0)
+    except Exception:
+        length = 0
+    if not length:
+        try:
+            total = str(response.headers.get('content-range') or '').rsplit('/', 1)[-1]
+            length = int(total) if total.isdigit() else 0
+        except Exception:
+            length = 0
+    try:
+        response.close()
+    except Exception:
+        pass
+    if status >= 400:
+        print(f'[TERABOX] file link HTTP {status}', flush=True)
+        return ''
+    if 'html' in ctype.lower() or 'json' in ctype.lower():
+        print(f'[TERABOX] file link was {ctype or "html"}, not a video', flush=True)
+        return ''
+    try:
+        parsed = urlparse(final)
+    except Exception:
+        return ''
+    if parsed.scheme != 'https' or not parsed.netloc:
+        return ''
+    if is_thumbnail_url(final):
+        print('[TERABOX] file link was a thumbnail, not the film', flush=True)
+        return ''
+    try:
+        size_bytes = int(size_bytes or 0)
+    except Exception:
+        size_bytes = 0
+    if size_bytes > 20 * 1024 * 1024 and length and length < size_bytes * 0.5:
+        print('[TERABOX] file link is shorter than the listed file', flush=True)
+        return ''
+    return final
+
+
 def is_thumbnail_url(url):
     """Preview image the share page paints into a <video> before Play.
 
@@ -977,6 +1168,22 @@ def _media_lines(text):
     return items
 
 
+def _first_variant(text, base_url):
+    pending = False
+    for raw in str(text or '').splitlines():
+        line = raw.strip()
+        if line.startswith('#EXT-X-STREAM-INF'):
+            pending = True
+            continue
+        if not pending or not line or line.startswith('#'):
+            continue
+        try:
+            return urljoin(base_url, line)
+        except Exception:
+            return line
+    return ''
+
+
 def chunk_index(url):
     try:
         path = unquote(urlparse(str(url or '')).path or '')
@@ -1063,6 +1270,16 @@ def prepare_playback_playlist(text, base_url):
     if not any(line.startswith('#EXT-X-ENDLIST') for line in lines):
         lines.append('#EXT-X-ENDLIST')
     return '\n'.join(lines) + '\n'
+
+
+def _safe_exc(exc):
+    text = re.sub(r'https?://\S+', '[url]', str(exc or ''))
+    text = re.sub(
+        r'(?i)(jsToken|bdstoken|ndus|cookie)[=:][^&\s;]+',
+        r'\1=[redacted]',
+        text,
+    )
+    return f'{type(exc).__name__}: {text[:160]}'
 
 
 def _redact_url(url):
@@ -1231,7 +1448,359 @@ def _dlink_from_streaming_url(session, streaming_url, referer, jar, timeout):
     return _mint_dlink(session, share, {'fs_id': params['fid']}, jar, timeout)
 
 
-def _playlist_playback(session, streaming_url, body, referer, jar):
+def _bdstoken_from(html, payload=None):
+    if isinstance(payload, dict):
+        for key in ('bdstoken',):
+            if payload.get(key):
+                return str(payload[key])
+        for box in (payload.get('result'), payload.get('data')):
+            if isinstance(box, dict) and box.get('bdstoken'):
+                return str(box['bdstoken'])
+    match = re.search(
+        r'bdstoken["\']?\s*[:=]\s*["\']([A-Za-z0-9]{8,})["\']',
+        str(html or ''),
+        re.I,
+    )
+    return match.group(1) if match else ''
+
+
+def _account_query(extra=None):
+    params = {
+        'app_id': APP_ID,
+        'web': '1',
+        'channel': 'dubox',
+        'clienttype': '0',
+    }
+    for key, value in dict(extra or {}).items():
+        if value not in (None, ''):
+            params[key] = value
+    return params
+
+
+def _account_tokens(session, base, referer, jar, timeout, fallback_js=''):
+    js_token = str(fallback_js or '')
+    bdstoken = ''
+    try:
+        response = _get(session, f'{base}/main', _headers(referer, 'text/html,*/*'), timeout)
+        _absorb(session, response, jar)
+        html = ''
+        try:
+            html = response.text or ''
+        except Exception:
+            html = ''
+        tokens = extract_tokens(html)
+        js_token = tokens.get('jsToken') or js_token
+        bdstoken = _bdstoken_from(html)
+    except Exception as exc:
+        print(f'[TERABOX] account page failed: {_safe_exc(exc)}', flush=True)
+    if not bdstoken:
+        params = _account_query({'fields': '["bdstoken","uk"]', 'jsToken': js_token})
+        try:
+            payload, _status = _request_json(
+                session,
+                f'{base}/api/gettemplatevariable?{urlencode(params)}',
+                referer,
+                jar,
+                timeout,
+            )
+        except Exception as exc:
+            print(f'[TERABOX] bdstoken request failed: {_safe_exc(exc)}', flush=True)
+            payload = None
+        bdstoken = _bdstoken_from('', payload)
+    return js_token, bdstoken
+
+
+def _find_owned_file(session, base, name, size, js_token, referer, jar, timeout):
+    for folder in (SAVE_DIR, '/'):
+        params = _account_query({
+            'dir': folder,
+            'num': '100',
+            'page': '1',
+            'order': 'time',
+            'desc': '1',
+            'jsToken': js_token,
+        })
+        try:
+            payload, _status = _request_json(
+                session,
+                f'{base}/api/list?{urlencode(params)}',
+                referer,
+                jar,
+                timeout,
+            )
+        except Exception as exc:
+            print(f'[TERABOX] account list failed: {_safe_exc(exc)}', flush=True)
+            continue
+        errno, _errmsg = _json_errno(payload or {})
+        if errno == -6:
+            return None, 'login'
+        for entry in _entries(payload or {}):
+            filename = str(entry.get('server_filename') or entry.get('filename') or '')
+            if filename != name:
+                continue
+            try:
+                found_size = int(entry.get('size') or 0)
+            except Exception:
+                found_size = 0
+            if size and found_size and found_size != size:
+                continue
+            path = str(entry.get('path') or f'{folder.rstrip("/")}/{name}')
+            fs_id = '' if entry.get('fs_id') in (None, '') else str(entry.get('fs_id'))
+            return {'path': path, 'fs_id': fs_id}, ''
+    return None, ''
+
+
+def _ensure_save_dir(session, base, bdstoken, js_token, referer, jar, timeout):
+    params = _account_query({'a': 'commit', 'bdstoken': bdstoken, 'jsToken': js_token})
+    try:
+        response = _post_form(
+            session,
+            f'{base}/api/create?{urlencode(params)}',
+            {'path': SAVE_DIR, 'isdir': '1', 'block_list': '[]', 'size': '0'},
+            referer,
+            timeout,
+        )
+        _absorb(session, response, jar)
+    except Exception as exc:
+        print(f'[TERABOX] could not create {SAVE_DIR}: {_safe_exc(exc)}', flush=True)
+
+
+def _saved_target(payload):
+    if not isinstance(payload, dict):
+        return '', ''
+    extra = payload.get('extra') if isinstance(payload.get('extra'), dict) else {}
+    for item in extra.get('list') or []:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get('to') or item.get('path') or '').strip()
+        fs_id = item.get('to_fs_id') or item.get('fs_id') or ''
+        if path or fs_id not in (None, ''):
+            return path, '' if fs_id in (None, '') else str(fs_id)
+    for item in payload.get('info') or []:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get('path') or '').strip()
+        fs_id = item.get('fs_id') or item.get('fsid') or ''
+        if path or fs_id not in (None, ''):
+            return path, '' if fs_id in (None, '') else str(fs_id)
+    return '', ''
+
+
+def _transfer_share(session, base, listed, chosen, bdstoken, js_token, referer, jar, timeout):
+    meta = listed.get('meta') or {}
+    fs_id = str(chosen.get('fs_id') or '').strip()
+    if not fs_id or not meta.get('shareid') or not meta.get('uk'):
+        return None
+    _ensure_save_dir(session, base, bdstoken, js_token, referer, jar, timeout)
+    params = _account_query({
+        'shareid': meta.get('shareid') or '',
+        'from': meta.get('uk') or '',
+        'ondup': 'newcopy',
+        'async': '0',
+        'bdstoken': bdstoken,
+        'jsToken': js_token,
+        'sekey': meta.get('sekey') or '',
+    })
+    try:
+        response = _post_form(
+            session,
+            f'{base}/share/transfer?{urlencode(params)}',
+            {'fsidlist': f'[{fs_id}]', 'path': SAVE_DIR},
+            referer,
+            timeout,
+        )
+        _absorb(session, response, jar)
+        text = response.text or ''
+        payload = json.loads(text) if text and text.lstrip()[:1] in '{[' else None
+    except Exception as exc:
+        print(f'[TERABOX] save failed: {_safe_exc(exc)}', flush=True)
+        return None
+    if not isinstance(payload, dict):
+        if 'login' in str(text or '')[:800].lower():
+            return _error('login', LOGIN_MESSAGE)
+        return None
+    errno, errmsg = _json_errno(payload)
+    print(f'[TERABOX] save errno={errno}', flush=True)
+    if errno == -6:
+        prefix = ''
+        try:
+            prefix = str(response.headers.get('Url-Domain-Prefix') or '').strip().strip('.')
+        except Exception:
+            prefix = ''
+        if prefix and '/' not in prefix and not prefix.startswith('http'):
+            return {'retry_base': f'https://{prefix}.terabox.com'}
+        return _error('login', LOGIN_MESSAGE)
+    if errno == 12:
+        return _error(
+            'space',
+            'TeraBox could not save this file. The account does not have enough free space.',
+        )
+    path, saved_id = _saved_target(payload if isinstance(payload, dict) else {})
+    if path or saved_id:
+        return {'ok': True, 'path': path, 'fs_id': saved_id}
+    if errno == 0:
+        found, code = _find_owned_file(
+            session, base, chosen.get('name') or '', int(chosen.get('size') or 0),
+            js_token, referer, jar, timeout,
+        )
+        if found:
+            return {'ok': True, 'path': found.get('path') or '', 'fs_id': found.get('fs_id') or ''}
+        if code == 'login':
+            return _error('login', LOGIN_MESSAGE)
+    return None
+
+
+def _account_stream(session, base, path, js_token, referer, jar, timeout, duration_ms, size_bytes):
+    if not path:
+        return None
+    saw_preview = False
+    for quality in ACCOUNT_STREAM_TYPES:
+        params = _account_query({'path': path, 'type': quality, 'jsToken': js_token})
+        url = f'{base}/api/streaming?{urlencode(params)}'
+        print(f'[TERABOX] account stream type={quality}', flush=True)
+        try:
+            body = _fetch_text(session, url, referer, min(int(timeout or 8), 8))
+        except Exception as exc:
+            print(f'[TERABOX] account stream failed: {_safe_exc(exc)}', flush=True)
+            continue
+        if not body or classify_playlist(body) not in ('normal', 'master'):
+            continue
+        if looks_like_guest_preview(body, duration_ms, size_bytes):
+            saw_preview = True
+            print('[TERABOX] account stream is still the 30-second preview', flush=True)
+            continue
+        return _playlist_playback(
+            session, url, body, referer, jar,
+            duration_ms=duration_ms, size_bytes=size_bytes,
+        )
+    if saw_preview:
+        return _error(
+            'preview',
+            'TeraBox only returned the 30-second preview. The file has to be saved '
+            'to the account before the full video plays.',
+        )
+    return None
+
+
+def _account_dlink(session, base, path, js_token, referer, jar, timeout):
+    if not path:
+        return ''
+    params = _account_query({
+        'target': json.dumps([path]),
+        'dlink': '1',
+        'origin': 'dlna',
+        'jsToken': js_token,
+    })
+    try:
+        payload, _status = _request_json(
+            session,
+            f'{base}/api/filemetas?{urlencode(params)}',
+            referer,
+            jar,
+            timeout,
+        )
+    except Exception as exc:
+        print(f'[TERABOX] account file link failed: {_safe_exc(exc)}', flush=True)
+        return ''
+    info = []
+    if isinstance(payload, dict):
+        raw = payload.get('info') or payload.get('list') or []
+        if isinstance(raw, list):
+            info = raw
+    for item in info:
+        if not isinstance(item, dict):
+            continue
+        link = str(item.get('dlink') or '').replace('&amp;', '&').strip()
+        if link.startswith('http') and not is_thumbnail_url(link):
+            return link
+    return ''
+
+
+def _play_from_account(session, listed, chosen, jar, timeout):
+    """Save the share into the logged-in account, then play that copy.
+
+    The share player itself stops at 30 seconds until Save is pressed.
+    The password is never read or stored. The login is the browser cookie.
+    """
+    cookie = listed.get('cookie_header') or _cookie_header(jar)
+    if not has_login_cookie(cookie):
+        return _error('login', LOGIN_MESSAGE)
+    referer = listed.get('page_url') or 'https://www.terabox.com/'
+    fallback_js = str((listed.get('tokens') or {}).get('jsToken') or '')
+    bases = []
+    for candidate in (
+        listed.get('api_base'),
+        'https://www.1024tera.com',
+        'https://www.terabox.com',
+        'https://www.1024terabox.com',
+    ):
+        if candidate and candidate not in bases:
+            bases.append(candidate)
+    name = chosen.get('name') or ''
+    size = int(chosen.get('size') or 0)
+    duration_ms = int(chosen.get('duration_ms') or 0)
+    last_login = False
+    saw_preview = False
+    for base in bases:
+        js_token, bdstoken = _account_tokens(
+            session, base, referer, jar, timeout, fallback_js=fallback_js,
+        )
+        found, code = _find_owned_file(
+            session, base, name, size, js_token, referer, jar, timeout,
+        )
+        if code == 'login':
+            last_login = True
+            continue
+        saved = found
+        if not saved:
+            print(f'[TERABOX] saving {name or "file"} into the account', flush=True)
+            transferred = _transfer_share(
+                session, base, listed, chosen, bdstoken, js_token, referer, jar, timeout,
+            )
+            if isinstance(transferred, dict) and transferred.get('retry_base'):
+                nxt = str(transferred['retry_base'])
+                if nxt and nxt not in bases:
+                    bases.append(nxt)
+                continue
+            if isinstance(transferred, dict) and transferred.get('error_code') == 'login':
+                last_login = True
+                continue
+            if isinstance(transferred, dict) and transferred.get('error_code'):
+                return transferred
+            if isinstance(transferred, dict) and transferred.get('ok'):
+                saved = transferred
+        if not saved:
+            continue
+        path = saved.get('path') or ''
+        link = _account_dlink(session, base, path, js_token, referer, jar, timeout)
+        if link:
+            try:
+                playback = _follow_file(session, link, referer, timeout, size) or ''
+            except Exception as exc:
+                print(f'[TERABOX] account file follow failed: {_safe_exc(exc)}', flush=True)
+                playback = ''
+            if playback:
+                print('[TERABOX] playing the saved file', flush=True)
+                return _file_result(playback, referer, jar, session)
+        played = _account_stream(
+            session, base, path, js_token, referer, jar, timeout, duration_ms, size,
+        )
+        if played and played.get('ok'):
+            return played
+        if played and played.get('error_code') == 'preview':
+            saw_preview = True
+            print('[TERABOX] saved copy is still the 30-second preview', flush=True)
+    if last_login:
+        return _error('login', LOGIN_MESSAGE)
+    if saw_preview:
+        return _error(
+            'preview',
+            'TeraBox saved the file, but the account player still returned only the 30-second preview.',
+        )
+    return None
+
+
+def _playlist_playback(session, streaming_url, body, referer, jar, duration_ms=0, size_bytes=0):
     shape = classify_playlist(body)
     if shape == 'random_chunk':
         print(
@@ -1247,11 +1816,31 @@ def _playlist_playback(session, streaming_url, body, referer, jar):
     if shape == 'master':
         # Nested variant URLs are themselves /share/streaming. The app
         # proxy rewrites those; a local copy would hand mpv extensionless
-        # variant URLs.
+        # variant URLs. A master with no durations can still be the
+        # 30-second cap, so check one variant before playing it.
+        variant = _first_variant(body, streaming_url)
+        if variant and session is not None:
+            try:
+                nested = _fetch_text(session, variant, referer, 8)
+            except Exception as exc:
+                print(f'[TERABOX] variant fetch failed: {exc}', flush=True)
+                nested = ''
+            if nested and classify_playlist(nested) == 'normal':
+                return _playlist_playback(
+                    session, variant, nested, referer, jar,
+                    duration_ms=duration_ms, size_bytes=size_bytes,
+                )
         print(f'[TERABOX] master playlist {_redact_url(streaming_url)}', flush=True)
         return _hls_result(streaming_url, referer, jar, session, remote=True)
     if shape != 'normal':
         return None
+    if looks_like_guest_preview(body, duration_ms, size_bytes):
+        print('[TERABOX] player stream is the 30-second preview, not the film', flush=True)
+        return _error(
+            'preview',
+            'TeraBox only returned the 30-second preview. The file has to be saved '
+            'to the account before the full video plays.',
+        )
     prepared = prepare_playback_playlist(body, streaming_url)
     local = _serve_m3u8(prepared)
     if local:
@@ -1262,7 +1851,8 @@ def _playlist_playback(session, streaming_url, body, referer, jar):
 
 
 def playback_from_streaming(streaming_url, referer='', cookie_header='', timeout=18,
-                            session=None, jar=None, try_dlink=True):
+                            session=None, jar=None, try_dlink=True,
+                            duration_ms=0, size_bytes=0):
     """Prefer a file URL minted from the player params, else a real m3u8.
 
     Does not play a thumbnail, and does not play a one-chunk burst as the
@@ -1289,7 +1879,7 @@ def playback_from_streaming(streaming_url, referer='', cookie_header='', timeout
             except Exception as exc:
                 print(f'[TERABOX] follow failed: {exc}', flush=True)
                 playback = ''
-            if playback:
+            if playback and not is_thumbnail_url(playback):
                 try:
                     host = urlparse(playback).netloc
                 except Exception:
@@ -1303,7 +1893,10 @@ def playback_from_streaming(streaming_url, referer='', cookie_header='', timeout
         return None
     if not body:
         return None
-    return _playlist_playback(session, streaming_url, body, referer, jar)
+    return _playlist_playback(
+        session, streaming_url, body, referer, jar,
+        duration_ms=duration_ms, size_bytes=size_bytes,
+    )
 
 
 def _streaming_from_share(session, listed, chosen, jar, timeout):
@@ -1314,6 +1907,8 @@ def _streaming_from_share(session, listed, chosen, jar, timeout):
     base = str(listed.get('api_base') or 'https://www.terabox.com')
     referer = listed.get('page_url') or base
     token = str((listed.get('tokens') or {}).get('jsToken') or '')
+    duration_ms = int(chosen.get('duration_ms') or 0)
+    size_bytes = int(chosen.get('size') or 0)
     last = None
     for quality in STREAMING_TYPES:
         url = build_streaming_url(base, meta, fs_id, token, quality)
@@ -1325,17 +1920,37 @@ def _streaming_from_share(session, listed, chosen, jar, timeout):
             continue
         if not body:
             continue
-        result = _playlist_playback(session, url, body, referer, jar)
+        result = _playlist_playback(
+            session, url, body, referer, jar,
+            duration_ms=duration_ms, size_bytes=size_bytes,
+        )
         if result and result.get('ok'):
             return result
-        if result and result.get('error_code') == 'fragment':
+        if result and result.get('error_code') in ('fragment', 'preview'):
             last = result
             continue
     return last
 
 
+def _with_file(result, chosen, listed, referer):
+    if not isinstance(result, dict) or not result.get('ok'):
+        return result
+    result['title'] = chosen.get('name') or listed.get('title') or ''
+    result['size_bytes'] = int(chosen.get('size') or 0)
+    result['duration_ms'] = int(chosen.get('duration_ms') or 0)
+    result['page_url'] = referer
+    result['fs_id'] = chosen.get('fs_id') or ''
+    result['surl'] = listed.get('surl') or ''
+    return result
+
+
 def open_playback(source_url, cookie_header='', password='', timeout=18):
-    """Mint a fresh file URL for the share, or for ``#fid=`` inside a folder."""
+    """Mint a fresh file URL for the share, or for ``#fid=`` inside a folder.
+
+    A real file link is still preferred. The 30-second guest playlist is
+    not played as the film. A logged-in browser cookie saves the share
+    first; a password is never read.
+    """
     listed = list_share(source_url, cookie_header=cookie_header, password=password, timeout=timeout)
     if not listed.get('ok'):
         return listed
@@ -1356,6 +1971,7 @@ def open_playback(source_url, cookie_header='', password='', timeout=18):
         return _error('empty', 'That TeraBox share has no video.')
 
     session, jar = _session(listed.get('cookie_header') or cookie_header)
+    size = int(chosen.get('size') or 0)
     try:
         dlink = _mint_dlink(session, listed, chosen, jar, timeout)
     except Exception as exc:
@@ -1368,12 +1984,9 @@ def open_playback(source_url, cookie_header='', password='', timeout=18):
     playback = ''
     if dlink and not is_thumbnail_url(dlink):
         try:
-            playback = _follow(session, dlink, referer, timeout) or ''
+            playback = _follow_file(session, dlink, referer, timeout, size) or ''
         except Exception as exc:
             print(f'[TERABOX] follow failed: {exc}', flush=True)
-            playback = ''
-        if playback and is_thumbnail_url(playback):
-            print('[TERABOX] file link was a thumbnail, not the film', flush=True)
             playback = ''
     if playback:
         try:
@@ -1381,28 +1994,45 @@ def open_playback(source_url, cookie_header='', password='', timeout=18):
         except Exception:
             host = ''
         print(f'[TERABOX] playback host={host} file={chosen.get("name")}', flush=True)
-        result = _file_result(playback, referer, jar, session)
-    else:
-        print('[TERABOX] no file link; asking the page player', flush=True)
+        return _with_file(_file_result(playback, referer, jar, session), chosen, listed, referer)
+
+    print('[TERABOX] no file link; asking the page player', flush=True)
+    streamed = None
+    try:
+        streamed = _streaming_from_share(session, listed, chosen, jar, timeout)
+    except Exception as exc:
+        print(f'[TERABOX] player stream failed: {exc}', flush=True)
+        streamed = None
+    if streamed and streamed.get('ok'):
+        return _with_file(streamed, chosen, listed, referer)
+
+    preview = isinstance(streamed, dict) and streamed.get('error_code') == 'preview'
+    needs_copy = preview or file_outlasts_preview(chosen)
+    logged_in = has_login_cookie(listed.get('cookie_header') or cookie_header)
+    if needs_copy and logged_in:
+        print('[TERABOX] saving the share into the logged-in account', flush=True)
         try:
-            result = _streaming_from_share(session, listed, chosen, jar, timeout)
+            saved = _play_from_account(session, listed, chosen, jar, timeout)
         except Exception as exc:
-            print(f'[TERABOX] player stream failed: {exc}', flush=True)
-            result = None
-        if not result and dlink and not is_thumbnail_url(dlink):
-            result = _file_result(dlink, referer, jar, session)
-        if not result:
+            print(f'[TERABOX] save failed: {_safe_exc(exc)}', flush=True)
+            saved = None
+        if saved and saved.get('ok'):
+            return _with_file(saved, chosen, listed, referer)
+        if saved and saved.get('error_code') in ('login', 'space', 'preview'):
+            return saved
+        if preview:
             return _error(
-                'verify',
-                'TeraBox listed the file but did not give a playable link. '
-                'A logged-in terabox.com cookie is needed for this share.',
+                'preview',
+                'TeraBox could not save this file into the account, so the full video is not available.',
             )
-        if not result.get('ok'):
-            return result
-    result['title'] = chosen.get('name') or listed.get('title') or ''
-    result['size_bytes'] = int(chosen.get('size') or 0)
-    result['duration_ms'] = int(chosen.get('duration_ms') or 0)
-    result['page_url'] = referer
-    result['fs_id'] = chosen.get('fs_id') or ''
-    result['surl'] = listed.get('surl') or ''
-    return result
+    if needs_copy and not logged_in:
+        return _error('login', LOGIN_MESSAGE)
+    if isinstance(streamed, dict) and not streamed.get('ok'):
+        return streamed
+    if dlink and not is_thumbnail_url(dlink):
+        return _with_file(_file_result(dlink, referer, jar, session), chosen, listed, referer)
+    return _error(
+        'verify',
+        'TeraBox listed the file but did not give a playable link. '
+        'A logged-in terabox.com cookie is needed for this share.',
+    )

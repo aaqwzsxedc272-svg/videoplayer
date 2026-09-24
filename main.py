@@ -40385,10 +40385,10 @@ try {
         if isinstance(result, dict) and result.get('ok') and result.get('playback_url'):
             return self._terabox_playback_result(
                 result, page_url, title, subtitle_tracks, fallback_headers=headers)
-        if isinstance(result, dict) and result.get('error_code') == 'fragment':
+        if isinstance(result, dict) and result.get('error_code') in ('fragment', 'preview', 'login'):
             return {
                 'terabox_error': result.get('error') or 'TeraBox only returned a fragment of that video, not the file.',
-                'terabox_error_code': 'fragment',
+                'terabox_error_code': result.get('error_code') or 'fragment',
                 'resolver_provider': 'terabox',
                 'title': title or '',
             }
@@ -40463,11 +40463,11 @@ try {
             code = str(result.get('error_code') or '')
             message = str(result.get('error') or 'Could not open that TeraBox link.')
             print(f'[TERABOX] {message}', flush=True)
-            # Password and a dead share are final. A missing file URL, or
-            # a one-chunk burst from the share API, is not: the capture
-            # finds /share/streaming after Play Video, which is the path
-            # that actually saw the film.
-            if code in ('password', 'empty', 'gone', 'invalid'):
+            # Password, a dead share, and the 30-second guest cap are final.
+            # Capture cannot see the browser login, so it cannot save the
+            # share, and playing that capture would stop at 30 seconds.
+            # A missing file URL, or a one-chunk burst, still falls through.
+            if code in ('password', 'empty', 'gone', 'invalid', 'login', 'preview', 'space'):
                 return {
                     'terabox_error': message,
                     'terabox_error_code': code,
@@ -47257,7 +47257,9 @@ try {
         if stream_info.get('terabox_error') and not str(stream_info.get('playback_url') or '').strip():
             if getattr(self, 'current_file', None) == source_url:
                 self.play_button.setEnabled(True)
-                self.show_osd(str(stream_info.get('terabox_error')), duration=5000)
+                _tb_code = str(stream_info.get('terabox_error_code') or '')
+                _tb_ms = 9000 if _tb_code in ('login', 'preview', 'space') else 5000
+                self.show_osd(str(stream_info.get('terabox_error')), duration=_tb_ms)
             return
         duration_ms = self._cache_resolved_remote_stream(source_url, dict(stream_info))
         # Always re-check mirrors after resolution — a newly-fetched title may
@@ -47331,7 +47333,9 @@ try {
             return False
         if stream_info.get('terabox_error') and not str(stream_info.get('playback_url') or '').strip():
             self.play_button.setEnabled(True)
-            self.show_osd(str(stream_info.get('terabox_error')), duration=5000)
+            _tb_code = str(stream_info.get('terabox_error_code') or '')
+            _tb_ms = 9000 if _tb_code in ('login', 'preview', 'space') else 5000
+            self.show_osd(str(stream_info.get('terabox_error')), duration=_tb_ms)
             return True
         # mega.nz (and any other use_ytdlp_download source) cannot be streamed
         # directly — yt-dlp must download and decrypt the file first.
