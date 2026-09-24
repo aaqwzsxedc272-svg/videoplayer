@@ -42046,6 +42046,171 @@ try {
             primary['mirrors'] = self._unique_paths(mirrors)
         return primary
 
+    def _media_url_looks_like_ad(self, url):
+        low = str(url or '').lower()
+        return any(token in low for token in (
+            'bkcdn', 'bxcdn', '/library/', 'adnetwork', 'popunder', 'popcash',
+            'exoclick', 'juicyads', 'trafficjunky', '/ads/', '/advert',
+            'sacdnssedge', 'exdynsrv',
+        ))
+
+    def _direct_candidate_is_full_video(self, url, page_url, external_hoster=False):
+        """False for a trailer, site promo, or ad clip sitting next to the film."""
+        if not url:
+            return False
+        if (
+            self._media_url_looks_like_preview(url)
+            or self._media_url_is_site_promo(url)
+            or self._media_url_is_trailer(url)
+            or self._media_url_looks_like_ad(url)
+        ):
+            return False
+        if not external_hoster:
+            return True
+        try:
+            page_host = (urlparse(page_url).netloc or '').lower().replace('www.', '')
+            media_host = (urlparse(url).netloc or '').lower().replace('www.', '')
+        except Exception:
+            return True
+        # UltimaTube-style pages keep a short same-host clip in the player
+        # and put the film on a server button (streamtape, dood, ...).
+        return not (page_host and media_host == page_host)
+
+    def _anchor_hoster_urls(self, html, page_url):
+        """Video-page links from server buttons, not the page's own preview file."""
+        if not html:
+            return []
+        found = []
+        seen = set()
+        raw_values = []
+        for match in re.finditer(
+            r'(?:href|data-href|data-link|data-url|data-src)\s*=\s*[\"\']([^\"\']+)[\"\']',
+            html,
+            re.IGNORECASE,
+        ):
+            raw_values.append(match.group(1) or '')
+        try:
+            decoded = unquote(html)
+        except Exception:
+            decoded = html
+        raw_values.extend(re.findall(r'https?://[^\s\"\'<>\\]+', decoded, re.IGNORECASE))
+
+        def _remember(raw_value):
+            candidate = self._normalize_extracted_media_url(raw_value or '', page_url)
+            candidate = str(candidate or '').rstrip(').,;')
+            if not candidate or not self._is_remote_url(candidate):
+                return
+            try:
+                parsed = urlparse(candidate)
+                host = (parsed.netloc or '').lower()
+                path = parsed.path or ''
+            except Exception:
+                return
+            if not re.search(r'/(?:v|e|embed|d|f|w|watch)/[^/?#]{4,}', path, re.IGNORECASE):
+                return
+            if not (
+                self._is_streamtape_host(host)
+                or self._is_dood_host(host)
+                or self._is_mixdrop_host(host)
+                or self._is_voe_host(host)
+                or self._is_lulustream_host(host)
+                or self._is_embed_hls_host(host)
+                or self._is_turtleviplay_host(host)
+            ):
+                return
+            key = candidate.split('?')[0].lower().rstrip('/')
+            if key in seen:
+                return
+            seen.add(key)
+            found.append(candidate)
+
+        for raw_value in raw_values:
+            _remember(raw_value)
+            try:
+                decoded_once = unquote(raw_value)
+            except Exception:
+                continue
+            if decoded_once != raw_value:
+                _remember(decoded_once)
+        return found
+
+    def _resolve_embedded_hoster_urls(self, urls, page_url, page_title='', subtitle_tracks=None):
+        inflight = getattr(self, '_hoster_resolve_inflight', None)
+        if not isinstance(inflight, set):
+            inflight = set()
+            self._hoster_resolve_inflight = inflight
+        for embed_url in urls or []:
+            try:
+                host = (urlparse(embed_url).netloc or '').lower()
+            except Exception:
+                continue
+            key = str(embed_url or '').split('?')[0].lower().rstrip('/')
+            if not key or key in inflight:
+                continue
+            inflight.add(key)
+            print(f'[HTML_RESOLVE] preview is not the film; trying hoster {embed_url[:140]}', flush=True)
+            resolved = None
+            try:
+                if self._is_streamtape_host(host):
+                    resolved = self._resolve_streamtape_source(embed_url)
+                elif self._is_dood_host(host):
+                    resolved = self._resolve_dood_source(embed_url)
+                elif self._is_mixdrop_host(host):
+                    resolved = self._resolve_stream_from_html(embed_url)
+                elif self._is_voe_host(host):
+                    resolved = self._resolve_voe_source(embed_url)
+                elif self._is_embed_hls_host(host):
+                    resolved = self._resolve_embed_hls_via_unpack(embed_url)
+                elif self._is_lulustream_host(host):
+                    resolved = self._resolve_lulustream_source(embed_url)
+                elif self._is_turtleviplay_host(host):
+                    resolved = self._resolve_turtleviplay_source(embed_url)
+            except Exception as exc:
+                print(f'[HTML_RESOLVE] hoster resolve failed: {exc}', flush=True)
+                resolved = None
+            if not resolved or not resolved.get('playback_url'):
+                inflight.discard(key)
+                continue
+            inflight.discard(key)
+            resolved = dict(resolved)
+            resolved.setdefault('source_url', embed_url)
+            resolved.setdefault('embed_url', embed_url)
+            resolved.setdefault('origin_page', page_url)
+            if page_title and not self._clean_remote_title(resolved.get('title')):
+                resolved['title'] = page_title
+            if subtitle_tracks and not resolved.get('subtitle_tracks'):
+                resolved['subtitle_tracks'] = subtitle_tracks
+            resolved.setdefault('resolved_at_ms', int(time.time() * 1000))
+            print(f'[HTML_RESOLVE] using hoster instead of the page preview: {embed_url[:140]}', flush=True)
+            return resolved
+        return None
+
+    def _resolved_stream_is_page_preview(self, resolved, source_url):
+        if not isinstance(resolved, dict) or resolved.get('use_mpv_ytdl'):
+            return False
+        playback = str(resolved.get('playback_url') or '')
+        if not playback or playback == source_url:
+            return False
+        if (
+            self._media_url_looks_like_preview(playback)
+            or self._media_url_is_site_promo(playback)
+            or self._media_url_is_trailer(playback)
+            or self._media_url_looks_like_ad(playback)
+        ):
+            return True
+        try:
+            duration_ms = int(resolved.get('duration_ms') or 0)
+        except Exception:
+            duration_ms = 0
+        try:
+            page_host = (urlparse(source_url).netloc or '').lower().replace('www.', '')
+            media_host = (urlparse(playback).netloc or '').lower().replace('www.', '')
+        except Exception:
+            page_host = media_host = ''
+        if page_host and media_host == page_host and (duration_ms <= 0 or duration_ms < 8 * 60 * 1000):
+            return True
+        return bool(duration_ms and duration_ms < 90 * 1000)
+
     def _resolve_known_hoster_embed_from_html(self, html, page_url, page_title='', subtitle_tracks=None):
         """Scan a page's HTML for an embedded Mixdrop / DoodStream iframe and
         resolve it through that hoster's own dedicated extractor.
@@ -42143,6 +42308,10 @@ try {
             elif self._is_embed_hls_host(embed_host):
                 # R45: emturbovid / vidara embeds on javgg-style pages
                 resolved = self._resolve_embed_hls_via_unpack(embed_url)
+            elif self._is_streamtape_host(embed_host):
+                resolved = self._resolve_streamtape_source(embed_url)
+            elif self._is_lulustream_host(embed_host):
+                resolved = self._resolve_lulustream_source(embed_url)
             else:
                 continue
             if not resolved:
@@ -45521,12 +45690,43 @@ try {
                     continue
                 seen_candidates.add(key)
                 candidates.append((pattern_index, candidate))
+        # A tube page often puts a short same-host clip (or an ad mp4) in the
+        # player and the film on a server button. Do not play that clip when
+        # a hoster link is on the page.
+        hoster_urls = self._anchor_hoster_urls(html, page_url)
+        full_candidates = [
+            item for item in candidates
+            if self._direct_candidate_is_full_video(item[1], page_url, bool(hoster_urls))
+        ]
+        if full_candidates:
+            direct = self._probe_ranked_html_candidates(
+                full_candidates, page_url, page_title, subtitle_tracks)
+            if direct:
+                return direct
+        if hoster_urls:
+            hoster_resolved = self._resolve_embedded_hoster_urls(
+                hoster_urls, page_url, page_title, subtitle_tracks)
+            if hoster_resolved:
+                return hoster_resolved
         if not candidates:
             return None
         # Prefer anything that is not obviously a preview; only fall back to
         # preview URLs when the page offered nothing else.
-        ordered = [item for item in candidates
-                   if not self._media_url_looks_like_preview(item[1])] or candidates
+        ordered = [
+            item for item in candidates
+            if not self._media_url_looks_like_preview(item[1])
+            and not self._media_url_looks_like_ad(item[1])
+        ] or [
+            item for item in candidates
+            if not self._media_url_looks_like_ad(item[1])
+        ] or candidates
+        return self._probe_ranked_html_candidates(
+            ordered, page_url, page_title, subtitle_tracks)
+
+    def _probe_ranked_html_candidates(self, ordered, page_url, page_title='', subtitle_tracks=None):
+        ordered = list(ordered or [])
+        if not ordered:
+            return None
         durations = {}
         if len(ordered) > 1:
             for _pattern_index, candidate in ordered[:6]:
@@ -46048,6 +46248,9 @@ try {
 
         if resolved is None:
             resolved = self._resolve_stream_with_ytdlp(source_url, allow_mpv_ytdl=not force_direct_ytdlp)
+        if self._resolved_stream_is_page_preview(resolved, source_url):
+            print(f'[HTML_RESOLVE] yt-dlp returned a preview for {source_url}; looking for the full video', flush=True)
+            resolved = None
         if resolved is None:
             resolved = self._resolve_stream_from_html(source_url)
 
