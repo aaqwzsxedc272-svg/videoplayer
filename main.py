@@ -34521,6 +34521,16 @@ try {
         # so normalize pasted Markdown/quoted text at this final handoff too.
         source_url = self._sanitize_url(source_url)
         source_url = self._canonicalize_remote_source_url(source_url)
+        try:
+            host = (urlparse(source_url).netloc or '').lower().replace('www.', '')
+        except Exception:
+            host = ''
+        if host in {'gofile.io', 'gofile.to'} or self._is_gofile_folder_page_url(source_url):
+            # Loading this page from the app is what got the IP blocked.
+            # A manual browser on a VPN is the user's choice; we do not load it.
+            print(f'[GOFILE] Refusing to open the share page for {source_url}; that load blocks the IP')
+            self.show_osd('GoFile site was not opened. Loading it blocks the IP.', duration=4000)
+            return False
         if not _QT_WEBENGINE_AVAILABLE:
             print('[GOFILE] In-app browser unavailable: install PyQt6-WebEngine.')
             self.show_osd('In-app GoFile browser needs PyQt6-WebEngine', duration=4000)
@@ -35736,6 +35746,10 @@ try {
         is_eporner = any(t in source_url for t in ('eporner.com', 'eporner.eu'))
         if not (is_gofile or is_eporner):
             return
+        if is_gofile:
+            print(f'[GOFILE] Not opening the share page for {source_url}; that load blocks the IP')
+            self.show_osd('GoFile site was not opened. Loading it blocks the IP.', duration=4000)
+            return
         if is_gofile and self._gofile_share_page_blocked(source_url):
             print('[GOFILE] Not opening the share page after the password attempt')
             self.show_osd('GoFile was not opened again. The saved password is the unlock path.', duration=3500)
@@ -36557,10 +36571,8 @@ try {
         entries = self._gofile_media_entries(source_url)
         
         if not entries:
-            # This resolver normally runs in a worker.  Use a signal so an
-            # uncached GoFile link still opens in the embedded page on the GUI
-            # thread instead of silently failing after the safe API hard-stop.
-            self._request_gofile_share_page(source_url)
+            # Do not open the share page. That load is what blocks the IP.
+            print(f"[GOFILE] No listing for {source_url}; not opening the share page")
             cache_key = self._gofile_folder_cache_key(source_url)
             failure_reason = ''
             try:
@@ -36603,9 +36615,8 @@ try {
                 return dict(entry)
             print(
                 f"[GOFILE] Matched entry for {source_url} has no usable "
-                f"playback_url; opening the share page instead."
+                f"playback_url; not opening the share page."
             )
-            self._request_gofile_share_page(source_url)
             return None
 
         if selected_id:
@@ -47572,6 +47583,79 @@ try {
             return bool(self._lookup_cached_remote_password('gofile', source_url))
         return False
 
+    def _pasted_folder_entry(self, source_url, provider, children):
+        source_url = self._canonicalize_remote_source_url(source_url)
+        children = [entry for entry in (children or []) if isinstance(entry, dict)]
+        files = [entry for entry in children if entry.get('entry_type') != 'remote_folder']
+        folders = [entry for entry in children if entry.get('entry_type') == 'remote_folder']
+        title = ''
+        try:
+            title = self._clean_remote_title(
+                (getattr(self, '_filester_folder_title_cache', {}) or {}).get(source_url)
+            )
+        except Exception:
+            title = ''
+        return {
+            'entry_type': 'remote_folder',
+            'provider': provider,
+            'source_url': source_url,
+            'title': title or self._playlist_display_name(source_url),
+            'file_count': len(files),
+            'folder_count': len(folders),
+            'item_count': len(files) + len(folders),
+            'children': children,
+            'level': 0,
+            'ancestor_slugs': [],
+            'expanded': False,
+        }
+
+    def _install_pasted_folder_children(self, entry):
+        """Put a pasted folder's files under the folder row, not as loose items."""
+        folder_path = self._remember_stream_album_entry(entry)
+        if not folder_path:
+            return None
+        child_paths = []
+        for child in entry.get('children') or []:
+            child_path = self._remember_stream_album_entry(child)
+            if child_path and child_path != folder_path and child_path not in child_paths:
+                child_paths.append(child_path)
+        if folder_path not in self.playlist:
+            self.add_video_to_playlist(folder_path, batch_mode=True)
+        if folder_path not in self.playlist:
+            return None
+        row = self.playlist.index(folder_path)
+        meta = dict(self._remote_folder_meta(folder_path))
+        already = list(meta.get('inserted_paths') or [])
+        nested = self.playlist[row + 1:row + 1 + len(child_paths)] == child_paths
+        if meta.get('expanded') and already == child_paths and nested:
+            for child_path in child_paths:
+                if not self._is_remote_folder_entry(child_path):
+                    return child_path
+            return None
+        for child_path in child_paths:
+            while child_path in self.playlist:
+                del self.playlist[self.playlist.index(child_path)]
+        if folder_path not in self.playlist:
+            self.playlist.insert(0, folder_path)
+        row = self.playlist.index(folder_path)
+        self.playlist[row + 1:row + 1] = child_paths
+        meta['expanded'] = True
+        meta['children'] = list(entry.get('children') or [])
+        meta['inserted_paths'] = list(child_paths)
+        meta['child_count'] = len(child_paths)
+        meta['file_count'] = sum(1 for path in child_paths if not self._is_remote_folder_entry(path))
+        meta['folder_count'] = sum(1 for path in child_paths if self._is_remote_folder_entry(path))
+        meta['item_count'] = len(child_paths)
+        if entry.get('title'):
+            meta['title'] = entry.get('title')
+        meta['provider'] = entry.get('provider') or meta.get('provider')
+        self._remote_folder_metadata[folder_path] = meta
+        self._pasted_folder_needs_rebuild = True
+        for child_path in child_paths:
+            if not self._is_remote_folder_entry(child_path):
+                return child_path
+        return None
+
     def _expand_unlocked_album_children(self, source_url, provider):
         """List a folder's files on paste when its password is already saved."""
         provider = str(provider or '').strip().lower()
@@ -47580,8 +47664,11 @@ try {
                 return []
             folder_path = self._make_remote_folder_entry_path(source_url)
             cached = self._remote_folder_meta(folder_path).get('children')
-            if isinstance(cached, list) and any(isinstance(entry, dict) for entry in cached):
-                return [dict(entry) for entry in cached if isinstance(entry, dict)]
+            if isinstance(cached, list) and any(
+                isinstance(entry, dict) and entry.get('entry_type') != 'remote_folder'
+                for entry in cached
+            ):
+                return [self._pasted_folder_entry(source_url, 'filester', cached)]
             print(f'[FILESTER] Saved password for {source_url}; listing files on paste')
             try:
                 children = self._expand_filester_album_source(
@@ -47596,17 +47683,35 @@ try {
                 entry for entry in (children or [])
                 if isinstance(entry, dict) and entry.get('entry_type') != 'remote_folder'
             ]
-            return children if files else []
+            if not files:
+                return []
+            return [self._pasted_folder_entry(source_url, 'filester', children)]
         if provider == 'gofile':
             if not self._lookup_cached_remote_password('gofile', source_url):
+                print(f'[GOFILE] No saved password for {source_url}; asking once. The site will not be opened.')
+                self._remote_password_for_url(
+                    'gofile',
+                    source_url,
+                    force_prompt=True,
+                    remember=True,
+                    reason='This GoFile folder is password protected. The site will not be opened.',
+                )
+            if not self._lookup_cached_remote_password('gofile', source_url):
+                print(f'[GOFILE] No password for {source_url}; not opening the share page')
                 return []
-            print(f'[GOFILE] Saved password for {source_url}; listing files on paste')
+            print(f'[GOFILE] Saved password for {source_url}; listing files on paste without opening the site')
             try:
                 children = self._gofile_media_entries(source_url)
             except Exception as exc:
                 print(f'[GOFILE] Paste expand failed: {exc}')
                 return []
-            return list(children or [])
+            files = [
+                entry for entry in (children or [])
+                if isinstance(entry, dict) and entry.get('entry_type') != 'remote_folder'
+            ]
+            if not files:
+                return []
+            return [self._pasted_folder_entry(source_url, 'gofile', children)]
         return []
 
     def _expand_stream_album_source_probe(self, source_url):
@@ -47658,6 +47763,8 @@ try {
                 self.video_durations[file_path] = cached_dur
                 self._refresh_playlist_row_metadata(file_path)
                 continue
+            if self._is_gofile_folder_page_url(file_path):
+                continue
             if not cached.get('playback_url'):
                 if file_path not in getattr(self, '_remote_stream_resolve_pending', set()):
                     self._resolve_remote_stream_async(file_path)
@@ -47693,7 +47800,22 @@ try {
         added_now = 0
         dup_now = 0
         call_had_file = False
+        self._pasted_folder_needs_rebuild = False
         for entry in (entries or []):
+            if isinstance(entry, dict) and entry.get('entry_type') == 'remote_folder' and entry.get('children'):
+                self._album_expand_batch_input += 1
+                first_file = self._install_pasted_folder_children(entry)
+                if first_file:
+                    call_had_file = True
+                    if getattr(self, '_album_expand_batch_playable', None) is None:
+                        self._album_expand_batch_playable = first_file
+                    added_now += 1
+                    self._album_expand_batch_count += 1
+                    if self._album_expand_batch_first is None:
+                        self._album_expand_batch_first = first_file
+                    if self._is_remote_url(first_file) and not self._is_gofile_folder_page_url(first_file):
+                        remote_duration_candidates.append(first_file)
+                continue
             self._album_expand_batch_input += 1
             entry_url = self._remember_stream_album_entry(entry)
             if not entry_url:
@@ -47729,15 +47851,20 @@ try {
             if self._album_expand_batch_first is None:
                 self._album_expand_batch_first = entry_url
         self.playlist_widget.setUpdatesEnabled(True)
+        if getattr(self, '_pasted_folder_needs_rebuild', False):
+            self.rebuild_playlist_table()
+            self._pasted_folder_needs_rebuild = False
         if remote_duration_candidates and not self._collapse_duplicate_url_mirrors():
             self.apply_playlist_filtering()
         self._schedule_remote_duration_probes(remote_duration_candidates)
 
-        if not call_had_file and self._gofile_token_rejected(source_url):
-            print(f'[GOFILE] Paste could not list {source_url} via API; opening the share page once')
-            self.show_osd('Opening GoFile with the saved password', duration=2500)
-            self._request_gofile_share_page(source_url)
-            self._album_expand_opened_page = True
+        if not call_had_file and self._is_gofile_folder_page_url(source_url):
+            if self._gofile_token_rejected(source_url):
+                print(f'[GOFILE] API token rejected for {source_url}; the share page was not opened')
+                self.show_osd('GoFile rejected the app token. The site was not opened.', duration=4000)
+            else:
+                print(f'[GOFILE] {source_url} was not listed. The share page was not opened')
+                self.show_osd('GoFile folder was not listed. The site was not opened.', duration=3500)
 
         if is_final_job:
             total   = self._album_expand_batch_count
@@ -51053,16 +51180,9 @@ try {
                 and float(cached.get('expires') or 0) > time.time()
             )
             if not cache_is_current:
-                saved_password = self._lookup_cached_remote_password('gofile', file_path)
-                if saved_password and self._gofile_token_rejected(file_path):
-                    print(f"[GOFILE] API token rejected for {file_path}; opening the share page once")
-                    self._request_gofile_share_page(file_path)
-                    return
-                if saved_password:
-                    print(f"[GOFILE] Saved password for {file_path}; not opening the share page")
-                else:
-                    self._open_gofile_share_page(file_path)
-                    return
+                print(f"[GOFILE] No listing for {file_path}; not opening the share page")
+                self.show_osd('GoFile site was not opened. Loading it blocks the IP.', duration=3500)
+                return
         self._hide_gofile_share_page()
         # Guard: ignore if already loading this exact file
         if getattr(self, '_set_media_loading', False):
