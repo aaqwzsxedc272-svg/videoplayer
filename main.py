@@ -38789,6 +38789,12 @@ try {
             'lulustream',
             'streamhihi.com',
             'luluvdo.com',
+            # Same player, rotating domains. A server button on luluvid /
+            # luluvdoo was invisible to the LuluStream resolver.
+            'luluvid.com',
+            'luluvdoo.com',
+            'lulucdn.com',
+            'lulu.st',
         ))
 
     def _is_voe_host(self, host):
@@ -38850,6 +38856,10 @@ try {
             'streamhihi.com',
             'lulustream.com',
             'luluvdo.com',
+            'luluvid.com',
+            'luluvdoo.com',
+            'lulucdn.com',
+            'lulu.st',
         ])
         queued_pages = []
         queued_keys = set()
@@ -42113,7 +42123,12 @@ try {
                 path = parsed.path or ''
             except Exception:
                 return
-            if not re.search(r'/(?:v|e|embed|d|f|w|watch)/[^/?#]{4,}', path, re.IGNORECASE):
+            _embed_path = bool(re.search(
+                r'/(?:v|e|embed|d|f|w|watch)/[^/?#]{4,}', path, re.IGNORECASE))
+            # vidoza.net/embed-abc123.html does not use a slash after embed.
+            _vidoza_path = 'vidoza' in host and bool(re.search(
+                r'/embed-[A-Za-z0-9]{4,}', path, re.IGNORECASE))
+            if not (_embed_path or _vidoza_path):
                 return
             if not (
                 self._is_streamtape_host(host)
@@ -42123,6 +42138,7 @@ try {
                 or self._is_lulustream_host(host)
                 or self._is_embed_hls_host(host)
                 or self._is_turtleviplay_host(host)
+                or 'vidoza' in host
             ):
                 return
             key = candidate.split('?')[0].lower().rstrip('/')
@@ -42172,6 +42188,10 @@ try {
                     resolved = self._resolve_lulustream_source(embed_url)
                 elif self._is_turtleviplay_host(host):
                     resolved = self._resolve_turtleviplay_source(embed_url)
+                elif 'vidoza' in host:
+                    # Same server-button role as streamtape. yt-dlp already
+                    # extracts it; the page scan just never followed the link.
+                    resolved = self._resolve_stream_with_ytdlp(embed_url, allow_mpv_ytdl=False)
             except Exception as exc:
                 print(f'[HTML_RESOLVE] hoster resolve failed: {exc}', flush=True)
                 resolved = None
@@ -42319,6 +42339,8 @@ try {
                 resolved = self._resolve_streamtape_source(embed_url)
             elif self._is_lulustream_host(embed_host):
                 resolved = self._resolve_lulustream_source(embed_url)
+            elif 'vidoza' in embed_host:
+                resolved = self._resolve_stream_with_ytdlp(embed_url, allow_mpv_ytdl=False)
             else:
                 continue
             if not resolved:
@@ -42897,10 +42919,12 @@ try {
             'emturbovid', 'turbovid', 'vidara',
             # R48: StreamWish family (+ known mirrors)
             'streamwish', 'swhoi', 'awish',
+            # Embed domains that do not keep "streamwish" in the hostname.
+            'wishembed', 'embedwish', 'flaswish', 'streamhg',
             # R48: FileMoon
             'filemoon',
             # R48: VidHide player family (incl. filelions/EarnVids mirrors)
-            'vidhide', 'filelions', 'kinoger', 'ryderjet',
+            'vidhide', 'vidhideplus', 'filelions', 'kinoger', 'ryderjet',
             'smoothpre', 'dhtpre', 'peytonepre', 'earnvids',
             # R48: javgg's own player
             'javstreamhq',
@@ -64058,7 +64082,7 @@ if __name__ == "__main__":
                                 except Exception:
                                     _contexts = [page]
                                 _js = """() => {
-                                    const hosts = ['streamtape', 'strtape', 'doodstream', 'ds2play', 'mixdrop', 'mxdrop', 'voe.sx', 'lulustream', 'filemoon', 'vidara', 'turbovid', 'streamwish'];
+                                    const hosts = ['streamtape', 'strtape', 'doodstream', 'ds2play', 'mixdrop', 'mxdrop', 'voe.sx', 'lulustream', 'luluvid', 'luluvdo', 'luluvdoo', 'filemoon', 'vidara', 'turbovid', 'streamwish', 'wishembed', 'embedwish', 'flaswish', 'vidhide', 'earnvids', 'streamhg', 'vidoza'];
                                     for (const a of document.querySelectorAll('a[href]')) {
                                         const href = String(a.href || '');
                                         const low = href.toLowerCase();
