@@ -30420,6 +30420,11 @@ try {
             if 'eroticmv.com' in media_host:
                 headers.setdefault('Referer', 'https://eroticmv.com/')
                 headers.setdefault('Origin', 'https://eroticmv.com')
+            if 'twimg.com' in media_host:
+                # Amplify playlists 403 a tube-site Referer. The film is the
+                # Twitter file named in the player tag, not the page host.
+                headers['Referer'] = 'https://x.com/'
+                headers['Origin'] = 'https://x.com'
             if origin and media_host and not same_origin:
                 headers.setdefault('Origin', origin)
             media_path = (parsed_media.path or '').lower()
@@ -45521,6 +45526,184 @@ try {
                   f'of {len(urls)}', flush=True)
         return sorted(real or usable, key=self._media_url_height_hint, reverse=True)
 
+    def _clean_tube_player_media_urls(self, html):
+        """Film URLs from a Clean Tube Player page.
+
+        pornmz names the film in itemprop=contentUrl and again inside
+        player-x.php?q=<base64 video tag>. The on-page mp4 can be a
+        mediabook trailer; this tag is the film (field: video.twimg.com
+        amplify playlist, not mediabook_320p.mp4).
+        """
+        if not html:
+            return []
+        found = []
+        seen = set()
+
+        def _add(raw):
+            value = html_unescape(unquote(str(raw or ''))).replace('\\/', '/').strip().strip('\'"')
+            if value.startswith('//'):
+                value = 'https:' + value
+            if not value.lower().startswith(('http://', 'https://')):
+                return
+            try:
+                path = (urlparse(value).path or '').lower()
+            except Exception:
+                return
+            if not path.endswith(('.m3u8', '.m3u', '.mp4', '.webm', '.mkv', '.mov')):
+                return
+            if (
+                self._media_url_looks_like_preview(value)
+                or self._media_url_looks_like_ad(value)
+                or self._media_url_is_site_promo(value)
+                or self._media_url_is_trailer(value)
+            ):
+                return
+            key = value.split('?')[0].lower()
+            if key in seen:
+                return
+            seen.add(key)
+            found.append(value)
+
+        for match in re.finditer(
+            r'itemprop\s*=\s*["\']contentUrl["\'][^>]*content\s*=\s*["\']([^"\']+)',
+            html,
+            re.IGNORECASE,
+        ):
+            _add(match.group(1))
+        for match in re.finditer(
+            r'content\s*=\s*["\']([^"\']+)["\'][^>]*itemprop\s*=\s*["\']contentUrl["\']',
+            html,
+            re.IGNORECASE,
+        ):
+            _add(match.group(1))
+        for match in re.finditer(
+            r'player-x\.php\?q=([A-Za-z0-9+/=_%\-]+)',
+            html,
+            re.IGNORECASE,
+        ):
+            token = html_unescape(unquote(match.group(1) or '')).split('&')[0]
+            pad = '=' * ((4 - len(token) % 4) % 4)
+            try:
+                decoded = base64.b64decode(token + pad).decode('utf-8', errors='replace')
+            except Exception:
+                continue
+            decoded = unquote(decoded)
+            for url in re.findall(r'https?://[^\"\'\s<>]+', decoded, re.IGNORECASE):
+                _add(url)
+            for src in re.findall(
+                r'(?:src|contentUrl)\s*=\s*["\']([^"\']+)',
+                decoded,
+                re.IGNORECASE,
+            ):
+                _add(src)
+        return found
+
+    @staticmethod
+    def _twimg_variant_height(url):
+        match = re.search(r'/(\d{3,4})x(\d{3,4})/', str(url or ''))
+        if not match:
+            return 0
+        try:
+            return int(match.group(2))
+        except Exception:
+            return 0
+
+    def _schema_video_duration_ms(self, html):
+        match = re.search(
+            r'itemprop\s*=\s*["\']duration["\'][^>]*content\s*=\s*["\']'
+            r'P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?["\']',
+            html or '',
+            re.IGNORECASE,
+        )
+        if not match:
+            return 0
+        days, hours, minutes, seconds = match.groups()
+        total = 0.0
+        for value, scale in ((days, 86400), (hours, 3600), (minutes, 60), (seconds, 1)):
+            if not value:
+                continue
+            try:
+                total += float(value) * scale
+            except Exception:
+                continue
+        if total < 90:
+            return 0
+        return int(total * 1000)
+
+    def _resolve_clean_tube_player_stream(self, html, page_url, page_title='', subtitle_tracks=None):
+        urls = self._clean_tube_player_media_urls(html)
+        if not urls:
+            return None
+        twimg = [u for u in urls if 'twimg.com' in u.lower() or 'amplify_video' in u.lower()]
+        pool = twimg or urls
+        for url in pool:
+            print(f'[HTML_RESOLVE] player source {url[:180]}', flush=True)
+        masters = [u for u in pool if self._is_hls_stream_url(u)]
+        playback_headers = (
+            self._media_playback_headers(page_url, masters[0] if masters else pool[0])
+        )
+        variants = []
+        if masters:
+            try:
+                variants = self._hls_variants_from_master(
+                    masters[0], playback_headers, page_title, page_url) or []
+            except Exception:
+                variants = []
+            for variant in variants:
+                if isinstance(variant, dict):
+                    variant['headers'] = dict(playback_headers)
+        best_url = ''
+        best_height = 0
+        if variants:
+            best = variants[0]
+            best_url = str(best.get('playback_url') or '')
+            try:
+                best_height = int(best.get('height') or 0)
+            except Exception:
+                best_height = 0
+        if not best_url:
+            ranked = sorted(
+                pool,
+                key=lambda item: (
+                    self._twimg_variant_height(item) or self._media_url_height_hint(item),
+                    1 if self._is_hls_stream_url(item) else 0,
+                ),
+                reverse=True,
+            )
+            best_url = ranked[0]
+            best_height = self._twimg_variant_height(best_url) or self._media_url_height_hint(best_url)
+        if not best_url or self._media_url_looks_like_preview(best_url):
+            return None
+        print(
+            f'[HTML_RESOLVE] chose player file {best_url[:150]}'
+            + (f' ({best_height}p)' if best_height else '')
+            + f' from {len(pool)} player source(s)',
+            flush=True,
+        )
+        resolved = {
+            'playback_url': best_url,
+            'download_url': best_url,
+            'headers': playback_headers,
+            'title': page_title,
+            'height': best_height,
+            'content_type': (
+                'application/vnd.apple.mpegurl'
+                if self._is_hls_stream_url(best_url) else 'video/mp4'
+            ),
+            'source_url': page_url,
+            'embed_url': page_url,
+            'resolver_provider': 'html',
+            'resolved_at_ms': int(time.time() * 1000),
+        }
+        duration_ms = self._schema_video_duration_ms(html)
+        if duration_ms:
+            resolved['duration_ms'] = duration_ms
+        if variants:
+            resolved['variants'] = variants
+        if subtitle_tracks:
+            resolved['subtitle_tracks'] = subtitle_tracks
+        return resolved
+
     def _resolve_stream_from_html(self, source_url):
         try:
             import requests
@@ -45758,6 +45941,13 @@ try {
         embed_resolved = self._resolve_known_hoster_embed_from_html(html, page_url, page_title, subtitle_tracks)
         if embed_resolved:
             return embed_resolved
+
+        # Clean Tube Player hides the film in a base64 video tag. Prefer that
+        # over a mediabook trailer sitting in the same HTML.
+        tube_resolved = self._resolve_clean_tube_player_stream(
+            html, page_url, page_title, subtitle_tracks)
+        if tube_resolved:
+            return tube_resolved
 
         patterns = [
             r'<meta[^>]+property=["\']og:video(?::url)?["\'][^>]+content=["\']([^"\']+)',
