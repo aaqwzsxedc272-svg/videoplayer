@@ -1,43 +1,121 @@
+
 C:\Users\Mouad\Desktop>cd /d "C:\Users\Mouad\Desktop\video_player"
 
 C:\Users\Mouad\Desktop\video_player>python main.py
-
 [MetadataScraper] build link7-scene
-
 [JAVGURU] VideoPlayer patched — jav.guru URL detection active.
-
 [GENERIC_JAV] VideoPlayer patched — URL detection active. (build R63-page-row)
-
 [JAVHD] VideoPlayer patched — javhd.today URL detection active.
-
 [FAMILYPORNHD] VideoPlayer patched — HTML URL detection active.
-
 [HENTAI] resolver loaded
-
 DEBUG: Data files will be saved in: C:\Users\Mouad\Desktop\video_player
-
 qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.3 LGPL version 2.1 or later
-
 [video_backend] Using libmpv renderer
-
 [COOKIES] mpv will use cookies from: C:\Users\Mouad\Desktop\video_player\cookies.txt
-
 [video_backend] mpv renderer: native D3D11 window
-
 [SUBS] caption detection build 7 (page scan, subtitle endpoint, session warm-up, no-Referer retry logged)
-
 [PASSWORDS] Loaded 54 cached passwords from disk
-
 No headphones detected at startup, using default audio output
-
-[HENTAI] hentaihaven answered with the Cloudflare check, not the player
-
-[HENTAI] no stream; not opening a browser for https://hentaihaven.xxx/watch/ookii-onnanoko-wa-suki-desu-ka/episode-1/
-
+[BATTERY] probe could not run: TimeoutExpired: Command '['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\\Users\\Mouad\\Desktop\\video_player\\battery_probe.ps1']' timed out after 60 seconds
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
 [FAVICON] hentaihaven.xxx: 2 declared icon(s) — https://hentaihaven.xxx/favicon.png
-
 [FAVICON] hentaihaven.xxx: got site icon from https://hentaihaven.xxx/favicon.png
-
-[BATTERY] Windows reported 3 device(s) with a charge: [('itel t1neo hands-free ag', 10), ('musicman bt-x78 hands-free ag', 70), ('roseland tws re-500 hands-free ag', 100)]
-
-[BATTERY]   pnp-direct=3
+[COOKIES] nothing for ['hentaihaven.xxx'] in any browser profile either -- the yt-dlp module
+[COOKIES] No matching cookies found for domains=['hentaihaven.xxx'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] hentaihaven answered with the Cloudflare check, not the player
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+PAGE_TITLE::Ookii Onnanoko wa Suki desu ka Episode 1 - Hentai Haven | Watch free Hentai HD
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+[BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
+[BROWSER_CLICK][JWPROBE] jwplayer_api=False containers=0 playlist_items=0 source_files=0 files=[]
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/playlist.m3u8
+MEDIA_URL::https://www.googletagmanager.com/gtm.js?id=GTM-KZFXMN5S
+MEDIA_URL::/_next/static/chunks/0k0fjjfqmgqvj.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3pyjh7g42a0cr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/turbopack-04ol-j1xr9f6g.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hap93h_2rlz1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/245jxcyhgs6bt.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1dfymrizihap5.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/19v-9-u232y1q.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1rokfh921mlk1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2h-8_q2_hzr59.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3-8j0n028-7_d.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2_9so-sp8llx3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2s7tiedvdwkkr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0hkfz14yzdxv_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3m8y9-fbeueiw.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/13jjxi_nocd1_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2l275el85o_t3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2yyn15_kenoi9.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0z_1_bbe5lm8z.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hlkqm-ptu4an.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/04hgmj47g3md3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0cz1d0mv5g_q7.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2jzxw7zu4ruh8.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/cdn-cgi/challenge-platform/scripts/jsd/main.js
+[BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
+MEDIA_URL::https://www.googletagmanager.com/gtag/js?id=G-V4YB0RHNZZ&cx=c&gtm=4e69n1
+MEDIA_URL::https://analytics.ahrefs.com/analytics.js
+MEDIA_URL::/ads/ads_controller.js?check=1790310323870
+MEDIA_URL::/playback-check.js?check=1790310323872
+BROWSER_COOKIES::_ga_V4YB0RHNZZ=GS2.1.s1790310323$o1$g0$t1790310323$j60$l0$h0; _ga=GA1.1.1671454855.1790310324
+[BROWSER_CLICK] clicked load-video control: shrink-0 items-center justify-center gap-2 text-sm font-medium whitespace-nowrap
+MEDIA_URL::/_next/static/chunks/0djz3pl2n1ziy.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::https://js.havenclick.com/loader.js?v=1776828719
+MEDIA_URL::https://js.havenclick.com/js/zone/29.js?v=15074
+VOE_M3U8::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/playlist_vp9.m3u8
+MEDIA_URL::https://js.havenclick.com/serve/zone/29/floating.js
+MEDIA_URL::https://js.havenclick.com/serve/zone/9
+MEDIA_URL::/api/ads/creative/?zone=23&mode=mobile
+[BROWSER_CLICK] clicked load-video control: inline-flex shrink-0 items-center justify-center gap-2 text-sm font-medium white
+MEDIA_URL::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4
+VOE_M3U8::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/vp_7sop/v.m3u8
+VOE_M3U8::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/snd/a.m3u8
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/ar.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/cs.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/da.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/de.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/el.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/en.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/es.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/fi.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/fr.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/he.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/hu.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/id.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/it.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/ko.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/nl.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/pl.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/pt.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/ro.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/ru.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/sv.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/th.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/tr.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/uk.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/vi.vtt
+MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/zh.vtt
+MEDIA_URL::/api/ads/creative/?zone=48
+MEDIA_URL::https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495
+[BROWSER_CLICK] clicked load-video control: inline-flex shrink-0 items-center justify-center gap-2 text-sm font-medium white
+MEDIA_URL::https://laidy.top/70460589-357e-413d-a0aa-09ba198623d4/vp_7sop/i.mp4
+MEDIA_URL::https://laidy.top/70460589-357e-413d-a0aa-09ba198623d4/snd/i.mp4
+MEDIA_URL::https://htl-cdn.adtng.com/a7/creatives/39/1598/818639/1194850/1194850_video_with_sound.mp4
+MEDIA_DUR::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4|6|350|200
+[BROWSER_CLICK] file-host capture complete - closing the browser early
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaihaven.xxx/watch/ookii-onnanoko-wa-suki-desu-ka/episode-1/: https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/playlist.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaihaven.xxx
+[HENTAI] stream after the Cloudflare click: https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/playlist.m3u8
+[HENTAI] hentaihaven: Ookii Onnanoko wa Suki desu ka Episode 1 - Hentai Haven | Watch free Hentai HD (0 mirror(s))
+[PLAYLIST][NAME] https://hentaihaven.xxx/watch/ookii-onnanoko-wa-suki-desu-ka/episode-1/ : 'episode-1 [hentaihaven.xxx]' -> 'Ookii Onnanoko wa Suki desu ka Episode 1 - Hentai Haven | Watch free Hentai HD'
+[PLAYLIST][INFO] path='https://hentaihaven.xxx/watch/ookii-onnanoko-wa-suki-desu-ka/episode-1/' rows=[0] duration='Stream' size='Stream' quality='Stream'
