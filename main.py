@@ -16021,6 +16021,36 @@ try {
             fresh_urls.append(url)
         return fresh_urls, skipped_urls
 
+    def _start_quiet_capture_browser(self, pid, proc=None):
+        """Stop an off-screen capture window flashing the auto-hide taskbar."""
+        try:
+            pid = int(pid or 0)
+        except Exception:
+            return
+        if os.name != 'nt' or pid <= 0:
+            return
+        started = getattr(self, '_quiet_capture_pids', None)
+        if not isinstance(started, set):
+            started = set()
+            self._quiet_capture_pids = started
+        if pid in started:
+            return
+        started.add(pid)
+
+        def _stop():
+            try:
+                return proc is not None and proc.poll() is not None
+            except Exception:
+                return True
+
+        threading.Thread(
+            target=_quiet_offscreen_browser_taskbar,
+            args=(pid,),
+            kwargs={'should_stop': _stop},
+            daemon=True,
+            name='quiet-capture-browser',
+        ).start()
+
     def _background_browser_popen_kwargs(self, background=False):
         kwargs = {
             'stdout': subprocess.DEVNULL,
@@ -42182,6 +42212,7 @@ try {
                 args,
                 **self._background_browser_popen_kwargs(background=True),
             )
+            self._start_quiet_capture_browser(proc.pid, proc)
             _wait_for_devtools(port)
             target = _new_target(port)
             ws_url = target.get('webSocketDebuggerUrl')
@@ -44597,7 +44628,9 @@ try {
                 out_lines.append(line)
                 if line.startswith('PW_BROWSER_PID::'):
                     try:
-                        browser_pids.append(int(line.split('::', 1)[1].strip()))
+                        _bp = int(line.split('::', 1)[1].strip())
+                        browser_pids.append(_bp)
+                        self._start_quiet_capture_browser(_bp, proc)
                     except Exception:
                         pass
                 elif line and not line.startswith('PAGE_HTML_B64::'):
@@ -44822,8 +44855,9 @@ try {
                     _pw_out_lines.append(line)
                     if line.startswith('PW_BROWSER_PID::'):
                         try:
-                            _pw_browser_pids.append(
-                                int(line.split('::', 1)[1].strip()))
+                            _bp = int(line.split('::', 1)[1].strip())
+                            _pw_browser_pids.append(_bp)
+                            self._start_quiet_capture_browser(_bp, proc)
                         except Exception:
                             pass
                     elif line.startswith('VERIFIED_MEDIA::') and _pw_verified_at is None:
@@ -64846,6 +64880,240 @@ try {
             print(f"Error during close: {e}")
         event.accept()
 
+def _quiet_offscreen_browser_taskbar(root_pid, should_stop=None, interval=0.2, max_seconds=180):
+    """Keep an off-screen capture browser off the taskbar.
+
+    A headed window at -32000,-32000 is still a normal app window. Windows
+    adds a taskbar button and, because the player already has focus, flashes
+    that button instead of switching to it. An auto-hide taskbar then stays
+    up and blinks for the whole capture. The page has to stay a real visible
+    window (a minimized one is hidden, and these players refuse that), so
+    the button is removed and the flash is stopped without hiding the page.
+    """
+    if os.name != 'nt':
+        return
+    try:
+        root_pid = int(root_pid or 0)
+    except Exception:
+        return
+    if root_pid <= 0:
+        return
+    try:
+        from ctypes import wintypes
+    except Exception:
+        return
+    user32 = ctypes.WinDLL('user32', use_last_error=True)
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    GWL_EXSTYLE = -20
+    WS_EX_TOOLWINDOW = 0x00000080
+    WS_EX_APPWINDOW = 0x00040000
+    WS_EX_NOACTIVATE = 0x08000000
+    SWP_NOSIZE = 0x0001
+    SWP_NOMOVE = 0x0002
+    SWP_NOZORDER = 0x0004
+    SWP_NOACTIVATE = 0x0010
+    SWP_FRAMECHANGED = 0x0020
+    TH32CS_SNAPPROCESS = 0x00000002
+
+    if ctypes.sizeof(ctypes.c_void_p) == 8:
+        get_long = user32.GetWindowLongPtrW
+        set_long = user32.SetWindowLongPtrW
+        get_long.restype = ctypes.c_ssize_t
+        set_long.restype = ctypes.c_ssize_t
+        get_long.argtypes = [wintypes.HWND, ctypes.c_int]
+        set_long.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+    else:
+        get_long = user32.GetWindowLongW
+        set_long = user32.SetWindowLongW
+
+    class FLASHWINFO(ctypes.Structure):
+        _fields_ = [
+            ('cbSize', wintypes.UINT),
+            ('hwnd', wintypes.HWND),
+            ('dwFlags', wintypes.DWORD),
+            ('uCount', wintypes.UINT),
+            ('dwTimeout', wintypes.DWORD),
+        ]
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [
+            ('dwSize', wintypes.DWORD),
+            ('cntUsage', wintypes.DWORD),
+            ('th32ProcessID', wintypes.DWORD),
+            ('th32DefaultHeapID', ctypes.c_size_t),
+            ('th32ModuleID', wintypes.DWORD),
+            ('cntThreads', wintypes.DWORD),
+            ('th32ParentProcessID', wintypes.DWORD),
+            ('pcPriClassBase', ctypes.c_long),
+            ('dwFlags', wintypes.DWORD),
+            ('szExeFile', wintypes.WCHAR * 260),
+        ]
+
+    user32.FlashWindowEx.argtypes = [ctypes.POINTER(FLASHWINFO)]
+    user32.FlashWindowEx.restype = wintypes.BOOL
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    _enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = [_enum_proc, wintypes.LPARAM]
+    user32.EnumWindows.restype = wintypes.BOOL
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.SetWindowPos.argtypes = [
+        wintypes.HWND, wintypes.HWND,
+        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT,
+    ]
+    user32.SetWindowPos.restype = wintypes.BOOL
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.ShowWindow.restype = wintypes.BOOL
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    announced = False
+
+    def _taskbar_delete_tab():
+        """Return a callable that removes one HWND from the taskbar, or None."""
+        try:
+            ole32 = ctypes.WinDLL('ole32', use_last_error=True)
+
+            class GUID(ctypes.Structure):
+                _fields_ = [
+                    ('Data1', wintypes.DWORD),
+                    ('Data2', wintypes.WORD),
+                    ('Data3', wintypes.WORD),
+                    ('Data4', ctypes.c_ubyte * 8),
+                ]
+
+            ole32.CoInitialize.argtypes = [ctypes.c_void_p]
+            ole32.CoInitialize.restype = ctypes.c_long
+            ole32.CLSIDFromString.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(GUID)]
+            ole32.CLSIDFromString.restype = ctypes.c_long
+            ole32.CoCreateInstance.argtypes = [
+                ctypes.POINTER(GUID), ctypes.c_void_p, wintypes.DWORD,
+                ctypes.POINTER(GUID), ctypes.POINTER(ctypes.c_void_p),
+            ]
+            ole32.CoCreateInstance.restype = ctypes.c_long
+            ole32.CoInitialize(None)
+            clsid = GUID()
+            iid = GUID()
+            if ole32.CLSIDFromString('{56FDF344-FD6D-11d0-958A-006097C9A090}', ctypes.byref(clsid)) < 0:
+                return None
+            if ole32.CLSIDFromString('{56FDF342-FD6D-11d0-958A-006097C9A090}', ctypes.byref(iid)) < 0:
+                return None
+            punk = ctypes.c_void_p()
+            if ole32.CoCreateInstance(ctypes.byref(clsid), None, 1, ctypes.byref(iid), ctypes.byref(punk)) < 0 or not punk.value:
+                return None
+            vtbl = ctypes.cast(punk, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+            hr_init = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)(vtbl[3])
+            delete = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, wintypes.HWND)(vtbl[5])
+            if hr_init(punk) < 0:
+                return None
+
+            def _drop(hwnd, _punk=punk, _delete=delete):
+                _delete(_punk, hwnd)
+
+            return _drop
+        except Exception:
+            return None
+
+    def _family():
+        wanted = {root_pid}
+        for _ in range(5):
+            snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+            invalid = ctypes.c_void_p(-1).value
+            if not snap or snap == invalid:
+                break
+            grew = False
+            try:
+                entry = PROCESSENTRY32W()
+                entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+                kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+                kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+                kernel32.Process32FirstW.restype = wintypes.BOOL
+                kernel32.Process32NextW.restype = wintypes.BOOL
+                ok = kernel32.Process32FirstW(snap, ctypes.byref(entry))
+                while ok:
+                    pid = int(entry.th32ProcessID)
+                    parent = int(entry.th32ParentProcessID)
+                    if parent in wanted and pid not in wanted:
+                        wanted.add(pid)
+                        grew = True
+                    ok = kernel32.Process32NextW(snap, ctypes.byref(entry))
+            except Exception:
+                break
+            finally:
+                kernel32.CloseHandle(snap)
+            if not grew:
+                break
+        return wanted
+
+    def _windows(pids):
+        found = []
+
+        @_enum_proc
+        def _each(hwnd, _lparam):
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if int(pid.value) in pids and user32.IsWindowVisible(hwnd):
+                found.append(hwnd)
+            return True
+
+        user32.EnumWindows(_each, 0)
+        return found
+
+    delete_tab = _taskbar_delete_tab()
+
+    def _quiet(hwnd):
+        try:
+            style = int(get_long(hwnd, GWL_EXSTYLE) or 0)
+        except Exception:
+            style = 0
+        new_style = (style | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) & ~WS_EX_APPWINDOW
+        if new_style != style:
+            try:
+                # Do not hide the window. A hidden page is what these
+                # players refuse. The style change plus DeleteTab drops the
+                # taskbar button without changing visibilityState.
+                set_long(hwnd, GWL_EXSTYLE, new_style)
+                user32.SetWindowPos(
+                    hwnd, 0, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
+            except Exception:
+                pass
+        if delete_tab is not None:
+            try:
+                delete_tab(hwnd)
+            except Exception:
+                pass
+        info = FLASHWINFO()
+        info.cbSize = ctypes.sizeof(FLASHWINFO)
+        info.hwnd = hwnd
+        info.dwFlags = 0  # FLASHW_STOP
+        try:
+            user32.FlashWindowEx(ctypes.byref(info))
+        except Exception:
+            pass
+
+    deadline = time.time() + max(5, float(max_seconds or 180))
+    while time.time() < deadline:
+        try:
+            if callable(should_stop) and should_stop():
+                return
+        except Exception:
+            return
+        try:
+            hwnds = _windows(_family())
+        except Exception:
+            hwnds = []
+        if hwnds:
+            for hwnd in hwnds:
+                _quiet(hwnd)
+            if not announced:
+                announced = True
+                print('[BROWSER_CLICK] capture window kept off the taskbar', flush=True)
+        time.sleep(max(0.05, float(interval or 0.2)))
+
+
 import javguru_integration   # noqa  ← add this line
 import generic_jav_integration   # noqa
 import javhd_integration   # noqa
@@ -65157,6 +65425,16 @@ if __name__ == "__main__":
                                 _PW_STATE['browser_pid'] = int(_pw_pid)
                                 print('PW_BROWSER_PID::' + str(int(_pw_pid)))
                                 sys.stdout.flush()
+                                if hidden_headed:
+                                    threading.Thread(
+                                        target=_quiet_offscreen_browser_taskbar,
+                                        args=(int(_pw_pid),),
+                                        kwargs={
+                                            'should_stop': lambda: _PW_STATE.get('browser') is None,
+                                        },
+                                        daemon=True,
+                                        name='quiet-capture-browser',
+                                    ).start()
                         except Exception:
                             pass
                         page = browser.new_page()
