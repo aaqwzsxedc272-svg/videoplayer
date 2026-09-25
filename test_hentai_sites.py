@@ -1,0 +1,242 @@
+"""Offline checks for the four sites named in terminal.txt."""
+
+import json
+
+import hentai_sites as sites
+
+
+class Fake:
+    def __init__(self, routes):
+        self.routes = routes
+        self.calls = []
+
+    def __call__(self, method, url, headers=None, data=None, timeout=25):
+        self.calls.append((method, url, data))
+        matches = [(needle, response) for needle, response in self.routes if needle in url]
+        if not matches:
+            return sites._Resp(404, '', {}, url)
+        _needle, response = max(matches, key=lambda item: len(item[0]))
+        if callable(response):
+            return response(method, url, data)
+        return response
+
+
+def test_hosts():
+    assert sites.site_kind('https://www.hanime.tv/videos/hentai/example-1') == 'hanime'
+    assert sites.site_kind('hentaihaven.xxx') == 'hentaihaven'
+    assert sites.site_kind('https://hentaini.com/h/example/2') == 'hentaini'
+    assert sites.site_kind('https://hentaimama.io/episodes/example-episode-1/') == 'hentaimama'
+    assert sites.site_kind('https://example.com/watch') == ''
+    assert sites.needs_fresh_playback('hanime.tv')
+    assert sites.needs_fresh_playback('hentaihaven.xxx')
+    assert not sites.needs_fresh_playback('hentaini.com')
+    assert not sites.needs_fresh_playback('hentaimama.io')
+
+
+def test_haven_token_roundtrip():
+    payload = {'en': 'cipher', 'iv': 'vector', 'uri': 'https://player.example/'}
+    opened = sites.haven_decode_token(sites.haven_encode_token(payload))
+    assert opened == payload
+
+
+def test_hanime_seal_roundtrip():
+    try:
+        sites._aes()
+    except ImportError:
+        return
+    payload = {'slug': 'example-1', 'directive': 'htv_player_handshake'}
+    assert sites.hanime_open(sites.hanime_seal(payload)) == payload
+
+
+def test_hentaini_plays_hls_and_keeps_known_hosters():
+    players = json.dumps([
+        {'name': 'HLS', 'url': 'https://cdn.example/series/1/1.m3u8'},
+        {'name': 'Yourupload', 'url': 'https://www.yourupload.com/embed/abc'},
+        {'name': 'Mega', 'url': 'https://mega.nz/embed/ZmVFkaJI#key'},
+        {'name': 'StreamHG', 'url': 'https://streamwish.to/e/pqgib6zsycon'},
+        {'name': 'HNI', 'url': 'https://player.example/#hash'},
+    ])
+    downloads = json.dumps([
+        {'url': 'https://1024terabox.com/s/1abc'},
+        {'url': 'https://www.mediafire.com/file/abc/video.mp4/file'},
+    ])
+    payload = json.dumps(['ignored', players, downloads])
+    fake = Fake([
+        ('/_payload.json', sites._Resp(200, payload, {}, 'https://hentaini.com/h/example/1/_payload.json')),
+    ])
+    found = sites.resolve('https://hentaini.com/h/example/1', fetch=fake)
+    assert found['provider'] == 'hentaini'
+    assert found['playback_url'].endswith('1.m3u8')
+    assert found['stable'] is True
+    mirrors = found['mirrors']
+    assert 'https://mega.nz/embed/ZmVFkaJI#key' in mirrors
+    assert 'https://streamwish.to/e/pqgib6zsycon' in mirrors
+    assert 'https://1024terabox.com/s/1abc' in mirrors
+    assert 'https://www.yourupload.com/embed/abc' in mirrors
+    assert not any('mediafire' in url for url in mirrors)
+    assert 'Episode 1' in found['title']
+
+
+def test_hentaini_series_page_uses_first_direct_episode():
+    episode_1 = json.dumps([
+        {'name': 'HLS', 'url': 'https://cdn.example/ep1.m3u8'},
+        {'name': 'Mega', 'url': 'https://mega.nz/embed/AAAAAAAA#one'},
+    ])
+    episode_2 = json.dumps([
+        {'name': 'HLS', 'url': 'https://cdn.example/ep2.m3u8'},
+    ])
+    payload = json.dumps([episode_1, episode_2])
+    fake = Fake([
+        ('/_payload.json', sites._Resp(200, payload)),
+    ])
+    found = sites.resolve('https://hentaini.com/h/example', fetch=fake)
+    assert found['playback_url'].endswith('ep1.m3u8')
+    assert len(found['mirrors']) == 1
+
+
+def test_hanime_one_stream():
+    def handshake(method, url, data):
+        body = json.loads(data)
+        opened = sites.hanime_open(body['token'])
+        assert opened['slug'] == 'example-1'
+        manifest = sites.hanime_seal({
+            'sources': [
+                {'kind': 'premium', 'src': '/premium.m3u8', 'label': '1080p'},
+                {'kind': 'normal', 'src': '/720.m3u8', 'label': '720p'},
+            ],
+        })
+        return sites._Resp(200, '', {'X-Token': manifest}, url)
+
+    try:
+        sites._aes()
+    except ImportError:
+        return
+    fake = Fake([
+        ('/videos/hentai/', sites._Resp(200, '<title>Example 1 - hanime.tv</title>')),
+        ('/api/v11/handshake', handshake),
+    ])
+    found = sites.resolve('https://hanime.tv/videos/hentai/example-1', fetch=fake)
+    assert found['provider'] == 'hanime'
+    assert found['playback_url'] == 'https://hanime.tv/720.m3u8'
+    assert found['mirrors'] == []
+    assert found['stable'] is False
+    assert found['title'] == 'Example 1'
+
+
+def test_hentaihaven_one_stream():
+    token = sites.haven_encode_token({
+        'en': 'aaa',
+        'iv': 'bbb',
+        'uri': 'https://player.example',
+    })
+    watch = (
+        '<title>Example Episode 1 - Hentai Haven</title>'
+        '<iframe src="https://player.example/player.php?data=blob"></iframe>'
+    )
+    player = f'<meta name="x-secure-token" content="{token}">'
+    api = json.dumps({
+        'status': True,
+        'data': {'sources': [{'src': 'https://cdn.example/playlist.m3u8'}]},
+    })
+    fake = Fake([
+        ('/watch/example/episode-1', sites._Resp(200, watch)),
+        ('player.php', sites._Resp(200, player)),
+        ('/api.php', sites._Resp(200, api)),
+    ])
+    found = sites.resolve(
+        'https://hentaihaven.xxx/watch/example/episode-1/', fetch=fake)
+    assert found['provider'] == 'hentaihaven'
+    assert found['playback_url'] == 'https://cdn.example/playlist.m3u8'
+    assert found['mirrors'] == []
+    assert found['title'] == 'Example Episode 1'
+
+
+def test_hentaihaven_show_page_follows_episode():
+    token = sites.haven_encode_token({
+        'en': 'aaa', 'iv': 'bbb', 'uri': 'https://player.example',
+    })
+    show = '<a href="https://hentaihaven.xxx/watch/example/episode-2/">Watch</a>'
+    episode = '<iframe src="/player.php?data=blob"></iframe><title>Example Episode 2</title>'
+    player = f'<meta content="{token}" name="x-secure-token">'
+    api = json.dumps({'status': True, 'data': {'sources': [{'src': 'https://cdn.example/ep2.m3u8'}]}})
+    fake = Fake([
+        ('/watch/example/episode-2', sites._Resp(200, episode)),
+        ('/watch/example/', sites._Resp(200, show, {}, 'https://hentaihaven.xxx/watch/example/')),
+        ('player.php', sites._Resp(200, player)),
+        ('/api.php', sites._Resp(200, api)),
+    ])
+    found = sites.resolve('https://hentaihaven.xxx/watch/example/', fetch=fake)
+    assert found['playback_url'] == 'https://cdn.example/ep2.m3u8'
+    assert any('/episode-2' in url for _method, url, _data in fake.calls)
+
+
+def test_hentaimama_mirrors():
+    page = '''
+    <title>Example Episode 1 – Hentaimama</title>
+    <div data-id="55"></div>
+    <li class="dooplay_player_option" data-type="movie" data-post="55" data-nume="1">mi-1</li>
+    <li class="dooplay_player_option" data-post="55" data-nume="2" data-type="movie">mi-2</li>
+    '''
+    ajax = json.dumps([
+        '<iframe src="https://hentaimama.io/new2.php?p=55"></iframe>',
+        '<iframe src="https://streamtape.com/e/abc"></iframe>',
+        '<iframe src="https://doodstream.com/e/xyz"></iframe>',
+    ])
+    player = 'jwplayer("v").setup({file:"https://cdn.example/video.mp4"});'
+    fake = Fake([
+        ('/episodes/', sites._Resp(200, page)),
+        ('admin-ajax.php', sites._Resp(200, ajax)),
+        ('new2.php', sites._Resp(200, player)),
+    ])
+    found = sites.resolve(
+        'https://hentaimama.io/episodes/example-episode-1/', fetch=fake)
+    assert found['provider'] == 'hentaimama'
+    assert found['playback_url'] == 'https://cdn.example/video.mp4'
+    assert 'https://streamtape.com/e/abc' in found['mirrors']
+    assert 'https://doodstream.com/e/xyz' in found['mirrors']
+    assert not any('new2.php' in url for url in found['mirrors'])
+    assert found['title'].startswith('Example Episode 1')
+    actions = []
+    for _method, url, data in fake.calls:
+        if 'admin-ajax' in url and isinstance(data, dict):
+            actions.append(data.get('action'))
+    assert 'get_player_contents' in actions
+    assert 'doo_player_ajax' in actions
+
+
+def test_hentaimama_show_page_follows_episode():
+    show = '<a href="https://hentaimama.io/episodes/example-episode-1/">Ep 1</a>'
+    episode = '<title>Example Episode 1</title><div data-id="9"></div>'
+    ajax = json.dumps(['<iframe src="https://voe.sx/e/abc"></iframe>'])
+    fake = Fake([
+        ('/tvshows/', sites._Resp(200, show)),
+        ('/episodes/', sites._Resp(200, episode)),
+        ('admin-ajax.php', sites._Resp(200, ajax)),
+    ])
+    found = sites.resolve(
+        'https://hentaimama.io/tvshows/example/', fetch=fake)
+    assert found['playback_url'] == ''
+    assert found['mirrors'] == ['https://voe.sx/e/abc']
+
+
+def main():
+    tests = [
+        test_hosts,
+        test_haven_token_roundtrip,
+        test_hanime_seal_roundtrip,
+        test_hentaini_plays_hls_and_keeps_known_hosters,
+        test_hentaini_series_page_uses_first_direct_episode,
+        test_hanime_one_stream,
+        test_hentaihaven_one_stream,
+        test_hentaihaven_show_page_follows_episode,
+        test_hentaimama_mirrors,
+        test_hentaimama_show_page_follows_episode,
+    ]
+    for test in tests:
+        test()
+        print('ok', test.__name__)
+    print(f'{len(tests)} passed')
+
+
+if __name__ == '__main__':
+    main()

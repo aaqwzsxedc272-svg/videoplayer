@@ -39015,6 +39015,12 @@ try {
             # TeraBox file URLs are signed and die within minutes. Re-mint
             # on the next play unless this one was just opened.
             or self._is_terabox_host(text)
+            # hanime / hentaihaven mint a short-lived stream. The page URL
+            # stays in the playlist, so the next play has to ask again.
+            or text in ('hanime.tv', 'hentaihaven.xxx', 'hentaihaven.com')
+            or text.endswith('.hanime.tv')
+            or text.endswith('.hentaihaven.xxx')
+            or text.endswith('.hentaihaven.com')
         )
 
     def _recent_signed_playback_cache_ttl_ms(self, host_or_url):
@@ -46378,6 +46384,92 @@ try {
         except Exception:
             pass
 
+    def _is_listed_hentai_site(self, host_or_url):
+        try:
+            import hentai_sites
+            return bool(hentai_sites.site_kind(host_or_url))
+        except Exception:
+            return False
+
+    def _hentai_mirror_can_resolve(self, url):
+        host = (urlparse(str(url or '')).netloc or '').lower()
+        return bool(
+            self._is_dood_host(host)
+            or self._is_voe_host(host)
+            or self._is_streamtape_host(host)
+            or self._is_mixdrop_host(host)
+            or self._is_embed_hls_host(host)
+            or self._is_mega_host(host)
+            or self._is_terabox_host(host)
+            or self._is_lulustream_host(host)
+        )
+
+    def _resolve_listed_hentai_site(self, source_url):
+        """One stream for hanime and hentaihaven. Hosters as mirrors for the other two."""
+        try:
+            import hentai_sites
+        except Exception as exc:
+            print(f'[HENTAI] resolver missing ({type(exc).__name__})', flush=True)
+            return None
+        try:
+            found = hentai_sites.resolve(source_url)
+        except Exception as exc:
+            print(f'[HENTAI] {type(exc).__name__}', flush=True)
+            return None
+        if not isinstance(found, dict):
+            return None
+        mirrors = []
+        for raw in found.get('mirrors') or []:
+            try:
+                url = self._canonicalize_remote_source_url(self._sanitize_url(raw)) or str(raw or '').strip()
+            except Exception:
+                url = str(raw or '').strip()
+            if url:
+                mirrors.append(url)
+        playback = str(found.get('playback_url') or '').strip()
+        headers = dict(found.get('headers') or {})
+        if not playback:
+            for mirror in mirrors:
+                if not self._hentai_mirror_can_resolve(mirror):
+                    continue
+                try:
+                    nested = self._resolve_stream_source(mirror)
+                except Exception:
+                    nested = None
+                if isinstance(nested, dict) and nested.get('playback_url'):
+                    playback = str(nested.get('playback_url') or '').strip()
+                    headers = dict(nested.get('headers') or headers)
+                    break
+        if not playback:
+            print(f'[HENTAI] no stream on {str(source_url)[:120]}', flush=True)
+            return None
+        try:
+            page_key = self._mirror_path_key(source_url)
+        except Exception:
+            page_key = ''
+        out = {
+            'playback_url': playback,
+            'headers': headers,
+            'title': found.get('title') or '',
+            'mirrors': [
+                url for url in mirrors
+                if not page_key or self._mirror_path_key(url) != page_key
+            ],
+            'origin_page': source_url,
+            'resolver_provider': found.get('provider') or 'hentai_site',
+            'resolved_at_ms': int(time.time() * 1000),
+        }
+        if found.get('stable'):
+            out['pre_resolved_playback_url'] = True
+        if found.get('content_type'):
+            out['content_type'] = found['content_type']
+        print(
+            f"[HENTAI] {out['resolver_provider']}: {out.get('title') or 'video'} "
+            f"({len(out['mirrors'])} mirror(s))",
+            flush=True,
+        )
+        return out
+
     def _resolve_sxyprn_source(self, source_url):
         try:
             import requests
@@ -47425,6 +47517,9 @@ try {
         # store-na-phx-4.gofile.io, which *contains* "gofile.io" but is a
         # normal direct-download host, not a share page needing resolution.
         _gofile_share_hosts = {'gofile.io', 'gofile.to', 'www.gofile.io', 'www.gofile.to'}
+        if resolved is None and self._is_listed_hentai_site(host):
+            resolved = self._resolve_listed_hentai_site(source_url)
+
         if resolved is None:
             # R64: turbo.cr is static-first (same reasoning as R49
             # turtleviplay) — a field capture spent its whole browser window
