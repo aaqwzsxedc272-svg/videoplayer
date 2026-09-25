@@ -1,7 +1,43 @@
- have only one video "https://hanime.tv" and "https://hentaihaven.xxx"
+C:\Users\Mouad\Desktop>cd /d "C:\Users\Mouad\Desktop\video_player"
 
+C:\Users\Mouad\Desktop\video_player>python main.py
 
+[MetadataScraper] build link7-scene
 
-these have mirrors multiple hosters 
+[JAVGURU] VideoPlayer patched — jav.guru URL detection active.
 
- "https://hentaini.com" and  "https://hentaimama.io"
+[GENERIC_JAV] VideoPlayer patched — URL detection active. (build R63-page-row)
+
+[JAVHD] VideoPlayer patched — javhd.today URL detection active.
+
+[FAMILYPORNHD] VideoPlayer patched — HTML URL detection active.
+
+[HENTAI] resolver loaded
+
+DEBUG: Data files will be saved in: C:\Users\Mouad\Desktop\video_player
+
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.3 LGPL version 2.1 or later
+
+[video_backend] Using libmpv renderer
+
+[COOKIES] mpv will use cookies from: C:\Users\Mouad\Desktop\video_player\cookies.txt
+
+[video_backend] mpv renderer: native D3D11 window
+
+[SUBS] caption detection build 7 (page scan, subtitle endpoint, session warm-up, no-Referer retry logged)
+
+[PASSWORDS] Loaded 54 cached passwords from disk
+
+No headphones detected at startup, using default audio output
+
+[HENTAI] hentaihaven answered with the Cloudflare check, not the player
+
+[HENTAI] no stream; not opening a browser for https://hentaihaven.xxx/watch/ookii-onnanoko-wa-suki-desu-ka/episode-1/
+
+[FAVICON] hentaihaven.xxx: 2 declared icon(s) — https://hentaihaven.xxx/favicon.png
+
+[FAVICON] hentaihaven.xxx: got site icon from https://hentaihaven.xxx/favicon.png
+
+[BATTERY] Windows reported 3 device(s) with a charge: [('itel t1neo hands-free ag', 10), ('musicman bt-x78 hands-free ag', 70), ('roseland tws re-500 hands-free ag', 100)]
+
+[BATTERY]   pnp-direct=3
