@@ -176,6 +176,36 @@ def _looks_like_challenge(text):
     )
 
 
+def signed_path_expiry(url):
+    """Unix expiry baked into a hentaidoge playlist path, or 0.
+
+    The player requests
+    ``https://hentaidoge.org/s/<expiry>/<token>/output/.../master.m3u8``.
+    That number is the expiry. It is not a query parameter, so a check
+    that only reads ``exp=`` treats a still-valid capture as unsigned
+    and opens a browser to mint the same playlist again.
+    """
+    try:
+        parsed = urlparse(str(url or ''))
+    except Exception:
+        return 0.0
+    host = (parsed.netloc or '').lower()
+    if host.startswith('www.'):
+        host = host[4:]
+    if host != 'hentaidoge.org' and not host.endswith('.hentaidoge.org'):
+        return 0.0
+    match = re.search(r'/s/(\d{10})(?:/|$)', parsed.path or '')
+    if not match:
+        return 0.0
+    try:
+        ts = float(match.group(1))
+    except Exception:
+        return 0.0
+    if 1000000000 <= ts <= 4102444800:
+        return ts
+    return 0.0
+
+
 def _mark_challenge(body, status, client):
     global last_block
     if _looks_like_challenge(body):

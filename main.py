@@ -30489,6 +30489,15 @@ try {
                     ts /= 1000.0
                 if 1000000000 <= ts <= 4102444800:
                     return ts
+        # hentaidoge puts the expiry in the path, /s/<epoch>/<token>/...,
+        # not in the query. A paste capture is still valid for that hour.
+        try:
+            import hentai_sites
+            path_expiry = hentai_sites.signed_path_expiry(target_url)
+        except Exception:
+            path_expiry = 0.0
+        if path_expiry > 0:
+            return path_expiry
         return 0.0
 
     def _signed_playback_url_is_expired(self, target_url, grace_seconds=90):
@@ -30521,8 +30530,11 @@ try {
         first. ok.ru is the second: every double-click stripped the
         vd*.okcdn.ru / vkuser.net url resolved on paste — expires= days
         out — and minted a new one, which is the wait, and which stopped
-        the load that had just started (mpv reason=stop). Hosts whose
-        URLs expire without saying so stay on the old blanket rule.
+        the load that had just started (mpv reason=stop). hentaidoge is
+        the third: the expiry is the /s/<epoch>/ segment, and double-click
+        opened a second browser to mint a replacement that was not needed.
+        Hosts whose URLs expire without saying so stay on the old blanket
+        rule.
         """
         try:
             url = str(playback_url or '')
@@ -30535,6 +30547,8 @@ try {
                 or host.endswith('.okcdn.ru')
                 or 'mycdn.me' in host
                 or 'vkuser.net' in host
+                or host == 'hentaidoge.org'
+                or host.endswith('.hentaidoge.org')
             )
             if not trusted:
                 return False
@@ -46659,8 +46673,16 @@ try {
                 list(captured) + [str(getattr(self, '_last_browser_click_html', '') or '')])
             if captions:
                 print(f'[HENTAI] {len(captions)} caption file(s)', flush=True)
+            kind = hentai_sites.site_kind(source_url) or 'hentai'
+            # The mama player mints a signed hentaidoge playlist. That URL
+            # is the stream. Keeping it stable lets the next double-click
+            # play it instead of opening the browser to mint another one.
+            stable = (
+                kind == 'hentaimama'
+                and hentai_sites._is_direct(playback)
+            )
             return {
-                'provider': hentai_sites.site_kind(source_url) or 'hentai',
+                'provider': kind,
                 'title': (bg or {}).get('title') or '',
                 'playback_url': playback,
                 'audio_url': audio,
@@ -46669,7 +46691,7 @@ try {
                 'mirrors': list((bg or {}).get('alternate_urls') or []),
                 'headers': dict((bg or {}).get('headers') or {}) if isinstance(bg, dict) else {},
                 'content_type': 'application/vnd.apple.mpegurl',
-                'stable': False,
+                'stable': stable,
                 'origin_page': source_url,
             }
         html = str(getattr(self, '_last_browser_click_html', '') or '')

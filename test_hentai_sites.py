@@ -227,6 +227,18 @@ def test_hentaimama_mirrors():
     assert 'doo_player_ajax' in actions
 
 
+def test_hentaidoge_expiry_is_the_path_segment():
+    fresh = (
+        'https://hentaidoge.org/s/1790320241/k7o7dNnksMaVA_BUxqbbGg/'
+        'output/S/shoujo-ramune/1/hls/master.m3u8'
+    )
+    assert sites.signed_path_expiry(fresh) == 1790320241.0
+    assert sites.signed_path_expiry(
+        'https://cdn.example/s/1790320241/token/master.m3u8') == 0.0
+    assert sites.signed_path_expiry(
+        'https://hentaidoge.org/output/S/shoujo-ramune/1/hls/master.m3u8') == 0.0
+
+
 def test_hentaimama_show_page_follows_episode():
     show = '<a href="https://hentaimama.io/episodes/example-episode-1/">Ep 1</a>'
     episode = '<title>Example Episode 1</title><div data-id="9"></div>'
@@ -347,6 +359,7 @@ def main():
         test_hentaihaven_one_stream,
         test_hentaihaven_show_page_follows_episode,
         test_hentaimama_mirrors,
+        test_hentaidoge_expiry_is_the_path_segment,
         test_hentaimama_show_page_follows_episode,
     ]
     for test in tests:
