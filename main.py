@@ -31998,6 +31998,10 @@ try {
             path = unquote(parsed.path or '').lower()
             if path.endswith(('.m3u8', '.m3u')):
                 return True
+            # hanime's handshake returns an extensionless /hls/ path.
+            # The page player requests that path as the playlist.
+            if 'hanime.tv' in (parsed.netloc or '').lower() and '/hls/' in path:
+                return True
             # The TeraBox page player. No .m3u8 suffix; the body is the
             # playlist. Without this, mpv is handed the URL as a file and
             # the proxy will not rewrite its segments.
@@ -43205,6 +43209,11 @@ try {
     def _resolved_stream_is_page_preview(self, resolved, source_url):
         if not isinstance(resolved, dict) or resolved.get('use_mpv_ytdl'):
             return False
+        # hanime's free stream is on hanime.tv itself (/hls/<id>/<token>,
+        # no duration yet). The same-host test below threw that away and
+        # the click that followed captured a 20s ad.
+        if self._is_listed_hentai_host(source_url):
+            return False
         playback = str(resolved.get('playback_url') or '')
         if not playback or playback == source_url:
             return False
@@ -46781,7 +46790,7 @@ try {
             out['subtitle_tracks'] = list(found['subtitle_tracks'])
         print(
             f"[HENTAI] {out['resolver_provider']}: {out.get('title') or 'video'} "
-            f"({len(out['mirrors'])} mirror(s))",
+            f"({len(out['mirrors'])} mirror(s)) {playback[:140]}",
             flush=True,
         )
         return out

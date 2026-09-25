@@ -94,6 +94,20 @@ def test_hentaini_series_page_uses_first_direct_episode():
     assert len(found['mirrors']) == 1
 
 
+def test_hanime_prefers_the_free_stream():
+    assert sites._hanime_playback([
+        {'kind': 'premium', 'src': '/premium.m3u8', 'label': '1080p'},
+        {'kind': 'normal', 'src': '/1080.m3u8', 'label': '1080p'},
+        {'kind': 'normal', 'src': '/hls/3530/token', 'label': ''},
+        {'kind': 'normal', 'src': '/720.m3u8', 'label': '720p'},
+    ]) == 'https://hanime.tv/720.m3u8'
+    assert sites._hanime_playback([
+        {'kind': 'normal', 'src': '/1080.m3u8', 'label': '1080p'},
+        {'kind': 'normal', 'src': '/hls/3530/token'},
+    ]) == 'https://hanime.tv/hls/3530/token'
+    assert sites._hanime_is_hls('https://hanime.tv/hls/3530/token')
+
+
 def test_hanime_one_stream():
     def handshake(method, url, data):
         body = json.loads(data)
@@ -323,6 +337,7 @@ def main():
         test_hanime_seal_roundtrip,
         test_hentaini_plays_hls_and_keeps_known_hosters,
         test_hentaini_series_page_uses_first_direct_episode,
+        test_hanime_prefers_the_free_stream,
         test_hanime_one_stream,
         test_caption_files_are_kept,
         test_split_playlist_uses_the_video_not_the_master,

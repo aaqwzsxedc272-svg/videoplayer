@@ -726,6 +726,39 @@ def resolve_hentaihaven(url, fetch):
     return haven_from_token(episode_url, token, fetch, title=title)
 
 
+def _hanime_is_hls(url):
+    path = (urlparse(str(url or '')).path or '').lower()
+    return '/hls/' in path or path.endswith(('.m3u8', '.m3u'))
+
+
+def _hanime_playback(sources):
+    """The free stream. 1080p and 4K are paid and are not played."""
+    ranked = []
+    for source in sources or []:
+        if not isinstance(source, dict) or source.get('kind') != 'normal':
+            continue
+        src = _abs('https://hanime.tv/', source.get('src') or source.get('url') or '')
+        if not src or _is_ad(src):
+            continue
+        height = max(
+            _height_hint(source.get('label') or ''),
+            _height_hint(src),
+            _height_hint(str(source.get('height') or '')),
+        )
+        ranked.append((height, src))
+    if not ranked:
+        return ''
+    free = [item for item in ranked if 0 < item[0] <= 720]
+    if free:
+        free.sort(reverse=True)
+        return free[0][1]
+    unlabeled = [src for height, src in ranked if height == 0]
+    if unlabeled:
+        return unlabeled[0]
+    ranked.sort()
+    return ranked[0][1]
+
+
 def _hanime_slug(url):
     match = re.search(
         r'hanime\.tv/(?:videos/hentai|hentai/video|playlists/[0-9a-z]+/video)/([0-9a-z-]+)',
@@ -773,20 +806,17 @@ def resolve_hanime(url, fetch):
     if not token:
         return None
     manifest = hanime_open(token)
-    urls = []
-    for source in manifest.get('sources') or []:
-        if not isinstance(source, dict) or source.get('kind') != 'normal':
-            continue
-        src = _abs('https://hanime.tv/', source.get('src') or '')
-        if src:
-            label = str(source.get('label') or '')
-            urls.append((max(_height_hint(label), _height_hint(src)), src))
-    if not urls:
+    playback = _hanime_playback(manifest.get('sources') or [])
+    if not playback:
         return None
-    urls.sort(reverse=True)
-    return _result(
+    found = _result(
         'hanime', url, title or slug.replace('-', ' '),
-        urls[0][1], [], stable=False)
+        playback, [], stable=False)
+    # The free stream is an extensionless /hls/ path on hanime.tv. Without
+    # the playlist type, the player treats that path as a file.
+    if _hanime_is_hls(playback):
+        found['content_type'] = 'application/vnd.apple.mpegurl'
+    return found
 
 
 def _chunks(body):
