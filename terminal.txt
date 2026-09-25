@@ -16,12 +16,379 @@ qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.3 LGPL version
 [SUBS] caption detection build 7 (page scan, subtitle endpoint, session warm-up, no-Referer retry logged)
 [PASSWORDS] Loaded 54 cached passwords from disk
 No headphones detected at startup, using default audio output
-[BATTERY] probe could not run: TimeoutExpired: Command '['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\\Users\\Mouad\\Desktop\\video_player\\battery_probe.ps1']' timed out after 60 seconds
+[BATTERY] Windows reported 3 device(s) with a charge: [('itel t1neo hands-free ag', 10), ('musicman bt-x78 hands-free ag', 70), ('roseland tws re-500 hands-free ag', 100)]
+[BATTERY]   pnp-direct=3
 [COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
 [FAVICON] hentaihaven.xxx: 2 declared icon(s) — https://hentaihaven.xxx/favicon.png
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
 [FAVICON] hentaihaven.xxx: got site icon from https://hentaihaven.xxx/favicon.png
+[EPORNER][PREP] launching extractor for https://www.eporner.com/video-agFVlJMHLs5/boku-ni-sefure-ga-dekita-riyuu-episode-1-6/ ...
+[EPORNER][EXTRACT] http: fetching video page (no browser)
+[EPORNER][EXTRACT] http: 10 download/json-ld media URL(s) in page HTML
+[EPORNER][EXTRACT] http: GET /xhr/video/agFVlJMHLs5
+[EPORNER][EXTRACT] http: xhr returned 5 source(s)
+[EPORNER][EXTRACT] http: 5 mp4 + 0 m3u8 playable URL(s) without browser
+[EPORNER][EXTRACT] http: got playable sources without opening a browser
+[EPORNER][PREP] title='Boku Ni Sefure Ga Dekita Riyuu Episode 1-6'  primary=https://vid-s22-n50-nl-cdn.eporner.com/v6/Q1Vzs8F9E7Rl12HQwacpGg/1790323520_105.68.187.48_876/11678998-1080p.mp4  mirrors=4
+[MIRRORS] 4 of 4 link(s) were other bitrates of the same video rather than mirrors, so they are not offered as alternates
+[REFRESH] key='https://vid-s22-n50-nl-cdn.eporner.com/v6/q1vzs8f9e7rl12hqwacpgg/1790323520_105.68.187.48_876/11678998-1080p.mp4', playlist size=2, pw=True
+[REFRESH] key='https://vid-s22-n50-nl-cdn.eporner.com/v6/q1vzs8f9e7rl12hqwacpgg/1790323520_105.68.187.48_876/11678998-720p.mp4', playlist size=2, pw=True
+[REFRESH] key='https://vid-s22-n50-nl-cdn.eporner.com/v6/q1vzs8f9e7rl12hqwacpgg/1790323520_105.68.187.48_876/11678998-480p.mp4', playlist size=2, pw=True
+[REFRESH] key='https://vid-s22-n50-nl-cdn.eporner.com/v6/q1vzs8f9e7rl12hqwacpgg/1790323520_105.68.187.48_876/11678998-360p.mp4', playlist size=2, pw=True
+[REFRESH] key='https://vid-s22-n50-nl-cdn.eporner.com/v6/q1vzs8f9e7rl12hqwacpgg/1790323520_105.68.187.48_876/11678998-240p.mp4', playlist size=2, pw=True
+[FAVICON] eporner.com: 1 declared icon(s) — https://static-eu-cdn.eporner.com/favicon.png
+[FAVICON] eporner.com: got site icon from https://static-eu-cdn.eporner.com/favicon.png
+QGraphicsView::dragLeaveEvent: drag leave received before drag enter
 [COOKIES] nothing for ['hentaihaven.xxx'] in any browser profile either -- the yt-dlp module
 [COOKIES] No matching cookies found for domains=['hentaihaven.xxx'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[COOKIES] nothing for ['hentaihaven.xxx'] in any browser profile either -- the yt-dlp module
+[COOKIES] No matching cookies found for domains=['hentaihaven.xxx'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] hentaihaven answered with the Cloudflare check, not the player
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] hentaihaven answered with the Cloudflare check, not the player
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[EPORNER][PREP] launching extractor for https://www.eporner.com/video-Cbm4yiJZvGg/ookii-onnanoko-wa-suki-desuka-full-uncensored-sub-eng/ ...
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[EPORNER][EXTRACT] http: fetching video page (no browser)
+[EPORNER][EXTRACT] http: 11 download/json-ld media URL(s) in page HTML
+[EPORNER][EXTRACT] http: GET /xhr/video/Cbm4yiJZvGg
+[EPORNER][EXTRACT] http: xhr returned 5 source(s)
+[EPORNER][EXTRACT] http: 6 mp4 + 0 m3u8 playable URL(s) without browser
+[EPORNER][EXTRACT] http: got playable sources without opening a browser
+[EPORNER][PREP] title='Ookii Onnanoko Wa Suki Desuka Full Uncensored Sub. Eng.'  primary=https://vid-s23-n50-nl-cdn.eporner.com/v6/McLhiNq2gfyDs_mz3DNTEQ/1790323537_105.68.187.48_1262/17764248-1080p.mp4  mirrors=5
+[MIRRORS] 4 of 5 link(s) were other bitrates of the same video rather than mirrors, so they are not offered as alternates
+[REFRESH] key='https://vid-s23-n50-nl-cdn.eporner.com/v6/mclhinq2gfyds_mz3dnteq/1790323537_105.68.187.48_1262/17764248-1080p.mp4', playlist size=3, pw=True
+[REFRESH] key='https://gvideo.eporner.com/cbm4yijzvgg/cbm4yijzvgg.mp4', playlist size=3, pw=True
+[REFRESH] key='https://vid-s23-n50-nl-cdn.eporner.com/v6/mclhinq2gfyds_mz3dnteq/1790323537_105.68.187.48_1262/17764248-720p.mp4', playlist size=3, pw=True
+[REFRESH] key='https://vid-s3-c50-fr-cdn.eporner.com/v5/mclhinq2gfyds_mz3dnteq/1790323537_105.68.187.48_1262/17764248-480p.mp4', playlist size=3, pw=True
+[REFRESH] key='https://vid-s3-c50-fr-cdn.eporner.com/v5/mclhinq2gfyds_mz3dnteq/1790323537_105.68.187.48_1262/17764248-360p.mp4', playlist size=3, pw=True
+[REFRESH] key='https://vid-s23-n50-nl-cdn.eporner.com/v6/mclhinq2gfyds_mz3dnteq/1790323537_105.68.187.48_1262/17764248-240p.mp4', playlist size=3, pw=True
+[REFRESH] key='https://gvideo.eporner.com/cbm4yijzvgg/cbm4yijzvgg.mp4', playlist size=3, pw=True
+[REFRESH] key='https://vid-s23-n50-nl-cdn.eporner.com/v6/mclhinq2gfyds_mz3dnteq/1790323537_105.68.187.48_1262/17764248-1080p.mp4', playlist size=3, pw=True
+PAGE_TITLE::Kyonyuu ga Futari Inai to Bokki Shinai Otto no Tame ni Tomodachi wo Tsuretekita Tsuma Episode 1 - Hentai Haven | Watch free Hentai HD
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+[BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
+[BROWSER_CLICK][JWPROBE] jwplayer_api=False containers=0 playlist_items=0 source_files=0 files=[]
+MEDIA_URL::https://octopusmanifest.org/b5f41a26-15b6-4219-91d4-b09d996af005/playlist.m3u8
+MEDIA_URL::https://www.googletagmanager.com/gtag/js?id=G-V4YB0RHNZZ&cx=c&gtm=4e69n1
+MEDIA_URL::https://www.googletagmanager.com/gtm.js?id=GTM-KZFXMN5S
+MEDIA_URL::/_next/static/chunks/0k0fjjfqmgqvj.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3pyjh7g42a0cr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/turbopack-04ol-j1xr9f6g.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hap93h_2rlz1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/245jxcyhgs6bt.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1dfymrizihap5.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/19v-9-u232y1q.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1rokfh921mlk1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2h-8_q2_hzr59.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3-8j0n028-7_d.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2_9so-sp8llx3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2s7tiedvdwkkr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0hkfz14yzdxv_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3m8y9-fbeueiw.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/13jjxi_nocd1_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2l275el85o_t3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2yyn15_kenoi9.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0z_1_bbe5lm8z.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hlkqm-ptu4an.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/04hgmj47g3md3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0cz1d0mv5g_q7.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2jzxw7zu4ruh8.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::https://analytics.ahrefs.com/analytics.js
+MEDIA_URL::/cdn-cgi/challenge-platform/scripts/jsd/main.js
+[BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
+MEDIA_URL::/ads/ads_controller.js?check=1790316352541
+MEDIA_URL::/playback-check.js?check=1790316352542
+MEDIA_URL::https://js.havenclick.com/loader.js?v=1776828719
+MEDIA_URL::https://js.havenclick.com/js/zone/29.js?v=15074
+MEDIA_URL::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4
+MEDIA_URL::https://cdn.havenclick.com/ads/2026/09/890e09fa-f1df-476f-87ff-661f9ad4b046.webm
+BROWSER_COOKIES::_ga_V4YB0RHNZZ=GS2.1.s1790316352$o1$g0$t1790316352$j60$l0$h0; _ga=GA1.1.694287069.1790316352
+[BROWSER_CLICK] clicked load-video control: shrink-0 items-center justify-center gap-2 text-sm font-medium whitespace-nowrap
+MEDIA_URL::https://js.havenclick.com/serve/zone/29/floating.js
+MEDIA_URL::/ads/ads_controller.js?check=1790316357371
+MEDIA_URL::/playback-check.js?check=1790316357372
+MEDIA_URL::/_next/static/chunks/0djz3pl2n1ziy.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/api/ads/creative/?zone=48
+MEDIA_URL::https://js.havenclick.com/serve/zone/9
+MEDIA_URL::/api/ads/creative/?zone=23&mode=mobile
+[BROWSER_CLICK] file-host capture complete - closing the browser early
+[BROWSER_CLICK] killed capture subprocess (final HTML dumped, child stuck closing browser) for https://hentaihaven.xxx/watch/kyonyuu-ga-futari-inai-to-bokki-shinai-otto-no-tame-ni-tomodachi-wo-tsuretekita-tsuma/episode-1/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaihaven.xxx/watch/kyonyuu-ga-futari-inai-to-bokki-shinai-otto-no-tame-ni-tomodachi-wo-tsuretekita-tsuma/episode-1/: https://octopusmanifest.org/b5f41a26-15b6-4219-91d4-b09d996af005/playlist.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaihaven.xxx
+[HENTAI] stream after the Cloudflare click: https://octopusmanifest.org/b5f41a26-15b6-4219-91d4-b09d996af005/playlist.m3u8
+[HENTAI] hentaihaven: Kyonyuu ga Futari Inai to Bokki Shinai Otto no Tame ni Tomodachi wo Tsuretekita Tsuma Episode 1 - Hentai Haven | Watch free Hentai HD (0 mirror(s))
+[HENTAI] reusing the Cloudflare clearance from the last click
+[PLAYLIST][NAME] https://hentaihaven.xxx/watch/kyonyuu-ga-futari-inai-to-bokki-shinai-otto-no-tame-ni-tomodachi-wo-tsuretekita-tsuma/episode-1/ : 'episode-1 [hentaihaven.xxx]' -> 'Kyonyuu ga Futari Inai to Bokki Shinai Otto no Tame ni Tomodachi wo Tsuretekita Tsuma Episode 1 - Hentai Haven | Watch free Hentai HD'
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] hentaihaven answered with the Cloudflare check, not the player
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[PLAYLIST][INFO] path='https://vid-s22-n50-nl-cdn.eporner.com/v6/Q1Vzs8F9E7Rl12HQwacpGg/1790323520_105.68.187.48_876/11678998-1080p.mp4' rows=[2] duration='01:27:26' size='Stream' quality='Stream'
+[PLAYLIST][INFO] path='https://vid-s23-n50-nl-cdn.eporner.com/v6/McLhiNq2gfyDs_mz3DNTEQ/1790323537_105.68.187.48_1262/17764248-1080p.mp4' rows=[3] duration='01:03:09' size='Stream' quality='Stream'
+[PLAYLIST][INFO] path='https://hentaihaven.xxx/watch/kyonyuu-ga-futari-inai-to-bokki-shinai-otto-no-tame-ni-tomodachi-wo-tsuretekita-tsuma/episode-1/' rows=[0] duration='Stream' size='Stream' quality='Stream'
+[EPORNER][PREP] launching extractor for https://www.eporner.com/video-6KpKTk9vUlb/boku-ni-harem-sefure-ga-dekita-riyuu-01-04/ ...
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[EPORNER][EXTRACT] http: fetching video page (no browser)
+[EPORNER][EXTRACT] http: 8 download/json-ld media URL(s) in page HTML
+[EPORNER][EXTRACT] http: GET /xhr/video/6KpKTk9vUlb
+[EPORNER][EXTRACT] http: xhr returned 7 source(s)
+[EPORNER][EXTRACT] http: 8 mp4 + 0 m3u8 playable URL(s) without browser
+[EPORNER][EXTRACT] http: got playable sources without opening a browser
+[EPORNER][PREP] title='Boku Ni Harem Sefure Ga Dekita Riyuu 01-04'  primary=https://vid-s2-n50-fr-cdn.eporner.com/v6/SCpNSfQqt9fAPFCKBsGoOA/1790323584_105.68.187.48_2592/17828528-2160p.mp4  mirrors=7
+[MIRRORS] 6 of 7 link(s) were other bitrates of the same video rather than mirrors, so they are not offered as alternates
+[REFRESH] key='https://vid-s2-n50-fr-cdn.eporner.com/v6/scpnsfqqt9fapfckbsgooa/1790323584_105.68.187.48_2592/17828528-2160p.mp4', playlist size=5, pw=True
+[REFRESH] key='https://gvideo.eporner.com/6kpktk9vulb/6kpktk9vulb.mp4', playlist size=5, pw=True
+[REFRESH] key='https://vid-s2-n50-fr-cdn.eporner.com/v6/scpnsfqqt9fapfckbsgooa/1790323584_105.68.187.48_2592/17828528-1440p.mp4', playlist size=5, pw=True
+[REFRESH] key='https://vid-s2-n50-fr-cdn.eporner.com/v6/scpnsfqqt9fapfckbsgooa/1790323584_105.68.187.48_2592/17828528-1080p.mp4', playlist size=5, pw=True
+[REFRESH] key='https://vid-s2-n50-fr-cdn.eporner.com/v6/scpnsfqqt9fapfckbsgooa/1790323584_105.68.187.48_2592/17828528-720p.mp4', playlist size=5, pw=True
+[REFRESH] key='https://vid-s2-n50-fr-cdn.eporner.com/v6/scpnsfqqt9fapfckbsgooa/1790323584_105.68.187.48_2592/17828528-480p.mp4', playlist size=5, pw=True
+[REFRESH] key='https://vid-s2-n50-fr-cdn.eporner.com/v6/scpnsfqqt9fapfckbsgooa/1790323584_105.68.187.48_2592/17828528-360p.mp4', playlist size=5, pw=True
+[REFRESH] key='https://vid-s2-n50-fr-cdn.eporner.com/v6/scpnsfqqt9fapfckbsgooa/1790323584_105.68.187.48_2592/17828528-240p.mp4', playlist size=5, pw=True
+[REFRESH] key='https://gvideo.eporner.com/6kpktk9vulb/6kpktk9vulb.mp4', playlist size=5, pw=True
+[REFRESH] key='https://vid-s2-n50-fr-cdn.eporner.com/v6/scpnsfqqt9fapfckbsgooa/1790323584_105.68.187.48_2592/17828528-2160p.mp4', playlist size=5, pw=True
+PAGE_TITLE::Ookii Onnanoko wa Suki desu ka Episode 11 - Hentai Haven | Watch free Hentai HD
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+[BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
+[BROWSER_CLICK][JWPROBE] jwplayer_api=False containers=0 playlist_items=0 source_files=0 files=[]
+MEDIA_URL::https://octopusmanifest.org/6a10657e-86ce-4ae7-8684-9a5f436c4a64/playlist.m3u8
+MEDIA_URL::https://www.googletagmanager.com/gtag/js?id=G-V4YB0RHNZZ&cx=c&gtm=4e69n1
+MEDIA_URL::https://www.googletagmanager.com/gtm.js?id=GTM-KZFXMN5S
+MEDIA_URL::/_next/static/chunks/0k0fjjfqmgqvj.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3pyjh7g42a0cr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/turbopack-04ol-j1xr9f6g.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hap93h_2rlz1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/245jxcyhgs6bt.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1dfymrizihap5.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/19v-9-u232y1q.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1rokfh921mlk1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2h-8_q2_hzr59.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3-8j0n028-7_d.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2_9so-sp8llx3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2s7tiedvdwkkr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0hkfz14yzdxv_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3m8y9-fbeueiw.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/13jjxi_nocd1_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2l275el85o_t3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2yyn15_kenoi9.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0z_1_bbe5lm8z.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hlkqm-ptu4an.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/04hgmj47g3md3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0cz1d0mv5g_q7.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2jzxw7zu4ruh8.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::https://analytics.ahrefs.com/analytics.js
+MEDIA_URL::/cdn-cgi/challenge-platform/scripts/jsd/main.js
+[BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
+MEDIA_URL::/ads/ads_controller.js?check=1790316388661
+MEDIA_URL::/playback-check.js?check=1790316388662
+MEDIA_URL::https://js.havenclick.com/loader.js?v=1776828719
+MEDIA_URL::https://js.havenclick.com/js/zone/29.js?v=15074
+BROWSER_COOKIES::_ga_V4YB0RHNZZ=GS2.1.s1790316388$o1$g0$t1790316388$j60$l0$h0; _ga=GA1.1.1767653569.1790316388
+[BROWSER_CLICK] clicked load-video control: shrink-0 items-center justify-center gap-2 text-sm font-medium whitespace-nowrap
+MEDIA_URL::/ads/ads_controller.js?check=1790316390351
+MEDIA_URL::/playback-check.js?check=1790316390352
+MEDIA_URL::https://js.havenclick.com/serve/zone/29/floating.js
+MEDIA_URL::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4
+MEDIA_URL::/_next/static/chunks/0djz3pl2n1ziy.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::https://js.havenclick.com/serve/zone/9
+MEDIA_URL::/api/ads/creative/?zone=23&mode=mobile
+[BROWSER_CLICK] clicked load-video control: inline-flex shrink-0 items-center justify-center gap-2 text-sm font-medium white
+VOE_M3U8::https://octopusmanifest.org/6a10657e-86ce-4ae7-8684-9a5f436c4a64/playlist_vp9.m3u8
+MEDIA_URL::https://cdn.havenclick.com/ads/2026/09/890e09fa-f1df-476f-87ff-661f9ad4b046.webm
+VOE_M3U8::https://octopusmanifest.org/6a10657e-86ce-4ae7-8684-9a5f436c4a64/vp_7sop/v.m3u8
+VOE_M3U8::https://octopusmanifest.org/6a10657e-86ce-4ae7-8684-9a5f436c4a64/snd/a.m3u8
+MEDIA_URL::https://octopusmanifest.org/6a10657e-86ce-4ae7-8684-9a5f436c4a64/s/en.vtt
+MEDIA_URL::https://octopusmanifest.org/6a10657e-86ce-4ae7-8684-9a5f436c4a64/s/fr.vtt
+MEDIA_URL::https://terrabun.top/6a10657e-86ce-4ae7-8684-9a5f436c4a64/vp_7sop/i.mp4
+MEDIA_URL::https://terrabun.top/6a10657e-86ce-4ae7-8684-9a5f436c4a64/snd/i.mp4
+MEDIA_URL::https://htl-cdn.adtng.com/a7/creatives/39/1597/818640/1195398/1195398_video_with_sound.mp4
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaihaven.xxx/watch/ookii-onnanoko-wa-suki-desu-ka/episode-11/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaihaven.xxx/watch/ookii-onnanoko-wa-suki-desu-ka/episode-11/: https://octopusmanifest.org/6a10657e-86ce-4ae7-8684-9a5f436c4a64/playlist.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaihaven.xxx
+[HENTAI] stream after the Cloudflare click: https://octopusmanifest.org/6a10657e-86ce-4ae7-8684-9a5f436c4a64/vp_7sop/v.m3u8
+[HENTAI] audio playlist: https://octopusmanifest.org/6a10657e-86ce-4ae7-8684-9a5f436c4a64/snd/a.m3u8
+[HENTAI] 2 caption file(s)
+[HENTAI] hentaihaven: Ookii Onnanoko wa Suki desu ka Episode 11 - Hentai Haven | Watch free Hentai HD (0 mirror(s))
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] hentaihaven answered with the Cloudflare check, not the player
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[PLAYLIST][NAME] https://hentaihaven.xxx/watch/ookii-onnanoko-wa-suki-desu-ka/episode-11/ : 'episode-11 [hentaihaven.xxx]' -> 'Ookii Onnanoko wa Suki desu ka Episode 11 - Hentai Haven | Watch free Hentai HD'
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[PLAYLIST][INFO] path='https://hentaihaven.xxx/watch/ookii-onnanoko-wa-suki-desu-ka/episode-11/' rows=[4] duration='Stream' size='Stream' quality='Stream'
+[PLAYLIST][INFO] path='https://vid-s2-n50-fr-cdn.eporner.com/v6/SCpNSfQqt9fAPFCKBsGoOA/1790323584_105.68.187.48_2592/17828528-2160p.mp4' rows=[5] duration='01:04:40' size='Stream' quality='Stream'
+PAGE_TITLE::Dokidoki Little Ooyasan Episode 1 - Hentai Haven | Watch free Hentai HD
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+[BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
+[BROWSER_CLICK][JWPROBE] jwplayer_api=False containers=0 playlist_items=0 source_files=0 files=[]
+MEDIA_URL::https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-1/master.m3u8
+MEDIA_URL::https://www.googletagmanager.com/gtag/js?id=G-V4YB0RHNZZ&cx=c&gtm=4e69o0h2
+MEDIA_URL::https://www.googletagmanager.com/gtm.js?id=GTM-KZFXMN5S
+MEDIA_URL::/_next/static/chunks/0k0fjjfqmgqvj.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3pyjh7g42a0cr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/turbopack-04ol-j1xr9f6g.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hap93h_2rlz1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/245jxcyhgs6bt.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1dfymrizihap5.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/19v-9-u232y1q.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1rokfh921mlk1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2h-8_q2_hzr59.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3-8j0n028-7_d.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2_9so-sp8llx3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2s7tiedvdwkkr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0hkfz14yzdxv_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3m8y9-fbeueiw.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/13jjxi_nocd1_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2l275el85o_t3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2yyn15_kenoi9.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0z_1_bbe5lm8z.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hlkqm-ptu4an.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/04hgmj47g3md3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0cz1d0mv5g_q7.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2jzxw7zu4ruh8.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::https://analytics.ahrefs.com/analytics.js
+MEDIA_URL::/cdn-cgi/challenge-platform/scripts/jsd/main.js
+[BROWSER_CLICK] clicked load-video control: shrink-0 items-center justify-center gap-2 text-sm font-medium whitespace-nowrap
+MEDIA_URL::/ads/ads_controller.js?check=1790316433458
+MEDIA_URL::/playback-check.js?check=1790316433459
+MEDIA_URL::/_next/static/chunks/0djz3pl2n1ziy.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::https://js.havenclick.com/loader.js?v=1776828719
+MEDIA_URL::https://js.havenclick.com/js/zone/29.js?v=15074
+MEDIA_URL::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4
+BROWSER_COOKIES::_ga_V4YB0RHNZZ=GS2.1.s1790316432$o1$g0$t1790316432$j60$l0$h0; _ga=GA1.1.1070597126.1790316433
+VOE_M3U8::https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-1/master.m3u8?hash=djqiniZ9_HJnzHSEp3eUvw&expirein=1790325440
+[BROWSER_CLICK] clicked load-video control: inline-flex shrink-0 items-center justify-center gap-2 text-sm font-medium white
+MEDIA_URL::https://js.havenclick.com/serve/zone/29/floating.js
+MEDIA_URL::/api/ads/creative/?zone=48
+MEDIA_URL::https://js.havenclick.com/serve/zone/9
+MEDIA_URL::/api/ads/creative/?zone=23&mode=mobile
+MEDIA_URL::https://a.magsrv.com/ad-provider.js
+MEDIA_URL::https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495
+MEDIA_DUR::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4|6|350|200
+MEDIA_URL::https://z6v2p9a8.bkcdn.net/library/192082/d7009a00d66f3f658e95f3d862517d83cf731dea.mp4
+MEDIA_DUR::https://z6v2p9a8.bkcdn.net/library/192082/d7009a00d66f3f658e95f3d862517d83cf731dea.mp4|9|1280|720
+[BROWSER_CLICK] file-host capture complete - closing the browser early
+PAGE_TITLE::Kyonyuu ga Futari Inai to Bokki Shinai Otto no Tame ni Tomodachi wo Tsuretekita Tsuma Episode 2 - Hentai Haven | Watch free Hentai HD
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_ga=GA1.1.1671454855.1790310324; _ga_V4YB0RHNZZ=GS2.1.s1790310323$o1$g1$t1790314491$j60$l0$h0
+[BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
+[BROWSER_CLICK][JWPROBE] jwplayer_api=False containers=0 playlist_items=0 source_files=0 files=[]
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/playlist.m3u8
+MEDIA_URL::https://www.googletagmanager.com/gtm.js?id=GTM-KZFXMN5S
+MEDIA_URL::/_next/static/chunks/0k0fjjfqmgqvj.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3pyjh7g42a0cr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/turbopack-04ol-j1xr9f6g.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hap93h_2rlz1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/245jxcyhgs6bt.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1dfymrizihap5.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/19v-9-u232y1q.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1rokfh921mlk1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2h-8_q2_hzr59.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3-8j0n028-7_d.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2_9so-sp8llx3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2s7tiedvdwkkr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0hkfz14yzdxv_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3m8y9-fbeueiw.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/13jjxi_nocd1_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2l275el85o_t3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2yyn15_kenoi9.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0z_1_bbe5lm8z.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hlkqm-ptu4an.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/04hgmj47g3md3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0cz1d0mv5g_q7.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2jzxw7zu4ruh8.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::https://analytics.ahrefs.com/analytics.js
+MEDIA_URL::/cdn-cgi/challenge-platform/scripts/jsd/main.js
+[BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
+MEDIA_URL::https://www.googletagmanager.com/gtag/js?id=G-V4YB0RHNZZ&cx=c&gtm=4e69n1
+MEDIA_URL::/ads/ads_controller.js?check=1790316452191
+MEDIA_URL::/playback-check.js?check=1790316452192
+[BROWSER_CLICK] killed capture subprocess (final HTML dumped, child stuck closing browser) for https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-1/
+MEDIA_URL::https://js.havenclick.com/loader.js?v=1776828719
+MEDIA_URL::https://js.havenclick.com/js/zone/29.js?v=15074
+BROWSER_COOKIES::_ga=GA1.1.1671454855.1790310324; _ga_V4YB0RHNZZ=GS2.1.s1790316452$o2$g0$t1790316452$j60$l0$h0
+[BROWSER_CLICK] clicked load-video control: shrink-0 items-center justify-center gap-2 text-sm font-medium whitespace-nowrap
+MEDIA_URL::/ads/ads_controller.js?check=1790316454055
+MEDIA_URL::/playback-check.js?check=1790316454056
+MEDIA_URL::https://js.havenclick.com/serve/zone/29/floating.js
+[BROWSER_CLICK] clicked load-video control: inline-flex shrink-0 items-center justify-center gap-2 text-sm font-medium white
+MEDIA_URL::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4
+VOE_M3U8::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/playlist_vp9.m3u8
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-1/: https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-1/master.m3u8
+VOE_M3U8::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/vp_7sop/v.m3u8
+VOE_M3U8::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/snd/a.m3u8
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/en.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/fr.vtt
+MEDIA_URL::/_next/static/chunks/0djz3pl2n1ziy.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/api/ads/creative/?zone=48
+MEDIA_URL::https://js.havenclick.com/serve/zone/9
+MEDIA_URL::/api/ads/creative/?zone=23&mode=mobile
+[BROWSER_CLICK] clicked load-video control: inline-flex shrink-0 items-center justify-center gap-2 text-sm font-medium white
+MEDIA_URL::https://hentaihaven.porn/f4c8a1de-3967-427a-903f-1b695e273420/vp_7sop/i.mp4
+MEDIA_URL::https://hentaihaven.porn/f4c8a1de-3967-427a-903f-1b695e273420/snd/i.mp4
+MEDIA_URL::https://htl-cdn.adtng.com/a7/creatives/39/1659/827102/1200211/1200211_video_with_sound.mp4
+MEDIA_DUR::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4|6|350|200
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/ar.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/cs.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/da.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/de.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/el.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/es.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/fi.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/he.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/hu.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/id.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/it.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/ko.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/nl.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/pl.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/pt.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/ro.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/ru.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/sv.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/th.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/tr.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/uk.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/vi.vtt
+MEDIA_URL::https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/s/zh.vtt
+MEDIA_URL::https://a.magsrv.com/ad-provider.js
+MEDIA_URL::https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495
+[BROWSER_CLICK] file-host capture complete - closing the browser early
+[HENTAI] stored the Cloudflare clearance for hentaihaven.xxx
+[HENTAI] stream after the Cloudflare click: https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-1/master.m3u8
+[HENTAI] hentaihaven: Dokidoki Little Ooyasan Episode 1 - Hentai Haven | Watch free Hentai HD (0 mirror(s))
+[HENTAI] reusing the Cloudflare clearance from the last click
+[PLAYLIST][NAME] https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-1/ : 'episode-1 [hentaihaven.xxx]' -> 'Dokidoki Little Ooyasan Episode 1 - Hentai Haven | Watch free Hentai HD'
 [HENTAI] chrome HTTP 200 was the Cloudflare check
 [HENTAI] chrome131 HTTP 200 was the Cloudflare check
 [HENTAI] chrome124 HTTP 200 was the Cloudflare check
@@ -33,11 +400,33 @@ No headphones detected at startup, using default audio output
 [JAVHD] VideoPlayer patched � javhd.today URL detection active.
 [FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
 [HENTAI] resolver loaded
-PAGE_TITLE::Ookii Onnanoko wa Suki desu ka Episode 1 - Hentai Haven | Watch free Hentai HD
+[BROWSER_CLICK] killed capture subprocess (final HTML dumped, child stuck closing browser) for https://hentaihaven.xxx/watch/kyonyuu-ga-futari-inai-to-bokki-shinai-otto-no-tame-ni-tomodachi-wo-tsuretekita-tsuma/episode-2/
+[PLAYLIST][INFO] path='https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-1/' rows=[6] duration='16:24' size='Stream' quality='Stream'
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaihaven.xxx/watch/kyonyuu-ga-futari-inai-to-bokki-shinai-otto-no-tame-ni-tomodachi-wo-tsuretekita-tsuma/episode-2/: https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/playlist.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaihaven.xxx
+[HENTAI] stream after the Cloudflare click: https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/vp_7sop/v.m3u8
+[HENTAI] audio playlist: https://octopusmanifest.org/f4c8a1de-3967-427a-903f-1b695e273420/snd/a.m3u8
+[HENTAI] 25 caption file(s)
+[HENTAI] hentaihaven: Kyonyuu ga Futari Inai to Bokki Shinai Otto no Tame ni Tomodachi wo Tsuretekita Tsuma Episode 2 - Hentai Haven | Watch free Hentai HD (0 mirror(s))
+[HENTAI] reusing the Cloudflare clearance from the last click
+[PLAYLIST][NAME] https://hentaihaven.xxx/watch/kyonyuu-ga-futari-inai-to-bokki-shinai-otto-no-tame-ni-tomodachi-wo-tsuretekita-tsuma/episode-2/ : 'episode-2 [hentaihaven.xxx]' -> 'Kyonyuu ga Futari Inai to Bokki Shinai Otto no Tame ni Tomodachi wo Tsuretekita Tsuma Episode 2 - Hentai Haven | Watch free Hentai HD'
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] hentaihaven answered with the Cloudflare check, not the player
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[PLAYLIST][INFO] path='https://hentaihaven.xxx/watch/kyonyuu-ga-futari-inai-to-bokki-shinai-otto-no-tame-ni-tomodachi-wo-tsuretekita-tsuma/episode-2/' rows=[1] duration='Stream' size='Stream' quality='Stream'
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+PAGE_TITLE::Dokidoki Little Ooyasan Episode 2 - Hentai Haven | Watch free Hentai HD
 BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
 [BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
 [BROWSER_CLICK][JWPROBE] jwplayer_api=False containers=0 playlist_items=0 source_files=0 files=[]
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/playlist.m3u8
+MEDIA_URL::https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-2/master.m3u8
 MEDIA_URL::https://www.googletagmanager.com/gtm.js?id=GTM-KZFXMN5S
 MEDIA_URL::/_next/static/chunks/0k0fjjfqmgqvj.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
 MEDIA_URL::/_next/static/chunks/3pyjh7g42a0cr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
@@ -65,57 +454,1170 @@ MEDIA_URL::/cdn-cgi/challenge-platform/scripts/jsd/main.js
 [BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
 MEDIA_URL::https://www.googletagmanager.com/gtag/js?id=G-V4YB0RHNZZ&cx=c&gtm=4e69n1
 MEDIA_URL::https://analytics.ahrefs.com/analytics.js
-MEDIA_URL::/ads/ads_controller.js?check=1790310323870
-MEDIA_URL::/playback-check.js?check=1790310323872
-BROWSER_COOKIES::_ga_V4YB0RHNZZ=GS2.1.s1790310323$o1$g0$t1790310323$j60$l0$h0; _ga=GA1.1.1671454855.1790310324
+[BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
+MEDIA_URL::/ads/ads_controller.js?check=1790316498435
+MEDIA_URL::/playback-check.js?check=1790316498435
 [BROWSER_CLICK] clicked load-video control: shrink-0 items-center justify-center gap-2 text-sm font-medium whitespace-nowrap
 MEDIA_URL::/_next/static/chunks/0djz3pl2n1ziy.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
 MEDIA_URL::https://js.havenclick.com/loader.js?v=1776828719
 MEDIA_URL::https://js.havenclick.com/js/zone/29.js?v=15074
-VOE_M3U8::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/playlist_vp9.m3u8
+[BROWSER_CLICK] clicked load-video control: inline-flex shrink-0 items-center justify-center gap-2 text-sm font-medium white
+VOE_M3U8::https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-2/master.m3u8?hash=dxmI09whGYVe9OkAnBDzhg&expirein=1790325506
 MEDIA_URL::https://js.havenclick.com/serve/zone/29/floating.js
+MEDIA_URL::/api/ads/creative/?zone=48
+MEDIA_URL::https://js.havenclick.com/serve/zone/9
+MEDIA_URL::/api/ads/creative/?zone=23&mode=mobile
+[BROWSER_CLICK] file-host capture complete - closing the browser early
+[BROWSER_CLICK] killed capture subprocess (final HTML dumped, child stuck closing browser) for https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-2/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-2/: https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-2/master.m3u8
+[HENTAI] stream after the Cloudflare click: https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-2/master.m3u8
+[HENTAI] hentaihaven: Dokidoki Little Ooyasan Episode 2 - Hentai Haven | Watch free Hentai HD (0 mirror(s))
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] hentaihaven answered with the Cloudflare check, not the player
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+Audio devices changed!
+Headphones detected: Headphones (Roseland TWS RE-500 Stereo), auto-switching...
+Switching audio to: Headphones (Roseland TWS RE-500 Stereo)
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[PLAYLIST][INFO_MISS] path='https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-2/' duration='16:37' quality='Stream'
+PAGE_TITLE::Dokidoki Little Ooyasan Episode 6 - Hentai Haven | Watch free Hentai HD
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+[BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
+[BROWSER_CLICK][JWPROBE] jwplayer_api=False containers=0 playlist_items=0 source_files=0 files=[]
+MEDIA_URL::https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-6/master.m3u8
+MEDIA_URL::https://www.googletagmanager.com/gtag/js?id=G-V4YB0RHNZZ&cx=c&gtm=4e69o0h2
+MEDIA_URL::https://www.googletagmanager.com/gtm.js?id=GTM-KZFXMN5S
+MEDIA_URL::/_next/static/chunks/0k0fjjfqmgqvj.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3pyjh7g42a0cr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/turbopack-04ol-j1xr9f6g.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hap93h_2rlz1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/245jxcyhgs6bt.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1dfymrizihap5.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/19v-9-u232y1q.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1rokfh921mlk1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2h-8_q2_hzr59.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3-8j0n028-7_d.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2_9so-sp8llx3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2s7tiedvdwkkr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0hkfz14yzdxv_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3m8y9-fbeueiw.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/13jjxi_nocd1_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2l275el85o_t3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2yyn15_kenoi9.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0z_1_bbe5lm8z.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hlkqm-ptu4an.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/04hgmj47g3md3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0cz1d0mv5g_q7.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2jzxw7zu4ruh8.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::https://analytics.ahrefs.com/analytics.js
+MEDIA_URL::/cdn-cgi/challenge-platform/scripts/jsd/main.js
+[BROWSER_CLICK] clicked load-video control: shrink-0 gap-2 text-sm font-medium whitespace-nowrap transition-all outline-none
+MEDIA_URL::/ads/ads_controller.js?check=1790316532306
+MEDIA_URL::/playback-check.js?check=1790316532308
+BROWSER_COOKIES::_ga_V4YB0RHNZZ=GS2.1.s1790316532$o1$g0$t1790316532$j60$l0$h0; _ga=GA1.1.673705399.1790316532
+[BROWSER_CLICK] clicked load-video control: shrink-0 items-center justify-center gap-2 text-sm font-medium whitespace-nowrap
+MEDIA_URL::/_next/static/chunks/0djz3pl2n1ziy.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::https://js.havenclick.com/loader.js?v=1776828719
+MEDIA_URL::https://js.havenclick.com/js/zone/29.js?v=15074
+VOE_M3U8::https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-6/master.m3u8?hash=p_VkjsLdFtFxqBfVbEKc1g&expirein=1790325539
+MEDIA_URL::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4
+MEDIA_URL::https://js.havenclick.com/serve/zone/29/floating.js
+MEDIA_URL::/api/ads/creative/?zone=48
 MEDIA_URL::https://js.havenclick.com/serve/zone/9
 MEDIA_URL::/api/ads/creative/?zone=23&mode=mobile
 [BROWSER_CLICK] clicked load-video control: inline-flex shrink-0 items-center justify-center gap-2 text-sm font-medium white
-MEDIA_URL::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4
-VOE_M3U8::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/vp_7sop/v.m3u8
-VOE_M3U8::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/snd/a.m3u8
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/ar.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/cs.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/da.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/de.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/el.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/en.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/es.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/fi.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/fr.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/he.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/hu.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/id.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/it.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/ko.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/nl.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/pl.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/pt.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/ro.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/ru.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/sv.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/th.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/tr.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/uk.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/vi.vtt
-MEDIA_URL::https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/zh.vtt
-MEDIA_URL::/api/ads/creative/?zone=48
+MEDIA_URL::https://a.magsrv.com/ad-provider.js
 MEDIA_URL::https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495
 [BROWSER_CLICK] clicked load-video control: inline-flex shrink-0 items-center justify-center gap-2 text-sm font-medium white
-MEDIA_URL::https://laidy.top/70460589-357e-413d-a0aa-09ba198623d4/vp_7sop/i.mp4
-MEDIA_URL::https://laidy.top/70460589-357e-413d-a0aa-09ba198623d4/snd/i.mp4
-MEDIA_URL::https://htl-cdn.adtng.com/a7/creatives/39/1598/818639/1194850/1194850_video_with_sound.mp4
+MEDIA_URL::https://video.sacdnssedge.com/video/ol_4361173b57ed1202687012d6cc6f0958.mp4
 MEDIA_DUR::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4|6|350|200
 [BROWSER_CLICK] file-host capture complete - closing the browser early
-[BROWSER_CLICK] captured + probe-verified stream for https://hentaihaven.xxx/watch/ookii-onnanoko-wa-suki-desu-ka/episode-1/: https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/playlist.m3u8
+[BROWSER_CLICK] killed capture subprocess (final HTML dumped, child stuck closing browser) for https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-6/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-6/: https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-6/master.m3u8
 [HENTAI] stored the Cloudflare clearance for hentaihaven.xxx
-[HENTAI] stream after the Cloudflare click: https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/playlist.m3u8
-[HENTAI] hentaihaven: Ookii Onnanoko wa Suki desu ka Episode 1 - Hentai Haven | Watch free Hentai HD (0 mirror(s))
-[PLAYLIST][NAME] https://hentaihaven.xxx/watch/ookii-onnanoko-wa-suki-desu-ka/episode-1/ : 'episode-1 [hentaihaven.xxx]' -> 'Ookii Onnanoko wa Suki desu ka Episode 1 - Hentai Haven | Watch free Hentai HD'
-[PLAYLIST][INFO] path='https://hentaihaven.xxx/watch/ookii-onnanoko-wa-suki-desu-ka/episode-1/' rows=[0] duration='Stream' size='Stream' quality='Stream'
+[HENTAI] stream after the Cloudflare click: https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-6/master.m3u8
+[HENTAI] hentaihaven: Dokidoki Little Ooyasan Episode 6 - Hentai Haven | Watch free Hentai HD (0 mirror(s))
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[PLAYLIST][NAME] https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-6/ : 'episode-6 [hentaihaven.xxx]' -> 'Dokidoki Little Ooyasan Episode 6 - Hentai Haven | Watch free Hentai HD'
+[PLAYLIST][INFO] path='https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-6/' rows=[8] duration='16:14' size='Stream' quality='Stream'
+[COOKIES] nothing for ['hentaimama.io'] in any browser profile either -- the yt-dlp module
+[COOKIES] No matching cookies found for domains=['hentaimama.io'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+PAGE_TITLE::Dokidoki Little Ooyasan Episode 4 - Hentai Haven | Watch free Hentai HD
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_ga=GA1.1.1671454855.1790310324; _ga_V4YB0RHNZZ=GS2.1.s1790316452$o2$g0$t1790316452$j60$l0$h0
+[BROWSER_CLICK] clicked load-video control: shrink-0 items-center justify-center gap-2 text-sm font-medium whitespace-nowrap
+[BROWSER_CLICK][JWPROBE] jwplayer_api=False containers=0 playlist_items=0 source_files=0 files=[]
+MEDIA_URL::https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-4/master.m3u8
+MEDIA_URL::https://www.googletagmanager.com/gtag/js?id=G-V4YB0RHNZZ&cx=c&gtm=4e69n1
+MEDIA_URL::https://www.googletagmanager.com/gtm.js?id=GTM-KZFXMN5S
+MEDIA_URL::/_next/static/chunks/0k0fjjfqmgqvj.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3pyjh7g42a0cr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/turbopack-04ol-j1xr9f6g.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hap93h_2rlz1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/245jxcyhgs6bt.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1dfymrizihap5.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/19v-9-u232y1q.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/1rokfh921mlk1.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2h-8_q2_hzr59.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3-8j0n028-7_d.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2_9so-sp8llx3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2s7tiedvdwkkr.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0hkfz14yzdxv_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3m8y9-fbeueiw.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/13jjxi_nocd1_.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2l275el85o_t3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/2yyn15_kenoi9.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0z_1_bbe5lm8z.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/3hlkqm-ptu4an.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/04hgmj47g3md3.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/_next/static/chunks/0cz1d0mv5g_q7.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::/ads/ads_controller.js?check=1790316607340
+MEDIA_URL::/playback-check.js?check=1790316607340
+MEDIA_URL::/_next/static/chunks/2jzxw7zu4ruh8.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::https://analytics.ahrefs.com/analytics.js
+[BROWSER_CLICK] clicked load-video control: shrink-0 items-center justify-center gap-2 text-sm font-medium whitespace-nowrap
+MEDIA_URL::/_next/static/chunks/0djz3pl2n1ziy.js?dpl=2214de20f5f1af99ea12c92b0ca537341f397fd1
+MEDIA_URL::https://js.havenclick.com/loader.js?v=1776828719
+MEDIA_URL::https://js.havenclick.com/js/zone/29.js?v=15074
+VOE_M3U8::https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-4/master.m3u8?hash=kr5RI9LunCsMHtQoirYz7Q&expirein=1790325613
+MEDIA_URL::https://js.havenclick.com/serve/zone/29/floating.js
+MEDIA_URL::/api/ads/creative/?zone=48
+MEDIA_URL::https://js.havenclick.com/serve/zone/9
+MEDIA_URL::/api/ads/creative/?zone=23&mode=mobile
+MEDIA_URL::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4
+BROWSER_COOKIES::_ga=GA1.1.1671454855.1790310324; _ga_V4YB0RHNZZ=GS2.1.s1790316452$o2$g1$t1790316607$j60$l0$h0
+[BROWSER_CLICK] clicked load-video control: inline-flex shrink-0 items-center justify-center gap-2 text-sm font-medium white
+MEDIA_DUR::https://cdn.havenclick.com/ads/2026/06/6ab0c89f-2d3b-44ef-a69d-e3c7c9993d83.mp4|6|350|200
+MEDIA_URL::https://a.magsrv.com/ad-provider.js
+MEDIA_URL::https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495
+MEDIA_URL::https://z6v2p9a8.bkcdn.net/library/984100/71bbebb39d20e2d0784116ca624dfc1c74bd9e35.mp4
+MEDIA_URL::https://z6v2p9a8.bkcdn.net/library/914186/aeef03e78a8689b68256c65d4b108725dd87707d.mp4
+MEDIA_URL::https://z6v2p9a8.bkcdn.net/library/984100/dd289c56bb97ee2a949c2089e4c61c1700666a81.mp4
+MEDIA_URL::https://video.sacdnssedge.com/video/ol_4361173b57ed1202687012d6cc6f0958.mp4
+MEDIA_DUR::https://z6v2p9a8.bkcdn.net/library/984100/71bbebb39d20e2d0784116ca624dfc1c74bd9e35.mp4|5|640|360
+[BROWSER_CLICK] clicked load-video control: inline-flex shrink-0 items-center justify-center gap-2 text-sm font-medium white
+MEDIA_DUR::https://video.sacdnssedge.com/video/ol_4361173b57ed1202687012d6cc6f0958.mp4|30|360|480
+VERIFIED_MEDIA::https://video.sacdnssedge.com/video/ol_4361173b57ed1202687012d6cc6f0958.mp4
+MEDIA_DUR::https://z6v2p9a8.bkcdn.net/library/914186/aeef03e78a8689b68256c65d4b108725dd87707d.mp4|10|640|360
+MEDIA_DUR::https://z6v2p9a8.bkcdn.net/library/984100/dd289c56bb97ee2a949c2089e4c61c1700666a81.mp4|6|640|360
+[BROWSER_CLICK] file-host capture complete - closing the browser early
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[BROWSER_CLICK] killed capture subprocess (capture verified, child stuck closing browser) for https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-4/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-4/: https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-4/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaihaven.xxx
+[HENTAI] stream after the Cloudflare click: https://master-lengs.org/api/v3/hh/dokidoki-little-ooya-san-episode-4/master.m3u8
+[HENTAI] hentaihaven: Dokidoki Little Ooyasan Episode 4 - Hentai Haven | Watch free Hentai HD (0 mirror(s))
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[PLAYLIST][NAME] https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-4/ : 'episode-4 [hentaihaven.xxx]' -> 'Dokidoki Little Ooyasan Episode 4 - Hentai Haven | Watch free Hentai HD'
+[PLAYLIST][INFO] path='https://hentaihaven.xxx/watch/dokidoki-little-ooyasan/episode-4/' rows=[7] duration='16:29' size='Stream' quality='Stream'
+PAGE_TITLE::Shoujo Ramune Episode 1 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_ga=GA1.1.881379865.1790304129; __PPU_puid=16912669746576622908; UGVyc2lzdFN0b3JhZ2U=%7B%22CAIFRQ%22%3A%22AD4pWwAAAAAAAAACAD2o8gAAAAAAAAACAD1ERQAAAAAAAAABAD1DbQAAAAAAAAABADxGUgAAAAAAAAAEADxGUQAAAAAAAAACADssGAAAAAAAAAAC%22%2C%22CAIFRT%22%3A%22AD4pWwAAAABqtkYgAD2o8gAAAABqtvzwAD1ERQAAAABqtqiQAD1DbQAAAABqt1FQADxGUgAAAABqt1FQADxGUQAAAABqt1FQADssGAAAAABqtqiQ%22%7D; _ga_W2QHGT7ZZ9=GS2.1.s1790314494$o2$g1$t1790316636$j60$l0$h0
+VOE_M3U8::https://hentaidoge.org/s/1790320241/k7o7dNnksMaVA_BUxqbbGg/output/S/shoujo-ramune/1/hls/master.m3u8
+MEDIA_URL::https://playhubconnect.com/bn/alternative/fb4/e50/bc5/fb4e50bc5c96cea49b0a18e36153266e826fd442-alt.mp4
+MEDIA_URL::https://playhubconnect.com/bn/alternative/44e/a3a/a36/44ea3aa3645302e7228c61f21aac31a4e9d9b0ac-alt.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790320241/k7o7dNnksMaVA_BUxqbbGg/output/S/shoujo-ramune/1/hls/1080p/index.m3u8
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9515-0-728x90.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9555-0-300x250.medium.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790320241/k7o7dNnksMaVA_BUxqbbGg/output/S/shoujo-ramune/1/hls/720p/index.m3u8
+MEDIA_URL::https://cdn.banhq.com/mp4/8/b/8bbaf92223bc4bae8457b5eaaf0a700b.mp4
+[COOKIES] nothing for ['hentaimama.io'] in any browser profile either -- the yt-dlp module
+[COOKIES] No matching cookies found for domains=['hentaimama.io'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-1/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-1/: https://hentaidoge.org/s/1790320241/k7o7dNnksMaVA_BUxqbbGg/output/S/shoujo-ramune/1/hls/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaimama.io
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790320241/k7o7dNnksMaVA_BUxqbbGg/output/S/shoujo-ramune/1/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 1 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+[HENTAI] reusing the Cloudflare clearance from the last click
+[PLAYLIST][NAME] https://hentaimama.io/episodes/shoujo-ramune-episode-1/ : 'shoujo-ramune-episode-1 [hentaimama.io]' -> 'Shoujo Ramune Episode 1 � Watch Online Free in HD � Hentaimama'
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 429 was the Cloudflare check
+[HENTAI] chrome124 HTTP 429 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[PLAYLIST][INFO] path='https://hentaimama.io/episodes/shoujo-ramune-episode-1/' rows=[9] duration='19:04' size='Stream' quality='Stream'
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+PAGE_TITLE::Shoujo Ramune Episode 2 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::UGVyc2lzdFN0b3JhZ2U=%7B%7D; _ga_W2QHGT7ZZ9=GS2.1.s1790316682$o1$g0$t1790316682$j60$l0$h0; _ga=GA1.1.266084349.1790316682
+MEDIA_URL::https://playhubconnect.com/bn/alternative/44e/a3a/a36/44ea3aa3645302e7228c61f21aac31a4e9d9b0ac-alt.mp4
+MEDIA_URL::https://playhubconnect.com/bn/44e/a3a/a36/44ea3aa3645302e7228c61f21aac31a4e9d9b0ac.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790320287/7Xy9Eiv1iHPUyj3DYy2hbg/output/S/shoujo-ramune/2/hls/master.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790320287/7Xy9Eiv1iHPUyj3DYy2hbg/output/S/shoujo-ramune/2/hls/480p/index.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790320287/7Xy9Eiv1iHPUyj3DYy2hbg/output/S/shoujo-ramune/2/hls/720p/index.m3u8
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9731-0-300x250.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9580-0-728x90.medium.mp4
+MEDIA_URL::https://cdn.banhq.com/mp4/8/9/899b0006a6deddd3aa4e24ed51369d18.mp4
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-2/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-2/: https://hentaidoge.org/s/1790320287/7Xy9Eiv1iHPUyj3DYy2hbg/output/S/shoujo-ramune/2/hls/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaimama.io
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790320287/7Xy9Eiv1iHPUyj3DYy2hbg/output/S/shoujo-ramune/2/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 2 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+[HENTAI] reusing the Cloudflare clearance from the last click
+[PLAYLIST][NAME] https://hentaimama.io/episodes/shoujo-ramune-episode-2/ : 'shoujo-ramune-episode-2 [hentaimama.io]' -> 'Shoujo Ramune Episode 2 � Watch Online Free in HD � Hentaimama'
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[PLAYLIST][INFO] path='https://hentaimama.io/episodes/shoujo-ramune-episode-2/' rows=[10] duration='19:34' size='Stream' quality='Stream'
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+PAGE_TITLE::Shoujo Ramune Episode 4 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_ga_W2QHGT7ZZ9=GS2.1.s1790316731$o1$g0$t1790316731$j60$l0$h0; _ga=GA1.1.1191145468.1790316732; UGVyc2lzdFN0b3JhZ2U=%7B%7D
+MEDIA_URL::https://playhubconnect.com/bn/alternative/44e/a3a/a36/44ea3aa3645302e7228c61f21aac31a4e9d9b0ac-alt.mp4
+MEDIA_URL::https://playhubconnect.com/bn/alternative/69e/459/0ee/69e4590ee2c2322aec577e94bb2d309816f56478-alt.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790320339/EzlWGpggfZC-hHOL33W1rw/output/S/shoujo-ramune/4/hls/master.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790320339/EzlWGpggfZC-hHOL33W1rw/output/S/shoujo-ramune/4/hls/480p/index.m3u8
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9577-0-728x90.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9678-0-300x250.medium.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790320339/EzlWGpggfZC-hHOL33W1rw/output/S/shoujo-ramune/4/hls/720p/index.m3u8
+MEDIA_URL::https://cdn.banhq.com/mp4/c/3/c38e707be7c91f28e99fc8d2ae7e9a57.mp4
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-4/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-4/: https://hentaidoge.org/s/1790320339/EzlWGpggfZC-hHOL33W1rw/output/S/shoujo-ramune/4/hls/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaimama.io
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790320339/EzlWGpggfZC-hHOL33W1rw/output/S/shoujo-ramune/4/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 4 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+PAGE_TITLE::Shoujo Ramune Episode 3 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_ga=GA1.1.881379865.1790304129; __PPU_puid=16912669746576622908; UGVyc2lzdFN0b3JhZ2U=%7B%22CAIFRQ%22%3A%22AD4pWwAAAAAAAAACAD2o8gAAAAAAAAACAD1ERQAAAAAAAAABAD1DbQAAAAAAAAABADxGUwAAAAAAAAABADxGUgAAAAAAAAAFADxGUQAAAAAAAAAEADssGAAAAAAAAAAC%22%2C%22CAIFRT%22%3A%22AD4pWwAAAABqtkYgAD2o8gAAAABqtvzwAD1ERQAAAABqtqiQAD1DbQAAAABqt1FQADxGUwAAAABqt1FQADxGUgAAAABqt1FQADxGUQAAAABqt1FQADssGAAAAABqtqiQ%22%7D; bnState_2146999=%7B%22impressions%22%3A2%2C%22delayStarted%22%3A0%7D; _ga_W2QHGT7ZZ9=GS2.1.s1790314494$o2$g1$t1790316767$j10$l0$h0
+MEDIA_URL::https://playhubconnect.com/bn/alternative/44e/a3a/a36/44ea3aa3645302e7228c61f21aac31a4e9d9b0ac-alt.mp4
+MEDIA_URL::https://playhubconnect.com/bn/alternative/69e/459/0ee/69e4590ee2c2322aec577e94bb2d309816f56478-alt.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790320251/kyGCMLUfccoYZOo-ffgJfw/output/S/shoujo-ramune/3/hls/master.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790320251/kyGCMLUfccoYZOo-ffgJfw/output/S/shoujo-ramune/3/hls/1080p/index.m3u8
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9325-0-728x90.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9202-1-300x250.medium.mp4
+[HENTAI] reusing the Cloudflare clearance from the last click
+MEDIA_URL::https://cdn.banhq.com/mp4/c/3/c38e707be7c91f28e99fc8d2ae7e9a57.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790320251/kyGCMLUfccoYZOo-ffgJfw/output/S/shoujo-ramune/3/hls/720p/index.m3u8
+[PLAYLIST][NAME] https://hentaimama.io/episodes/shoujo-ramune-episode-4/ : 'shoujo-ramune-episode-4 [hentaimama.io]' -> 'Shoujo Ramune Episode 4 � Watch Online Free in HD � Hentaimama'
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[PLAYLIST][INFO] path='https://hentaimama.io/episodes/shoujo-ramune-episode-4/' rows=[12] duration='20:14' size='Stream' quality='Stream'
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+PAGE_TITLE::Shoujo Ramune Episode 5 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+VOE_M3U8::https://hentaidoge.org/s/1790320248/0qED-CirzNcu15E6NMzISw/output/S/shoujo-ramune/5/hls/master.m3u8
+MEDIA_URL::https://playhubconnect.com/bn/alternative/69e/459/0ee/69e4590ee2c2322aec577e94bb2d309816f56478-alt.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790320248/0qED-CirzNcu15E6NMzISw/output/S/shoujo-ramune/5/hls/480p/index.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790320248/0qED-CirzNcu15E6NMzISw/output/S/shoujo-ramune/5/hls/720p/index.m3u8
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9579-0-728x90.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9555-0-300x250.medium.mp4
+MEDIA_URL::https://cdn.banhq.com/mp4/c/3/c38e707be7c91f28e99fc8d2ae7e9a57.mp4
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-3/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-3/: https://hentaidoge.org/s/1790320251/kyGCMLUfccoYZOo-ffgJfw/output/S/shoujo-ramune/3/hls/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaimama.io
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790320251/kyGCMLUfccoYZOo-ffgJfw/output/S/shoujo-ramune/3/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 3 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+[HENTAI] reusing the Cloudflare clearance from the last click
+[PLAYLIST][NAME] https://hentaimama.io/episodes/shoujo-ramune-episode-3/ : 'shoujo-ramune-episode-3 [hentaimama.io]' -> 'Shoujo Ramune Episode 3 � Watch Online Free in HD � Hentaimama'
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 429 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[PLAYLIST][INFO] path='https://hentaimama.io/episodes/shoujo-ramune-episode-3/' rows=[11] duration='16:35' size='Stream' quality='Stream'
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-5/
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-5/: https://hentaidoge.org/s/1790320248/0qED-CirzNcu15E6NMzISw/output/S/shoujo-ramune/5/hls/master.m3u8
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790320248/0qED-CirzNcu15E6NMzISw/output/S/shoujo-ramune/5/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 5 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+[HENTAI] reusing the Cloudflare clearance from the last click
+[PLAYLIST][NAME] https://hentaimama.io/episodes/shoujo-ramune-episode-5/ : 'shoujo-ramune-episode-5 [hentaimama.io]' -> 'Shoujo Ramune Episode 5 � Watch Online Free in HD � Hentaimama'
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 429 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 429 was the Cloudflare check
+[PLAYLIST][INFO] path='https://hentaimama.io/episodes/shoujo-ramune-episode-5/' rows=[13] duration='16:10' size='Stream' quality='Stream'
+[HENTAI] chrome131 HTTP 429 was the Cloudflare check
+[HENTAI] chrome124 HTTP 429 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+PAGE_TITLE::Shoujo Ramune Episode 6 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_ga=GA1.1.881379865.1790304129; __PPU_puid=16912669746576622908; bnState_2146999=%7B%22impressions%22%3A4%2C%22delayStarted%22%3A0%7D; _ga_W2QHGT7ZZ9=GS2.1.s1790314494$o2$g1$t1790316829$j9$l0$h0; UGVyc2lzdFN0b3JhZ2U=%7B%22CAIFRQ%22%3A%22AD4pWwAAAAAAAAACAD2o8gAAAAAAAAACAD1ERQAAAAAAAAABAD1DbQAAAAAAAAABADxGUwAAAAAAAAABADxGUgAAAAAAAAAFADxGUQAAAAAAAAAEADssGAAAAAAAAAAC%22%2C%22CAIFRT%22%3A%22AD4pWwAAAABqtkYgAD2o8gAAAABqtvzwAD1ERQAAAABqtqiQAD1DbQAAAABqt1FQADxGUwAAAABqt1FQADxGUgAAAABqt1FQADxGUQAAAABqt1FQADssGAAAAABqtqiQ%22%7D
+VOE_M3U8::https://hentaidoge.org/s/1790320435/w0k4T1b6fWK6MBeVmAiPPg/output/S/shoujo-ramune/6/hls/master.m3u8
+MEDIA_URL::https://playhubconnect.com/bn/alternative/69e/459/0ee/69e4590ee2c2322aec577e94bb2d309816f56478-alt.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790320435/w0k4T1b6fWK6MBeVmAiPPg/output/S/shoujo-ramune/6/hls/1080p/index.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790320435/w0k4T1b6fWK6MBeVmAiPPg/output/S/shoujo-ramune/6/hls/720p/index.m3u8
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9733-0-300x250.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9579-0-728x90.medium.mp4
+MEDIA_URL::https://cdn.banhq.com/mp4/8/b/8bbaf92223bc4bae8457b5eaaf0a700b.mp4
+PAGE_TITLE::Shoujo Ramune Episode 7 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::UGVyc2lzdFN0b3JhZ2U=%7B%7D; _ga_W2QHGT7ZZ9=GS2.1.s1790316840$o1$g0$t1790316840$j60$l0$h0; _ga=GA1.1.1132985685.1790316841
+VOE_M3U8::https://hentaidoge.org/s/1790319332/T6EsUfaO44VrQXbC-qcmEw/output/S/shoujo-ramune/7/hls/master.m3u8
+MEDIA_URL::https://playhubconnect.com/bn/alternative/69e/459/0ee/69e4590ee2c2322aec577e94bb2d309816f56478-alt.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790319332/T6EsUfaO44VrQXbC-qcmEw/output/S/shoujo-ramune/7/hls/480p/index.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790319332/T6EsUfaO44VrQXbC-qcmEw/output/S/shoujo-ramune/7/hls/720p/index.m3u8
+MEDIA_URL::https://cdn.banhq.com/mp4/c/3/c38e707be7c91f28e99fc8d2ae7e9a57.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9578-0-728x90.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9732-0-300x250.medium.mp4
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-6/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-6/: https://hentaidoge.org/s/1790320435/w0k4T1b6fWK6MBeVmAiPPg/output/S/shoujo-ramune/6/hls/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaimama.io
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790320435/w0k4T1b6fWK6MBeVmAiPPg/output/S/shoujo-ramune/6/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 6 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+[PLAYLIST][NAME] https://hentaimama.io/episodes/shoujo-ramune-episode-6/ : 'shoujo-ramune-episode-6 [hentaimama.io]' -> 'Shoujo Ramune Episode 6 � Watch Online Free in HD � Hentaimama'
+[PLAYLIST][INFO] path='https://hentaimama.io/episodes/shoujo-ramune-episode-6/' rows=[14] duration='17:04' size='Stream' quality='Stream'
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-7/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-7/: https://hentaidoge.org/s/1790319332/T6EsUfaO44VrQXbC-qcmEw/output/S/shoujo-ramune/7/hls/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaimama.io
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790319332/T6EsUfaO44VrQXbC-qcmEw/output/S/shoujo-ramune/7/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 7 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+[PLAYLIST][NAME] https://hentaimama.io/episodes/shoujo-ramune-episode-7/ : 'shoujo-ramune-episode-7 [hentaimama.io]' -> 'Shoujo Ramune Episode 7 � Watch Online Free in HD � Hentaimama'
+[PLAYLIST][INFO] path='https://hentaimama.io/episodes/shoujo-ramune-episode-7/' rows=[15] duration='14:59' size='Stream' quality='Stream'
+[FAVICON] hentaimama.io: 1 declared icon(s) — https://hentaimama.io/wp-content/themes/dooplay/assets/img/favicon.png?v=3
+[FAVICON] hentaimama.io: got site icon from https://hentaimama.io/wp-content/themes/dooplay/assets/img/favicon.png?v=3
+[FAVICON] github.com: 1 declared icon(s) — https://github.githubassets.com/favicons/favicon.svg
+[FAVICON] github.com: got site icon from https://github.githubassets.com/favicons/favicon.svg
+[YTDLP] github.com: no info -- ERROR: Unsupported URL: https://github.com/aaqwzsxedc272-svg/videoplayer/blob/arena/01a0cc1f-videoplayer/test_hentai_sites.py
+[SUBS] github.com: page scan named 1 caption file(s) -- und https://cdn.havenclick.com/ads/ad.vtt
+[HTML_RESOLVE] page candidate https://cdn.example/series/1/1.m3u8
+[HTML_RESOLVE] page candidate https://www.mediafire.com/file/abc/video.mp4/file
+[HTML_RESOLVE] page candidate https://cdn.example/ep1.m3u8
+[HTML_RESOLVE] page candidate https://cdn.example/ep2.m3u8
+[HTML_RESOLVE] page candidate https://hanime.tv/720.m3u8
+[HTML_RESOLVE] page candidate https://cdn.example/playlist.m3u8
+[HTML_RESOLVE] page candidate https://cdn.example/video.mp4\
+[HTML_RESOLVE] page candidate https://cdn.example/video.mp4
+[HTML_RESOLVE] page candidate https://cdn.havenclick.com/ads/ad.mp4
+[HTML_RESOLVE] page candidate https://cdn.example/playlist.m3u8?token=abc
+[HTML_RESOLVE] page candidate https://cdn.example/series/1/1.m3u8'
+[HTML_RESOLVE] page candidate https://www.mediafire.com/file/abc/video.mp4/file'
+[HTML_RESOLVE] page candidate https://cdn.example/ep1.m3u8'
+[HTML_RESOLVE] page candidate https://cdn.example/ep2.m3u8'
+[HTML_RESOLVE] page candidate https://hanime.tv/720.m3u8'
+[HTML_RESOLVE] page candidate https://cdn.example/playlist.m3u8'
+[HTML_RESOLVE] page candidate https://cdn.example/video.mp4"});'
+[HTML_RESOLVE] page candidate https://cdn.example/video.mp4'
+[HTML_RESOLVE] page candidate https://cdn.havenclick.com/ads/ad.mp4'
+[HTML_RESOLVE] page candidate https://cdn.example/playlist.m3u8?token=abc'
+[HTML_RESOLVE] candidate 0 bytes 0s skip probe failed https://cdn.example/series/1/1.m3u8
+[HTML_RESOLVE] candidate 0 bytes 0s skip probe failed https://www.mediafire.com/file/abc/video.mp4/file
+[HTML_RESOLVE] candidate 0 bytes 0s skip probe failed https://cdn.example/ep1.m3u8
+[HTML_RESOLVE] candidate 0 bytes 0s skip probe failed https://cdn.example/ep2.m3u8
+[HTML_RESOLVE] candidate 0 bytes 0s skip probe failed https://hanime.tv/720.m3u8
+[HTML_RESOLVE] candidate 0 bytes 0s skip probe failed https://cdn.example/playlist.m3u8
+[HTML_RESOLVE] candidate 0 bytes 0s skip probe failed https://cdn.example/video.mp4\
+[HTML_RESOLVE] candidate 0 bytes 0s skip probe failed https://cdn.example/video.mp4
+[HTML_RESOLVE] no full video among 18 page candidate(s)
+[HTML_RESOLVE] preview is not the film; trying hoster https://streamwish.to/e/pqgib6zsycon
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[COOKIES] nothing for ['streamwish.to'] in any browser profile either -- the yt-dlp module
+[COOKIES] No matching cookies found for domains=['streamwish.to'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[EMBED_HLS] video title: Loading...
+[EMBED_HLS] no stream found in page/packed JS for https://streamwish.to/e/pqgib6zsycon
+[HTML_RESOLVE] preview is not the film; trying hoster https://streamwish.to/e/pqgib6zsycon'
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[COOKIES] nothing for ['streamwish.to'] in any browser profile either -- the yt-dlp module
+[COOKIES] No matching cookies found for domains=['streamwish.to'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[EMBED_HLS] video title: Loading...
+[EMBED_HLS] no stream found in page/packed JS for https://streamwish.to/e/pqgib6zsycon'
+[HTML_RESOLVE] preview is not the film; trying hoster https://streamtape.com/e/abc"></iframe>'
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[COOKIES] Loaded 1 cookies from C:\Users\Mouad\Desktop\video_player\streamtape.com_cookies.txt
+[streamtape] embed fetch returned 404
+[HTML_RESOLVE] preview is not the film; trying hoster https://doodstream.com/e/xyz"></iframe>'
+[YTDLP] doodstream.com: no info -- ERROR: Unsupported URL: https://playmogo.com/e/xyz
+[STREAM][DOOD][YTDLP_BROWSER_COOKIES_FAILED] source=https://doodstream.com/e/xyz browser=brave returncode=1 stderr=ERROR: Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info\nERROR: Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info
+[STREAM][DOOD][YTDLP_BROWSER_COOKIES_UNAVAILABLE] source=https://doodstream.com/e/xyz error=ERROR: Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info\nERROR: Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info
+[YTDLP] doodstream.com: no info -- ERROR: Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info
+ERROR: Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info
+[SUBS] playmogo.com: no caption file and no subtitle endpoint referenced in the page
+[SUBS] wrote 0 subtitle line(s) from the page to C:\Users\Mouad\Desktop\video_player\subtitles_debug.txt -- that file says what the site actually offers
+[STREAM][DOOD][START] source=https://doodstream.com/e/xyz host=doodstream.com cookies=1 cf_bypass=True
+[STREAM][DOOD][SOURCE_PAGE] source=https://doodstream.com/e/xyz attempt=1 status=200 elapsed_ms=2215 url=https://playmogo.com/e/xyz%22%3E%3C/iframe%3E' challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][SOURCE_PAGE_RETRY] source=https://doodstream.com/e/xyz attempt=1 delay_ms=751 reason=challenge
+[STREAM][DOOD][SOURCE_PAGE] source=https://doodstream.com/e/xyz attempt=2 status=200 elapsed_ms=172 url=https://playmogo.com/e/xyz%22%3E%3C/iframe%3E' challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][SOURCE_PAGE_RETRY] source=https://doodstream.com/e/xyz attempt=2 delay_ms=1798 reason=challenge
+[STREAM][DOOD][SOURCE_PAGE] source=https://doodstream.com/e/xyz attempt=3 status=200 elapsed_ms=726 url=https://playmogo.com/e/xyz%22%3E%3C/iframe%3E' challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PAGE_FETCH] source=https://doodstream.com/e/xyz attempt=1 status=200 elapsed_ms=121 url=https://playmogo.com/e/xyz%22%3E%3C challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PAGE_FETCH_RETRY] source=https://doodstream.com/e/xyz attempt=1 delay_ms=810 reason=challenge
+[STREAM][DOOD][PAGE_FETCH] source=https://doodstream.com/e/xyz attempt=2 status=200 elapsed_ms=5119 url=https://playmogo.com/e/xyz%22%3E%3C challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PAGE_FETCH_RETRY] source=https://doodstream.com/e/xyz attempt=2 delay_ms=1526 reason=challenge
+[STREAM][DOOD][PAGE_FETCH] source=https://doodstream.com/e/xyz attempt=3 status=200 elapsed_ms=600 url=https://playmogo.com/e/xyz%22%3E%3C challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PASS_MD5_MISSING] source=https://doodstream.com/e/xyz page=https://playmogo.com/e/xyz%22%3E%3C
+[STREAM][DOOD][PAGE_FETCH] source=https://doodstream.com/e/xyz attempt=1 status=200 elapsed_ms=2993 url=https://playmogo.com/e/xyz challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PAGE_FETCH_RETRY] source=https://doodstream.com/e/xyz attempt=1 delay_ms=799 reason=challenge
+[STREAM][DOOD][PAGE_FETCH] source=https://doodstream.com/e/xyz attempt=2 status=200 elapsed_ms=1174 url=https://playmogo.com/e/xyz challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PAGE_FETCH_RETRY] source=https://doodstream.com/e/xyz attempt=2 delay_ms=1636 reason=challenge
+[STREAM][DOOD][PAGE_FETCH] source=https://doodstream.com/e/xyz attempt=3 status=200 elapsed_ms=195 url=https://playmogo.com/e/xyz challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PASS_MD5_MISSING] source=https://doodstream.com/e/xyz page=https://playmogo.com/e/xyz
+[STREAM][DOOD][RESOLVE_FAILED] source=https://doodstream.com/e/xyz
+[TURTLEVIP][BROWSER] Timed out before a playable runtime URL appeared for https://doodstream.com/e/xyz
+[HTML_RESOLVE] preview is not the film; trying hoster https://streamtape.com/e/abc'
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[COOKIES] Loaded 1 cookies from C:\Users\Mouad\Desktop\video_player\streamtape.com_cookies.txt
+[streamtape] embed fetch returned 404
+[HTML_RESOLVE] preview is not the film; trying hoster https://doodstream.com/e/xyz'
+[YTDLP] doodstream.com: no info -- ERROR: Unsupported URL: https://playmogo.com/e/xyz
+[STREAM][DOOD][YTDLP_BROWSER_COOKIES_FAILED] source=https://doodstream.com/e/xyz browser=brave returncode=1 stderr=ERROR: Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info\nERROR: Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info
+[STREAM][DOOD][YTDLP_BROWSER_COOKIES_UNAVAILABLE] source=https://doodstream.com/e/xyz error=ERROR: Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info\nERROR: Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info
+[YTDLP] doodstream.com: no info -- ERROR: Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info
+ERROR: Could not copy Chrome cookie database. See  https://github.com/yt-dlp/yt-dlp/issues/7271  for more info
+[SUBS] playmogo.com: no caption file and no subtitle endpoint referenced in the page
+[SUBS] wrote 0 subtitle line(s) from the page to C:\Users\Mouad\Desktop\video_player\subtitles_debug.txt -- that file says what the site actually offers
+[STREAM][DOOD][START] source=https://doodstream.com/e/xyz host=doodstream.com cookies=1 cf_bypass=True
+[STREAM][DOOD][SOURCE_PAGE] source=https://doodstream.com/e/xyz attempt=1 status=200 elapsed_ms=577 url=https://playmogo.com/e/xyz' challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][SOURCE_PAGE_RETRY] source=https://doodstream.com/e/xyz attempt=1 delay_ms=799 reason=challenge
+[STREAM][DOOD][SOURCE_PAGE] source=https://doodstream.com/e/xyz attempt=2 status=200 elapsed_ms=219 url=https://playmogo.com/e/xyz' challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][SOURCE_PAGE_RETRY] source=https://doodstream.com/e/xyz attempt=2 delay_ms=1572 reason=challenge
+[STREAM][DOOD][SOURCE_PAGE] source=https://doodstream.com/e/xyz attempt=3 status=200 elapsed_ms=526 url=https://playmogo.com/e/xyz' challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PAGE_FETCH] source=https://doodstream.com/e/xyz attempt=1 status=200 elapsed_ms=552 url=https://playmogo.com/e/xyz challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PAGE_FETCH_RETRY] source=https://doodstream.com/e/xyz attempt=1 delay_ms=1027 reason=challenge
+[STREAM][DOOD][PAGE_FETCH] source=https://doodstream.com/e/xyz attempt=2 status=200 elapsed_ms=119 url=https://playmogo.com/e/xyz challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PAGE_FETCH_RETRY] source=https://doodstream.com/e/xyz attempt=2 delay_ms=1787 reason=challenge
+[STREAM][DOOD][PAGE_FETCH] source=https://doodstream.com/e/xyz attempt=3 status=200 elapsed_ms=317 url=https://playmogo.com/e/xyz challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PASS_MD5_MISSING] source=https://doodstream.com/e/xyz page=https://playmogo.com/e/xyz
+[STREAM][DOOD][PAGE_FETCH] source=https://doodstream.com/e/xyz attempt=1 status=200 elapsed_ms=293 url=https://playmogo.com/e/xyz challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PAGE_FETCH_RETRY] source=https://doodstream.com/e/xyz attempt=1 delay_ms=970 reason=challenge
+[STREAM][DOOD][PAGE_FETCH] source=https://doodstream.com/e/xyz attempt=2 status=200 elapsed_ms=334 url=https://playmogo.com/e/xyz challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PAGE_FETCH_RETRY] source=https://doodstream.com/e/xyz attempt=2 delay_ms=1558 reason=challenge
+[STREAM][DOOD][PAGE_FETCH] source=https://doodstream.com/e/xyz attempt=3 status=200 elapsed_ms=1085 url=https://playmogo.com/e/xyz challenged=True content_type=text/html; charset=UTF-8
+[STREAM][DOOD][PASS_MD5_MISSING] source=https://doodstream.com/e/xyz page=https://playmogo.com/e/xyz
+[STREAM][DOOD][RESOLVE_FAILED] source=https://doodstream.com/e/xyz
+[TURTLEVIP][BROWSER] Fallback failed: DevTools websocket closed
+[HTML_RESOLVE] preview is not the film; trying hoster https://voe.sx/e/abc"></iframe>'
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[COOKIES] nothing for ['voe.sx', 'voe.sx', 'voe.ru'] in any browser profile either -- the yt-dlp module
+[COOKIES] No matching cookies found for domains=['voe.sx', 'voe.sx', 'voe.ru'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[VOE] static decode failed for https://voe.sx/e/abc"></iframe>' — trying the voe.js browser capture
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[VOE_BROWSER] no m3u8 seen for https://voe.sx/e/abc"></iframe>' within 90s
+[COOKIES] nothing for ['hanime.tv'] in any browser profile either -- the yt-dlp module
+[VOE] no stream for https://voe.sx/e/abc"></iframe>' from static decode or the browser capture
+[COOKIES] No matching cookies found for domains=['hanime.tv'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[HTML_RESOLVE] preview is not the film; trying hoster https://voe.sx/e/abc'
+[FAVICON] hanime.tv: 3 declared icon(s) — https://hanime.tv/favicon.png
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[FAVICON] hanime.tv: got site icon from https://hanime.tv/favicon.png
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[COOKIES] nothing for ['auth.hanime.tv', 'hanime.tv'] in any browser profile either -- the yt-dlp module
+[COOKIES] No matching cookies found for domains=['auth.hanime.tv', 'hanime.tv'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[COOKIES] nothing for ['voe.sx', 'voe.sx', 'voe.ru'] in any browser profile either -- the yt-dlp module
+[COOKIES] No matching cookies found for domains=['voe.sx', 'voe.sx', 'voe.ru'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[HENTAI] hanime: Schoolgirl 2 (0 mirror(s))
+[HTML_RESOLVE] yt-dlp returned a preview for https://hanime.tv/playlists/oyvyglr5goea5krvr5m7/video/nikuen-1; looking for the full video
+[SUBS] hanime.tv: no caption file and no subtitle endpoint referenced in the page
+[SUBS] wrote 0 subtitle line(s) from the page to C:\Users\Mouad\Desktop\video_player\subtitles_debug.txt -- that file says what the site actually offers
+[VOE] static decode failed for https://voe.sx/e/abc' — trying the voe.js browser capture
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[VOE_BROWSER] failed for https://voe.sx/e/abc': BrowserContext.new_page: Target page, context or browser has been closed
+Browser logs:
+
+<launching> C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,AutoDeElevate,RenderDocument,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --no-sandbox --window-position=60,60 --window-size=1280,800 --mute-audio --autoplay-policy=no-user-gesture-required --disable-blink-features=AutomationControlled --user-data-dir=C:\Users\Mouad\AppData\Local\Temp\voe_capture_profile --remote-debugging-pipe about:blank
+<launched> pid=13580
+[VOE] no stream for https://voe.sx/e/abc' from static decode or the browser capture
+[HTML_RESOLVE] candidate 0 bytes 0s skip probe failed https://cdn.havenclick.com/ads/ad.mp4
+[HTML_RESOLVE] candidate 0 bytes 0s skip probe failed https://cdn.havenclick.com/ads/ad.mp4'
+[HTML_RESOLVE] no full video among 2 page candidate(s)
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+PAGE_TITLE::videoplayer/test_hentai_sites.py at arena/01a0cc1f-videoplayer � aaqwzsxedc272-svg/videoplayer � GitHub
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_octo=GH1.1.425356809.1790317920; cpu_bucket=md; preferred_color_mode=light
+[BROWSER_CLICK][JWPROBE] jwplayer_api=False containers=0 playlist_items=0 source_files=0 files=[]
+MEDIA_URL::https://github.githubassets.com/assets/high-contrast-cookie-e3d808ee18eb9784.js
+MEDIA_URL::https://github.githubassets.com/assets/environment-708f2666cf17d064.js
+MEDIA_URL::https://github.githubassets.com/assets/github-elements-66aed2456c11e9ae.js
+MEDIA_URL::https://github.githubassets.com/assets/element-registry-f1cbb7298cf486b3.js
+MEDIA_URL::https://github.githubassets.com/assets/behaviors-b79957e82763d441.js
+MEDIA_URL::https://github.githubassets.com/assets/code-menu-9baf417c0b82daae.js
+MEDIA_URL::https://github.githubassets.com/assets/code-view-e2feb66908368c3b.js
+MEDIA_URL::https://github.githubassets.com/assets/notifications-subscriptions-menu-1e749823c7a9d166.js
+MEDIA_URL::https://avatars.githubusercontent.com/u/261834830?v=4&size=40
+MEDIA_URL::https://avatars.githubusercontent.com/u/297053741?v=4&size=40
+BROWSER_COOKIES::_octo=GH1.1.425356809.1790317920; cpu_bucket=md; preferred_color_mode=light; tz=UTC
+[BROWSER_CLICK] killed capture subprocess (deadline reached) for https://hanime.tv/playlists/oyvyglr5goea5krvr5m7/video/nikuen-1
+[BROWSER_CLICK] nothing captured for https://hanime.tv/playlists/oyvyglr5goea5krvr5m7/video/nikuen-1 — subprocess output:
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+BROWSER_COOKIES::_octo=GH1.1.425356809.1790317920; cpu_bucket=md; preferred_color_mode=light; tz=UTC
+PAGE_TITLE::Schoolgirl 2 - Watch Nikuen 1 - hanime.tv
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+[BROWSER_CLICK] clicked load-video control: absolute isolate overflow-hidden z-50 group w-full h-full grid cursor-pointer pl
+[BROWSER_CLICK][JWPROBE] jwplayer_api=False containers=0 playlist_items=0 source_files=0 files=[]
+MEDIA_URL::https://s0.2mdn.net/instream/video/client.js
+MEDIA_URL::https://hanime-cdn.com/js/vendor.6cb274d12de4872d245a5bc7781bdc5e.min.js
+MEDIA_URL::/_astro/iVJVT9Tr.js
+MEDIA_URL::/_astro/B8RVNPyy.js
+MEDIA_URL::/_astro/C_6f_MY_.js
+MEDIA_URL::https://imasdk.googleapis.com/js/sdkloader/ima3.js
+MEDIA_URL::https://cdn.jsdelivr.net/npm/video.js@8.23.8/dist/alt/video.novtt.min.js
+MEDIA_URL::/_astro/DwyRR1tE.js
+MEDIA_URL::https://imasdk.googleapis.com/js/core/bridge3.791.0_en.html#deid=%22%22&eventfe_experiment_ids=%5B%5D&fid=%22goog_1063357545%22&genotype_experiment_data=%7B%22experimentStateProto%22%3A%22%5B%5B%5B45713128%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45796605%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B45816264%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45761044%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45803173%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45722344%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45801847%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45784857%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45668885%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45685340%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45734716%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45735891%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45663239%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B839547366%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B45676441%2Cnull%2Cnull%2C%5B%5D%5D%2C%5Bnull%2C45645574%2Cnull%2C%5B%5D%5D%2C%5B45688859%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45685601%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5Bnull%2C45685602%2Cnull%2C%5Bnull%2C100%5D%5D%2C%5B45830425%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45820997%2Cnull%2Cnull%2C%5B%5D%5D%2C%5Bnull%2C45812678%2Cnull%2C%5B%5D%5D%2C%5B45756824%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B45794243%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45747172%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B775241416%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B781107959%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B781107958%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B792614055%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B781107957%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45729602%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45753603%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45753604%2Cnull%2Cnull%2C%5B%5D%5D%5D%2C%5B%5B16%2C%5B%5B10%2C%5B%5B83323635%5D%2C%5B83323636%2C%5B%5Bnull%2C45812678%2Cnull%2C%5Bnull%2C100%5D%5D%5D%5D%5D%5D%2C%5B50%2C%5B%5B83323870%5D%2C%5B83323871%2C%5B%5B45830425%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5B1000%2C%5B%5B95332046%5D%5D%5D%2C%5Bnull%2C%5B%5B95332047%5D%5D%5D%2C%5B10%2C%5B%5B95338769%2C%5B%5Bnull%2C45645574%2Cnull%2C%5Bnull%2C1%5D%5D%5D%5D%2C%5B95338770%2C%5B%5Bnull%2C45645574%2Cnull%2C%5Bnull%2C2%5D%5D%5D%5D%5D%5D%2C%5B1%2C%5B%5B95373378%2C%5B%5B792614055%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%2C%5B95373379%2C%5B%5B45747172%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B781107959%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B792614055%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B781107957%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5B10%2C%5B%5B95378629%5D%2C%5B95378630%2C%5B%5B45729602%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%2C%5B95381582%2C%5B%5B45729602%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B45753603%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%2C%5B95381583%2C%5B%5B45729602%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B45753604%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5B10%2C%5B%5B95389581%5D%2C%5B95389582%2C%5B%5B635466687%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5Bnull%2C%5B%5B95391735%5D%5D%5D%2C%5B50%2C%5B%5B95394237%5D%2C%5B95394238%2C%5B%5B45801847%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5Bnull%2C%5B%5B95394594%5D%2C%5B95394595%2C%5B%5B45803173%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5B10%2C%5B%5B95398837%5D%2C%5B95398838%2C%5B%5Bnull%2C960449109%2Cnull%2C%5Bnull%2C1%5D%5D%5D%5D%5D%5D%2C%5B1%2C%5B%5B95401453%5D%2C%5B95401454%2C%5B%5B45668885%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5B50%2C%5B%5B95402052%5D%2C%5B95402053%2C%5B%5B957164676%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%5D%5D%5D%2Cnull%2Cnull%2C%5Bnull%2C1000%2C1%2C1000%5D%5D%22%7D&imalib_experiments=%5B95322027%2C95331589%2C95332046%5D&is_eap_loader=false&managed_js_experiment_id=0&page_correlator=1975179557847573&pvsid=8209193585370243&top_accessible_page_url=%22https%3A%2F%2Fhanime.tv%2Fplaylists%2Foyvyglr5goea5krvr5m7%2Fvideo%2Fnikuen-1%22
+MEDIA_URL::https://vjs.zencdn.net/vttjs/0.14.1/vtt.min.js
+MEDIA_URL::/_astro/DmrQmXOY.js
+MEDIA_URL::https://cdn.jsdelivr.net/npm/iconify-icon@3.0.2/dist/iconify-icon.min.js
+MEDIA_URL::/hls/3300/6l7fzfdhm5l0xk8q4x34dmbjwqZAzfvA6b7664vv9r87vt9v3lkqdr2nlj37fpyyzlhyr6yt75fdbd93gpy7lzsfzm3b23rhw2yrj09lnnw8zbvvxxkq2btjqhAhw5ynx3
+MEDIA_URL::https://pagead2.googlesyndication.com/omsdk/releases/live/omweb-v1.js
+[BROWSER_CLICK] clicked load-video control: absolute isolate overflow-hidden z-50 group w-full h-full grid cursor-pointer pl
+MEDIA_URL::https://evtubescms.phncdn.com/pre_videos/002/703/461/2703461/mp4_720.mp4
+BROWSER_COOKIES::_octo=GH1.1.425356809.1790317920; cpu_bucket=md; preferred_color_mode=light; tz=UTC
+MEDIA_DUR::https://evtubescms.phncdn.com/pre_videos/002/703/461/2703461/mp4_720.mp4|23|1280|720
+VERIFIED_MEDIA::https://evtubescms.phncdn.com/pre_videos/002/703/461/2703461/mp4_720.mp4
+[BROWSER_CLICK] killed capture subprocess (capture verified, child stuck closing browser) for https://hanime.tv/playlists/oyvyglr5goea5krvr5m7/video/nikuen-1
+[BROWSER_CLICK] dropped 1 candidate(s) that are the source page itself: https://hanime.tv/playlists/oyvyglr5goea5krvr5m7/video/nikuen-1
+[AD_SKIP] rejecting 23s ad-like capture: https://evtubescms.phncdn.com/pre_videos/002/703/461/2703461/mp4_720.mp4
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[BROWSER_CLICK] killed capture subprocess (deadline reached) for https://github.com/aaqwzsxedc272-svg/videoplayer/blob/arena/01a0cc1f-videoplayer/test_hentai_sites.py
+[BROWSER_CLICK] dropped 2 candidate(s) with no media shape (unverified fallback): https://avatars.githubusercontent.com/u/261834830?v=4&size=40
+[COOKIES] nothing for ['hanime.tv'] in any browser profile either -- the yt-dlp module
+[COOKIES] No matching cookies found for domains=['hanime.tv'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[COOKIES] Loaded 0 cookies from C:\Users\Mouad\Desktop\video_player\cookies.txt
+[COOKIES] nothing for ['auth.hanime.tv', 'hanime.tv'] in any browser profile either -- the yt-dlp module
+[COOKIES] No matching cookies found for domains=['auth.hanime.tv', 'hanime.tv'] -- this page will be fetched anonymously. Export the site's cookies to <domain>_cookies.txt to use your logged-in session.
+[HENTAI] hanime: Schoolgirl 2 (0 mirror(s))
+[HTML_RESOLVE] yt-dlp returned a preview for https://hanime.tv/playlists/oyvyglr5goea5krvr5m7/video/nikuen-2; looking for the full video
+[SUBS] hanime.tv: no caption file and no subtitle endpoint referenced in the page
+[SUBS] wrote 0 subtitle line(s) from the page to C:\Users\Mouad\Desktop\video_player\subtitles_debug.txt -- that file says what the site actually offers
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[BROWSER_CLICK] killed capture subprocess (deadline reached) for https://hanime.tv/playlists/oyvyglr5goea5krvr5m7/video/nikuen-2
+[BROWSER_CLICK] nothing captured for https://hanime.tv/playlists/oyvyglr5goea5krvr5m7/video/nikuen-2 — subprocess output:
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+PAGE_TITLE::Schoolgirl 2 - Watch Nikuen 2 - hanime.tv
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+[BROWSER_CLICK] clicked load-video control: absolute isolate overflow-hidden z-50 group w-full h-full grid cursor-pointer pl
+[BROWSER_CLICK][JWPROBE] jwplayer_api=False containers=0 playlist_items=0 source_files=0 files=[]
+MEDIA_URL::https://hanime-cdn.com/js/vendor.6cb274d12de4872d245a5bc7781bdc5e.min.js
+MEDIA_URL::/_astro/iVJVT9Tr.js
+MEDIA_URL::/_astro/B8RVNPyy.js
+MEDIA_URL::/_astro/C_6f_MY_.js
+MEDIA_URL::https://imasdk.googleapis.com/js/sdkloader/ima3.js
+MEDIA_URL::https://cdn.jsdelivr.net/npm/video.js@8.23.8/dist/alt/video.novtt.min.js
+MEDIA_URL::/_astro/DwyRR1tE.js
+MEDIA_URL::/_astro/DmrQmXOY.js
+MEDIA_URL::https://cdn.jsdelivr.net/npm/iconify-icon@3.0.2/dist/iconify-icon.min.js
+[BROWSER_CLICK] clicked load-video control: absolute isolate overflow-hidden z-50 group w-full h-full grid cursor-pointer pl
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+MEDIA_URL::https://s0.2mdn.net/instream/video/client.js
+MEDIA_URL::https://imasdk.googleapis.com/js/core/bridge3.791.0_en.html#deid=%22%22&eventfe_experiment_ids=%5B95401822%5D&fid=%22goog_2103843403%22&genotype_experiment_data=%7B%22experimentStateProto%22%3A%22%5B%5B%5B45713128%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45796605%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B45816264%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45761044%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45803173%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45722344%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45801847%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45784857%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45668885%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45685340%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45734716%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45735891%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45663239%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B839547366%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B45676441%2Cnull%2Cnull%2C%5B%5D%5D%2C%5Bnull%2C45645574%2Cnull%2C%5B%5D%5D%2C%5B45688859%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45685601%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5Bnull%2C45685602%2Cnull%2C%5Bnull%2C100%5D%5D%2C%5B45830425%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45820997%2Cnull%2Cnull%2C%5B%5D%5D%2C%5Bnull%2C45812678%2Cnull%2C%5B%5D%5D%2C%5B45756824%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B45794243%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45747172%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B775241416%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B781107959%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B781107958%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B792614055%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B781107957%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45729602%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45753603%2Cnull%2Cnull%2C%5B%5D%5D%2C%5B45753604%2Cnull%2Cnull%2C%5B%5D%5D%5D%2C%5B%5B16%2C%5B%5B10%2C%5B%5B83323635%5D%2C%5B83323636%2C%5B%5Bnull%2C45812678%2Cnull%2C%5Bnull%2C100%5D%5D%5D%5D%5D%5D%2C%5B50%2C%5B%5B83323870%5D%2C%5B83323871%2C%5B%5B45830425%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5B1000%2C%5B%5B95332046%5D%5D%5D%2C%5Bnull%2C%5B%5B95332047%5D%5D%5D%2C%5B10%2C%5B%5B95338769%2C%5B%5Bnull%2C45645574%2Cnull%2C%5Bnull%2C1%5D%5D%5D%5D%2C%5B95338770%2C%5B%5Bnull%2C45645574%2Cnull%2C%5Bnull%2C2%5D%5D%5D%5D%5D%5D%2C%5B1%2C%5B%5B95373378%2C%5B%5B792614055%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%2C%5B95373379%2C%5B%5B45747172%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B781107959%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B792614055%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B781107957%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5B10%2C%5B%5B95378629%5D%2C%5B95378630%2C%5B%5B45729602%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%2C%5B95381582%2C%5B%5B45729602%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B45753603%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%2C%5B95381583%2C%5B%5B45729602%2Cnull%2Cnull%2C%5B1%5D%5D%2C%5B45753604%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5B10%2C%5B%5B95389581%5D%2C%5B95389582%2C%5B%5B635466687%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5Bnull%2C%5B%5B95391735%5D%5D%5D%2C%5B50%2C%5B%5B95394237%5D%2C%5B95394238%2C%5B%5B45801847%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5Bnull%2C%5B%5B95394594%5D%2C%5B95394595%2C%5B%5B45803173%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5B10%2C%5B%5B95398837%5D%2C%5B95398838%2C%5B%5Bnull%2C960449109%2Cnull%2C%5Bnull%2C1%5D%5D%5D%5D%5D%5D%2C%5B1%2C%5B%5B95401453%5D%2C%5B95401454%2C%5B%5B45668885%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%2C%5B50%2C%5B%5B95402052%5D%2C%5B95402053%2C%5B%5B957164676%2Cnull%2Cnull%2C%5B1%5D%5D%5D%5D%5D%5D%5D%5D%5D%2Cnull%2Cnull%2C%5Bnull%2C1000%2C1%2C1000%5D%5D%22%7D&imalib_experiments=%5B95322027%2C95331589%2C95332046%5D&is_eap_loader=false&managed_js_experiment_id=0&page_correlator=2615300778810875&pvsid=6544588788377963&top_accessible_page_url=%22https%3A%2F%2Fhanime.tv%2Fplaylists%2Foyvyglr5goea5krvr5m7%2Fvideo%2Fnikuen-2%22
+MEDIA_URL::https://vjs.zencdn.net/vttjs/0.14.1/vtt.min.js
+MEDIA_URL::/hls/3321/tmqnjpmx62ct0drpj4v6f78sy3Z796jgkA0ngw3pjz3xsvvyvzpgs5Ak8rhzlltlhnzyrh3d83dzp8v1622k2pk0xAgwcx16AAb1p6y2scvh53lc0lcx9A3gcqmj8jvmp1
+MEDIA_URL::https://pagead2.googlesyndication.com/omsdk/releases/live/omweb-v1.js
+[BROWSER_CLICK] clicked load-video control: absolute isolate overflow-hidden z-50 group w-full h-full grid cursor-pointer pl
+MEDIA_URL::https://htl-cdn.adtng.com/a7/creatives/221/1559/827231/1201799/1201799_video_with_sound.mp4
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+MEDIA_DUR::https://htl-cdn.adtng.com/a7/creatives/221/1559/827231/1201799/1201799_video_with_sound.mp4|30|1920|1080
+VERIFIED_MEDIA::https://htl-cdn.adtng.com/a7/creatives/221/1559/827231/1201799/1201799_video_with_sound.mp4
+[BROWSER_CLICK] killed capture subprocess (capture verified, child stuck closing browser) for https://hanime.tv/playlists/oyvyglr5goea5krvr5m7/video/nikuen-2
+[BROWSER_CLICK] dropped 1 candidate(s) that are the source page itself: https://hanime.tv/playlists/oyvyglr5goea5krvr5m7/video/nikuen-2
+[AD_SKIP] rejecting 30s ad-like capture: https://htl-cdn.adtng.com/a7/creatives/221/1559/827231/1201799/1201799_video_with_sound.mp4
+[BROWSER_CLICK] killed capture subprocess (deadline reached) for https://hentaimama.io/episodes/shoujo-ramune-episode-1/
+[BROWSER_CLICK] nothing captured for https://hentaimama.io/episodes/shoujo-ramune-episode-1/ — subprocess output:
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+[HENTAI] the Cloudflare click did not clear the page
+[HENTAI] no stream; the Cloudflare page was not played for https://hentaimama.io/episodes/shoujo-ramune-episode-1/
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+PAGE_TITLE::Shoujo Ramune Episode 1 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_ga=GA1.1.881379865.1790304129; __PPU_puid=16912669746576622908; UGVyc2lzdFN0b3JhZ2U=%7B%22CAIFRQ%22%3A%22AD4pWwAAAAAAAAACAD2o8gAAAAAAAAACAD1ERQAAAAAAAAABAD1DbQAAAAAAAAABADxGUwAAAAAAAAACADxGUgAAAAAAAAAFADxGUQAAAAAAAAAEADssGAAAAAAAAAAC%22%2C%22CAIFRT%22%3A%22AD4pWwAAAABqtkYgAD2o8gAAAABqtvzwAD1ERQAAAABqtqiQAD1DbQAAAABqt1FQADxGUwAAAABqt1FQADxGUgAAAABqt1FQADxGUQAAAABqt1FQADssGAAAAABqtqiQ%22%7D; bnState_2146999=%7B%22impressions%22%3A6%2C%22delayStarted%22%3A0%7D; _ga_W2QHGT7ZZ9=GS2.1.s1790314494$o2$g1$t1790318626$j60$l0$h0
+MEDIA_URL::https://playhubconnect.com/bn/alternative/118/69f/cf6/11869fcf666ed7d8e2dce913175f1c9a4e69e38c-alt.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790322061/PMkYf0ZHLhzLCzg-095BMA/output/S/shoujo-ramune/1/hls/master.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790322061/PMkYf0ZHLhzLCzg-095BMA/output/S/shoujo-ramune/1/hls/1080p/index.m3u8
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9580-0-728x90.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9731-0-300x250.medium.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790322061/PMkYf0ZHLhzLCzg-095BMA/output/S/shoujo-ramune/1/hls/720p/index.m3u8
+MEDIA_URL::https://cdn.banhq.com/mp4/7/9/79098a5ed789f8675c75bf494d9bac87.mp4
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-1/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-1/: https://hentaidoge.org/s/1790322061/PMkYf0ZHLhzLCzg-095BMA/output/S/shoujo-ramune/1/hls/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaimama.io
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790322061/PMkYf0ZHLhzLCzg-095BMA/output/S/shoujo-ramune/1/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 1 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+[STREAM][HENTAIMAMA][PLAYBACK_APPLY] source=https://hentaimama.io/episodes/shoujo-ramune-episode-1/ playback_url=https://hentaidoge.org/s/1790322061/PMkYf0ZHLhzLCzg-095BMA/output/S/shoujo-ramune/1/hls/master.m3u8 age_ms=1691 has_cookie=True
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-1/ status=LoadingMedia
+[PLAYBACK][LOADFILE] https://hentaidoge.org/s/1790322061/PMkYf0ZHLhzLCzg-095BMA/output/S/shoujo-ramune/1/hls/master.m3u8
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://hentaidoge.org/s/1790322061/PMkYf0ZHLhzLCzg-095BMA/output/S/shoujo-ramune/1/hls/master.m3u8
+Looking for subtitle mapping for: https://hentaimama.io/episodes/shoujo-ramune-episode-1/
+No saved subtitle for this video or its mirrors: https://hentaimama.io/episodes/shoujo-ramune-episode-1/
+[SUBS] no usable caption track for https://hentaimama.io/episodes/shoujo-ramune-episode-1/ (0 offered by the resolver)
+[PLAYBACK][FILE_LOADED] https://hentaidoge.org/s/1790322061/PMkYf0ZHLhzLCzg-095BMA/output/S/shoujo-ramune/1/hls/master.m3u8
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-1/ status=LoadedMedia
+[mpv][perf] profile=base 1920x1080 fps=25.00 bitrate=0kbps hwdec=d3d11va-copy config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
+[MPV][error][ffmpeg/audio] aac: env_facs_q 251 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 245 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 254 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 254 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 254 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 251 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 252 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-1/ status=EndOfMedia
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+PAGE_TITLE::Shoujo Ramune Episode 2 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_ga=GA1.1.881379865.1790304129; __PPU_puid=16912669746576622908; UGVyc2lzdFN0b3JhZ2U=%7B%22CAIFRQ%22%3A%22AD4pWwAAAAAAAAACAD2o8gAAAAAAAAACAD1ERQAAAAAAAAABAD1DbQAAAAAAAAABADxGUwAAAAAAAAACADxGUgAAAAAAAAAFADxGUQAAAAAAAAAEADssHgAAAAAAAAACADssGAAAAAAAAAAC%22%2C%22CAIFRT%22%3A%22AD4pWwAAAABqtkYgAD2o8gAAAABqtvzwAD1ERQAAAABqtqiQAD1DbQAAAABqt1FQADxGUwAAAABqt1FQADxGUgAAAABqt1FQADxGUQAAAABqt1FQADssHgAAAABqtqiQADssGAAAAABqtqiQ%22%7D; bnState_2146999=%7B%22impressions%22%3A8%2C%22delayStarted%22%3A0%7D; _ga_W2QHGT7ZZ9=GS2.1.s1790314494$o2$g1$t1790319173$j53$l0$h0
+VOE_M3U8::https://hentaidoge.org/s/1790322655/uq5T-IAdJ3lSZvXnYY0HLA/output/S/shoujo-ramune/2/hls/master.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790322655/uq5T-IAdJ3lSZvXnYY0HLA/output/S/shoujo-ramune/2/hls/1080p/index.m3u8
+MEDIA_URL::https://playhubconnect.com/bn/alternative/118/69f/cf6/11869fcf666ed7d8e2dce913175f1c9a4e69e38c-alt.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790322655/uq5T-IAdJ3lSZvXnYY0HLA/output/S/shoujo-ramune/2/hls/720p/index.m3u8
+MEDIA_URL::https://cdn.banhq.com/mp4/c/3/c38e707be7c91f28e99fc8d2ae7e9a57.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9325-0-728x90.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9202-1-300x250.medium.mp4
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-2/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-2/: https://hentaidoge.org/s/1790322655/uq5T-IAdJ3lSZvXnYY0HLA/output/S/shoujo-ramune/2/hls/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaimama.io
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790322655/uq5T-IAdJ3lSZvXnYY0HLA/output/S/shoujo-ramune/2/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 2 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+[STREAM][HENTAIMAMA][PLAYBACK_APPLY] source=https://hentaimama.io/episodes/shoujo-ramune-episode-2/ playback_url=https://hentaidoge.org/s/1790322655/uq5T-IAdJ3lSZvXnYY0HLA/output/S/shoujo-ramune/2/hls/master.m3u8 age_ms=1328 has_cookie=True
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-2/ status=LoadingMedia
+[PLAYBACK][LOADFILE] https://hentaidoge.org/s/1790322655/uq5T-IAdJ3lSZvXnYY0HLA/output/S/shoujo-ramune/2/hls/master.m3u8
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://hentaidoge.org/s/1790322655/uq5T-IAdJ3lSZvXnYY0HLA/output/S/shoujo-ramune/2/hls/master.m3u8
+[PLAYBACK][END_FILE] https://hentaidoge.org/s/1790322655/uq5T-IAdJ3lSZvXnYY0HLA/output/S/shoujo-ramune/2/hls/master.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'stop', 'playlist_entry_id': 1}>
+Looking for subtitle mapping for: https://hentaimama.io/episodes/shoujo-ramune-episode-2/
+No saved subtitle for this video or its mirrors: https://hentaimama.io/episodes/shoujo-ramune-episode-2/
+[SUBS] no usable caption track for https://hentaimama.io/episodes/shoujo-ramune-episode-2/ (0 offered by the resolver)
+[PLAYBACK][FILE_LOADED] https://hentaidoge.org/s/1790322655/uq5T-IAdJ3lSZvXnYY0HLA/output/S/shoujo-ramune/2/hls/master.m3u8
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-2/ status=LoadedMedia
+[mpv][perf] profile=base 1920x1080 fps=29.97 bitrate=0kbps hwdec=d3d11va-copy config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
+[MPV][error][ffmpeg/video] h264: co located POCs unavailable
+
+[MPV][error][ffmpeg/video] h264: mmco: unref short failure
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 254 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 241 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 254 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 253 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 254 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 248 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 253 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 249 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 254 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][main] Too many events queued.
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 251 is invalid
+
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-2/ status=EndOfMedia
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+PAGE_TITLE::Shoujo Ramune Episode 3 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_ga=GA1.1.881379865.1790304129; __PPU_puid=16912669746576622908; bnState_2146999=%7B%22impressions%22%3A10%2C%22delayStarted%22%3A0%7D; _ga_W2QHGT7ZZ9=GS2.1.s1790314494$o2$g1$t1790319694$j60$l0$h0; UGVyc2lzdFN0b3JhZ2U=%7B%22CAIFRQ%22%3A%22AD4pWwAAAAAAAAACAD2o8gAAAAAAAAACAD1ERQAAAAAAAAABAD1DbQAAAAAAAAABADxGUwAAAAAAAAACADxGUgAAAAAAAAAFADxGUQAAAAAAAAAEADssHgAAAAAAAAACADssGAAAAAAAAAAC%22%2C%22CAIFRT%22%3A%22AD4pWwAAAABqtkYgAD2o8gAAAABqtvzwAD1ERQAAAABqtqiQAD1DbQAAAABqt1FQADxGUwAAAABqt1FQADxGUgAAAABqt1FQADxGUQAAAABqt1FQADssHgAAAABqtqiQADssGAAAAABqtqiQ%22%7D
+MEDIA_URL::https://playhubconnect.com/bn/alternative/eb7/eb4/8bc/eb7eb48bc1ad053271400f6cc3806762ea77e8eb-alt.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790323300/YZZeENyaIt0nyWXw0JItIg/output/S/shoujo-ramune/3/hls/master.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790323300/YZZeENyaIt0nyWXw0JItIg/output/S/shoujo-ramune/3/hls/1080p/index.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790323300/YZZeENyaIt0nyWXw0JItIg/output/S/shoujo-ramune/3/hls/720p/index.m3u8
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9579-0-728x90.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9678-0-300x250.medium.mp4
+MEDIA_URL::https://cdn.banhq.com/mp4/c/3/c38e707be7c91f28e99fc8d2ae7e9a57.mp4
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-3/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-3/: https://hentaidoge.org/s/1790323300/YZZeENyaIt0nyWXw0JItIg/output/S/shoujo-ramune/3/hls/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaimama.io
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790323300/YZZeENyaIt0nyWXw0JItIg/output/S/shoujo-ramune/3/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 3 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+[STREAM][HENTAIMAMA][PLAYBACK_APPLY] source=https://hentaimama.io/episodes/shoujo-ramune-episode-3/ playback_url=https://hentaidoge.org/s/1790323300/YZZeENyaIt0nyWXw0JItIg/output/S/shoujo-ramune/3/hls/master.m3u8 age_ms=1649 has_cookie=True
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-3/ status=LoadingMedia
+[PLAYBACK][LOADFILE] https://hentaidoge.org/s/1790323300/YZZeENyaIt0nyWXw0JItIg/output/S/shoujo-ramune/3/hls/master.m3u8
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://hentaidoge.org/s/1790323300/YZZeENyaIt0nyWXw0JItIg/output/S/shoujo-ramune/3/hls/master.m3u8
+[PLAYBACK][END_FILE] https://hentaidoge.org/s/1790323300/YZZeENyaIt0nyWXw0JItIg/output/S/shoujo-ramune/3/hls/master.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'stop', 'playlist_entry_id': 2}>
+Looking for subtitle mapping for: https://hentaimama.io/episodes/shoujo-ramune-episode-3/
+No saved subtitle for this video or its mirrors: https://hentaimama.io/episodes/shoujo-ramune-episode-3/
+[SUBS] no usable caption track for https://hentaimama.io/episodes/shoujo-ramune-episode-3/ (0 offered by the resolver)
+[PLAYBACK][FILE_LOADED] https://hentaidoge.org/s/1790323300/YZZeENyaIt0nyWXw0JItIg/output/S/shoujo-ramune/3/hls/master.m3u8
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-3/ status=LoadedMedia
+[mpv][perf] profile=base 1920x1080 fps=25.00 bitrate=0kbps hwdec=d3d11va-copy config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
+[MPV][error][ffmpeg/video] h264: co located POCs unavailable
+
+[MPV][error][ffmpeg/video] h264: mmco: unref short failure
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 253 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 253 is invalid
+
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-3/ status=EndOfMedia
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+PAGE_TITLE::Shoujo Ramune Episode 4 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_ga=GA1.1.881379865.1790304129; __PPU_puid=16912669746576622908; UGVyc2lzdFN0b3JhZ2U=%7B%22CAIFRQ%22%3A%22AD4pWwAAAAAAAAACAD2o8gAAAAAAAAACAD1ERQAAAAAAAAABAD1DbQAAAAAAAAACADxGUwAAAAAAAAACADxGUgAAAAAAAAAFADxGUQAAAAAAAAAEADupqgAAAAAAAAABADssHgAAAAAAAAACADssGAAAAAAAAAAC%22%2C%22CAIFRT%22%3A%22AD4pWwAAAABqtkYgAD2o8gAAAABqtvzwAD1ERQAAAABqtqiQAD1DbQAAAABqt1FQADxGUwAAAABqt1FQADxGUgAAAABqt1FQADxGUQAAAABqt1FQADupqgAAAABqt1FQADssHgAAAABqtqiQADssGAAAAABqtqiQ%22%7D; bnState_2146999=%7B%22impressions%22%3A11%2C%22delayStarted%22%3A0%7D; _ga_W2QHGT7ZZ9=GS2.1.s1790314494$o2$g1$t1790320055$j52$l0$h0
+VOE_M3U8::https://hentaidoge.org/s/1790323632/LBUL4NdIN86VZCIOUJEgdQ/output/S/shoujo-ramune/4/hls/master.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790323632/LBUL4NdIN86VZCIOUJEgdQ/output/S/shoujo-ramune/4/hls/1080p/index.m3u8
+MEDIA_URL::https://playhubconnect.com/bn/alternative/eb7/eb4/8bc/eb7eb48bc1ad053271400f6cc3806762ea77e8eb-alt.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790323632/LBUL4NdIN86VZCIOUJEgdQ/output/S/shoujo-ramune/4/hls/720p/index.m3u8
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9577-0-728x90.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9667-0-300x250.medium.mp4
+MEDIA_URL::https://cdn.banhq.com/mp4/b/7/b7f00250159d1f2ebd04cd50bb7ec05d.mp4
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-4/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-4/: https://hentaidoge.org/s/1790323632/LBUL4NdIN86VZCIOUJEgdQ/output/S/shoujo-ramune/4/hls/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaimama.io
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790323632/LBUL4NdIN86VZCIOUJEgdQ/output/S/shoujo-ramune/4/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 4 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+[STREAM][HENTAIMAMA][PLAYBACK_APPLY] source=https://hentaimama.io/episodes/shoujo-ramune-episode-4/ playback_url=https://hentaidoge.org/s/1790323632/LBUL4NdIN86VZCIOUJEgdQ/output/S/shoujo-ramune/4/hls/master.m3u8 age_ms=1012 has_cookie=True
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-4/ status=LoadingMedia
+[PLAYBACK][LOADFILE] https://hentaidoge.org/s/1790323632/LBUL4NdIN86VZCIOUJEgdQ/output/S/shoujo-ramune/4/hls/master.m3u8
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://hentaidoge.org/s/1790323632/LBUL4NdIN86VZCIOUJEgdQ/output/S/shoujo-ramune/4/hls/master.m3u8
+[PLAYBACK][END_FILE] https://hentaidoge.org/s/1790323632/LBUL4NdIN86VZCIOUJEgdQ/output/S/shoujo-ramune/4/hls/master.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'stop', 'playlist_entry_id': 3}>
+Looking for subtitle mapping for: https://hentaimama.io/episodes/shoujo-ramune-episode-4/
+No saved subtitle for this video or its mirrors: https://hentaimama.io/episodes/shoujo-ramune-episode-4/
+[SUBS] no usable caption track for https://hentaimama.io/episodes/shoujo-ramune-episode-4/ (0 offered by the resolver)
+[PLAYBACK][FILE_LOADED] https://hentaidoge.org/s/1790323632/LBUL4NdIN86VZCIOUJEgdQ/output/S/shoujo-ramune/4/hls/master.m3u8
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-4/ status=LoadedMedia
+[mpv][perf] profile=base 1920x1080 fps=25.00 bitrate=0kbps hwdec=['d3d11va-copy'] config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
+[MPV][error][ffmpeg/video] h264: mmco: unref short failure
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 254 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 254 is invalid
+
+[MPV][error][ffmpeg/audio] aac: env_facs_q 255 is invalid
+
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-4/ status=EndOfMedia
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+DEBUG: Turning screen OFF
+DEBUG: Screen state reset to ON (Windows input wake detected)
+DEBUG: Ignoring PageDown during screen wake guard
+PAGE_TITLE::Shoujo Ramune Episode 5 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_ga=GA1.1.881379865.1790304129; __PPU_puid=16912669746576622908; bnState_2146999=%7B%22impressions%22%3A13%2C%22delayStarted%22%3A0%7D; _ga_W2QHGT7ZZ9=GS2.1.s1790314494$o2$g1$t1790320673$j60$l0$h0; UGVyc2lzdFN0b3JhZ2U=%7B%22CAIFRQ%22%3A%22AD4pWwAAAAAAAAACAD2o8gAAAAAAAAACAD1ERQAAAAAAAAABAD1DbQAAAAAAAAACADxGUwAAAAAAAAACADxGUgAAAAAAAAAFADxGUQAAAAAAAAAEADupqgAAAAAAAAABADssHgAAAAAAAAACADssGAAAAAAAAAAC%22%2C%22CAIFRT%22%3A%22AD4pWwAAAABqtkYgAD2o8gAAAABqtvzwAD1ERQAAAABqtqiQAD1DbQAAAABqt1FQADxGUwAAAABqt1FQADxGUgAAAABqt1FQADxGUQAAAABqt1FQADupqgAAAABqt1FQADssHgAAAABqtqiQADssGAAAAABqtqiQ%22%7D
+VOE_M3U8::https://hentaidoge.org/s/1790324044/F2V08ZbIA0LtyKelovf6wA/output/S/shoujo-ramune/5/hls/master.m3u8
+MEDIA_URL::https://playhubconnect.com/bn/alternative/118/69f/cf6/11869fcf666ed7d8e2dce913175f1c9a4e69e38c-alt.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790324044/F2V08ZbIA0LtyKelovf6wA/output/S/shoujo-ramune/5/hls/1080p/index.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790324044/F2V08ZbIA0LtyKelovf6wA/output/S/shoujo-ramune/5/hls/720p/index.m3u8
+MEDIA_URL::https://cdn.banhq.com/mp4/8/b/8bbaf92223bc4bae8457b5eaaf0a700b.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9580-0-728x90.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9821-0-300x250.medium.mp4
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-5/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-5/: https://hentaidoge.org/s/1790324044/F2V08ZbIA0LtyKelovf6wA/output/S/shoujo-ramune/5/hls/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaimama.io
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790324044/F2V08ZbIA0LtyKelovf6wA/output/S/shoujo-ramune/5/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 5 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+[STREAM][HENTAIMAMA][PLAYBACK_APPLY] source=https://hentaimama.io/episodes/shoujo-ramune-episode-5/ playback_url=https://hentaidoge.org/s/1790324044/F2V08ZbIA0LtyKelovf6wA/output/S/shoujo-ramune/5/hls/master.m3u8 age_ms=1037 has_cookie=True
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-5/ status=LoadingMedia
+[PLAYBACK][LOADFILE] https://hentaidoge.org/s/1790324044/F2V08ZbIA0LtyKelovf6wA/output/S/shoujo-ramune/5/hls/master.m3u8
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://hentaidoge.org/s/1790324044/F2V08ZbIA0LtyKelovf6wA/output/S/shoujo-ramune/5/hls/master.m3u8
+[PLAYBACK][END_FILE] https://hentaidoge.org/s/1790324044/F2V08ZbIA0LtyKelovf6wA/output/S/shoujo-ramune/5/hls/master.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'stop', 'playlist_entry_id': 4}>
+Looking for subtitle mapping for: https://hentaimama.io/episodes/shoujo-ramune-episode-5/
+No saved subtitle for this video or its mirrors: https://hentaimama.io/episodes/shoujo-ramune-episode-5/
+[SUBS] no usable caption track for https://hentaimama.io/episodes/shoujo-ramune-episode-5/ (0 offered by the resolver)
+[PLAYBACK][FILE_LOADED] https://hentaidoge.org/s/1790324044/F2V08ZbIA0LtyKelovf6wA/output/S/shoujo-ramune/5/hls/master.m3u8
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-5/ status=LoadedMedia
+[mpv][perf] profile=base 1920x1080 fps=29.97 bitrate=0kbps hwdec=['d3d11va-copy'] config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
+[MPV][error][ffmpeg/video] h264: co located POCs unavailable
+
+[MPV][error][ffmpeg/video] h264: mmco: unref short failure
+
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-5/ status=EndOfMedia
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 403 was the Cloudflare check
+[HENTAI] chrome131 HTTP 403 was the Cloudflare check
+[HENTAI] chrome124 HTTP 403 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] chrome HTTP 200 was the Cloudflare check
+[HENTAI] chrome131 HTTP 200 was the Cloudflare check
+[HENTAI] chrome124 HTTP 200 was the Cloudflare check
+[HENTAI] reusing the Cloudflare clearance from the last click
+[HENTAI] Cloudflare check. Clicking it in the background, same as fileditch, then reading the page.
+[MetadataScraper] build link7-scene
+[JAVGURU] VideoPlayer patched � jav.guru URL detection active.
+[GENERIC_JAV] VideoPlayer patched � URL detection active. (build R63-page-row)
+[JAVHD] VideoPlayer patched � javhd.today URL detection active.
+[FAMILYPORNHD] VideoPlayer patched � HTML URL detection active.
+[HENTAI] resolver loaded
+PAGE_TITLE::Shoujo Ramune Episode 6 � Watch Online Free in HD � Hentaimama
+BROWSER_UA::Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+BROWSER_COOKIES::_ga=GA1.1.881379865.1790304129; __PPU_puid=16912669746576622908; UGVyc2lzdFN0b3JhZ2U=%7B%22CAIFRQ%22%3A%22AD4pWwAAAAAAAAACAD2o8gAAAAAAAAACAD1ERQAAAAAAAAABAD1DbQAAAAAAAAACADxGUwAAAAAAAAACADxGUgAAAAAAAAAFADxGUQAAAAAAAAAEADupqgAAAAAAAAABADssHgAAAAAAAAADADssGAAAAAAAAAAC%22%2C%22CAIFRT%22%3A%22AD4pWwAAAABqtkYgAD2o8gAAAABqtvzwAD1ERQAAAABqtqiQAD1DbQAAAABqt1FQADxGUwAAAABqt1FQADxGUgAAAABqt1FQADxGUQAAAABqt1FQADupqgAAAABqt1FQADssHgAAAABqtqiQADssGAAAAABqtqiQ%22%7D; bnState_2146999=%7B%22impressions%22%3A15%2C%22delayStarted%22%3A0%7D; _ga_W2QHGT7ZZ9=GS2.1.s1790314494$o2$g1$t1790321079$j60$l0$h0
+VOE_M3U8::https://hentaidoge.org/s/1790324363/3_65kTnB1Ck1KnYb9P1VFA/output/S/shoujo-ramune/6/hls/master.m3u8
+MEDIA_URL::https://playhubconnect.com/bn/alternative/118/69f/cf6/11869fcf666ed7d8e2dce913175f1c9a4e69e38c-alt.mp4
+VOE_M3U8::https://hentaidoge.org/s/1790324363/3_65kTnB1Ck1KnYb9P1VFA/output/S/shoujo-ramune/6/hls/1080p/index.m3u8
+VOE_M3U8::https://hentaidoge.org/s/1790324363/3_65kTnB1Ck1KnYb9P1VFA/output/S/shoujo-ramune/6/hls/720p/index.m3u8
+MEDIA_URL::https://cdn.banhq.com/mp4/5/e/5ea273b262e5588031aae18d79b0b0c2.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9202-1-300x250.medium.mp4
+MEDIA_URL::https://cdn.storagexhd.com/files/video/9325-0-728x90.medium.mp4
+[BROWSER_CLICK] killed capture subprocess (file-host capture done, child stuck closing browser) for https://hentaimama.io/episodes/shoujo-ramune-episode-6/
+[BROWSER_CLICK] captured + probe-verified stream for https://hentaimama.io/episodes/shoujo-ramune-episode-6/: https://hentaidoge.org/s/1790324363/3_65kTnB1Ck1KnYb9P1VFA/output/S/shoujo-ramune/6/hls/master.m3u8
+[HENTAI] stored the Cloudflare clearance for hentaimama.io
+[HENTAI] stream after the Cloudflare click: https://hentaidoge.org/s/1790324363/3_65kTnB1Ck1KnYb9P1VFA/output/S/shoujo-ramune/6/hls/master.m3u8
+[HENTAI] hentaimama: Shoujo Ramune Episode 6 � Watch Online Free in HD � Hentaimama (0 mirror(s))
+[STREAM][HENTAIMAMA][PLAYBACK_APPLY] source=https://hentaimama.io/episodes/shoujo-ramune-episode-6/ playback_url=https://hentaidoge.org/s/1790324363/3_65kTnB1Ck1KnYb9P1VFA/output/S/shoujo-ramune/6/hls/master.m3u8 age_ms=963 has_cookie=True
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-6/ status=LoadingMedia
+[PLAYBACK][LOADFILE] https://hentaidoge.org/s/1790324363/3_65kTnB1Ck1KnYb9P1VFA/output/S/shoujo-ramune/6/hls/master.m3u8
+[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=True target=https://hentaidoge.org/s/1790324363/3_65kTnB1Ck1KnYb9P1VFA/output/S/shoujo-ramune/6/hls/master.m3u8
+[PLAYBACK][END_FILE] https://hentaidoge.org/s/1790324363/3_65kTnB1Ck1KnYb9P1VFA/output/S/shoujo-ramune/6/hls/master.m3u8 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'stop', 'playlist_entry_id': 5}>
+Looking for subtitle mapping for: https://hentaimama.io/episodes/shoujo-ramune-episode-6/
+No saved subtitle for this video or its mirrors: https://hentaimama.io/episodes/shoujo-ramune-episode-6/
+[SUBS] no usable caption track for https://hentaimama.io/episodes/shoujo-ramune-episode-6/ (0 offered by the resolver)
+[PLAYBACK][FILE_LOADED] https://hentaidoge.org/s/1790324363/3_65kTnB1Ck1KnYb9P1VFA/output/S/shoujo-ramune/6/hls/master.m3u8
+[STREAM][HENTAIMAMA][PLAYBACK_STATUS] source=https://hentaimama.io/episodes/shoujo-ramune-episode-6/ status=LoadedMedia
+[mpv][perf] profile=base 1920x1080 fps=24.00 bitrate=0kbps hwdec=d3d11va-copy config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
