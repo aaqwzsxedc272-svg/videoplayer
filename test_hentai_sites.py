@@ -228,6 +228,26 @@ def test_hentaimama_show_page_follows_episode():
     assert found['mirrors'] == ['https://voe.sx/e/abc']
 
 
+def test_capture_ignores_the_cloudflare_page():
+    blob = (
+        b'https://hentaihaven.xxx/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1'
+        b'?ray=a406da0a4d1f026a '
+        b'https://cdn.example/playlist.m3u8?token=abc '
+        b'<meta name="x-secure-token" content="sha512-token"> '
+        b'src="//player.example/player.php?data=blobdata"'
+    )
+    found = sites.urls_from_capture(blob)
+    assert found['media'] == ['https://cdn.example/playlist.m3u8?token=abc']
+    assert found['token'] == 'sha512-token'
+    assert found['players'] == ['https://player.example/player.php?data=blobdata']
+    sites.resolve(
+        'https://hentaihaven.xxx/watch/example/episode-1/',
+        fetch=Fake([
+            ('hentaihaven.xxx', sites._Resp(200, '<title>Just a moment...</title>')),
+        ]))
+    assert sites.last_block == 'cloudflare'
+
+
 def main():
     tests = [
         test_hosts,
@@ -237,6 +257,7 @@ def main():
         test_hentaini_series_page_uses_first_direct_episode,
         test_hanime_one_stream,
         test_hentaihaven_challenge_is_not_a_video,
+        test_capture_ignores_the_cloudflare_page,
         test_hentaihaven_one_stream,
         test_hentaihaven_show_page_follows_episode,
         test_hentaimama_mirrors,

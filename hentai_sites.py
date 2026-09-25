@@ -53,6 +53,11 @@ _HANIME_KEY = bytes.fromhex(
     '5d657a4dcb0bad1c637ff2e221059b10ff17ae39fe855003e846918941f4ebe3')
 _HANIME_HEADER = bytes.fromhex('6874762d696e7365637572652d7631')
 
+# Set when a fetch comes back as the Cloudflare check instead of a page.
+# The player reads this and opens the user's own Brave. It does not play
+# the check page.
+last_block = ''
+
 
 class _Resp:
     def __init__(self, status, text, headers=None, url=''):
@@ -171,6 +176,18 @@ def _looks_like_challenge(text):
     )
 
 
+def _mark_challenge(body, status, client):
+    global last_block
+    if _looks_like_challenge(body):
+        last_block = 'cloudflare'
+        print(
+            f'[HENTAI] {client} HTTP {status} was the Cloudflare check',
+            flush=True,
+        )
+        return True
+    return False
+
+
 def _default_fetch(method, url, headers=None, data=None, timeout=25):
     headers = dict(headers or {})
     headers.setdefault('Accept', 'text/html,application/xhtml+xml,application/json,*/*;q=0.8')
@@ -178,17 +195,18 @@ def _default_fetch(method, url, headers=None, data=None, timeout=25):
     method = method.upper()
     # A custom User-Agent on top of impersonation is what makes Cloudflare
     # show "Just a moment". Leave the fingerprint's own agent in place.
+    last = None
     try:
         import curl_cffi.requests as cfreq
         fn = cfreq.post if method == 'POST' else cfreq.get
-        last = None
+        errors = []
         for persona in ('chrome', 'chrome131', 'chrome124'):
             try:
                 response = fn(
                     url, impersonate=persona, timeout=timeout,
                     headers=headers, data=data)
             except Exception as exc:
-                last = exc
+                errors.append(f'{persona}:{type(exc).__name__}')
                 continue
             body = getattr(response, 'text', '') or ''
             status = getattr(response, 'status_code', 0)
@@ -197,24 +215,29 @@ def _default_fetch(method, url, headers=None, data=None, timeout=25):
                     status, body,
                     getattr(response, 'headers', {}) or {},
                     getattr(response, 'url', url) or url)
+            _mark_challenge(body, status, persona)
             last = response
-        if last is not None and not isinstance(last, Exception):
+        if errors and last is None:
+            print('[HENTAI] curl_cffi failed: ' + ', '.join(errors), flush=True)
+        if last is not None:
             return _Resp(
                 getattr(last, 'status_code', 0),
                 getattr(last, 'text', '') or '',
                 getattr(last, 'headers', {}) or {},
                 getattr(last, 'url', url) or url)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f'[HENTAI] curl_cffi unavailable ({type(exc).__name__})', flush=True)
     headers.setdefault('User-Agent', _UA)
     import requests
     fn = requests.post if method == 'POST' else requests.get
     response = fn(
         url, timeout=timeout, headers=headers, data=data,
         allow_redirects=True)
+    body = getattr(response, 'text', '') or ''
+    status = getattr(response, 'status_code', 0)
+    _mark_challenge(body, status, 'plain request')
     return _Resp(
-        getattr(response, 'status_code', 0),
-        getattr(response, 'text', '') or '',
+        status, body,
         getattr(response, 'headers', {}) or {},
         getattr(response, 'url', url) or url)
 
@@ -460,48 +483,34 @@ def _haven_episode_url(page_url, html):
     return f'{parsed.scheme}://{parsed.netloc}/watch/{slug.group(1)}/episode-1/'
 
 
-def resolve_hentaihaven(url, fetch):
-    page = fetch('GET', url)
-    html = page.text or ''
-    episode_url = _haven_episode_url(getattr(page, 'url', '') or url, html)
-    if episode_url and episode_url.rstrip('/') != str(url).rstrip('/'):
-        page = fetch('GET', episode_url)
-        html = page.text or ''
-        episode_url = getattr(page, 'url', '') or episode_url
-    else:
-        episode_url = getattr(page, 'url', '') or url
-    html = html_unescape(html or '').replace('\\/', '/')
-    if _looks_like_challenge(html):
-        print('[HENTAI] hentaihaven answered with the Cloudflare check, not the player', flush=True)
-        return None
-    match = re.search(r'(https?:)?(//[^"\'\s>]*player\.php\?data=[^"\'\s>]+)', html, re.I)
-    if not match:
-        match = re.search(r'(["\'])(/[^"\']*player\.php\?data=[^"\']+)', html, re.I)
-        player_url = _abs(episode_url, match.group(2)) if match else ''
-    else:
-        player_url = _abs(episode_url, (match.group(1) or 'https:') + match.group(2))
-    if not player_url:
-        return None
-    player = fetch('GET', player_url, headers={'Referer': episode_url})
-    token = ''
-    for tag in re.finditer(r'<meta\b[^>]*>', player.text or '', re.I):
+def haven_token_from_html(html):
+    text = html_unescape(html or '')
+    for tag in re.finditer(r'<meta\b[^>]*>', text, re.I):
         piece = tag.group(0)
         if 'x-secure-token' not in piece.lower():
             continue
         content = re.search(r'content=["\']([^"\']+)', piece, re.I)
         if content:
-            token = content.group(1)
-            break
-    if not token:
+            return content.group(1)
+    match = re.search(
+        r'x-secure-token["\']?\s+content=["\']([^"\']+)', text, re.I)
+    return match.group(1) if match else ''
+
+
+def haven_from_token(page_url, token, fetch, title=''):
+    """Finish the hentaihaven player once the browser already has the token."""
+    try:
+        config = haven_decode_token(token)
+    except Exception:
         return None
-    config = haven_decode_token(token)
     uri = str(config.get('uri') or '')
     if uri.startswith('//'):
         uri = 'https:' + uri
     if not uri or not config.get('en') or not config.get('iv'):
         return None
     api = uri.rstrip('/') + '/api.php'
-    origin = f"{urlparse(episode_url).scheme}://{urlparse(episode_url).netloc}"
+    parsed = urlparse(page_url)
+    origin = f'{parsed.scheme}://{parsed.netloc}' if parsed.netloc else 'https://hentaihaven.xxx'
     posted = fetch(
         'POST', api,
         headers={
@@ -525,13 +534,96 @@ def resolve_hentaihaven(url, fetch):
         if not isinstance(source, dict):
             continue
         src = _abs(api, source.get('src') or source.get('file') or '')
-        if src and _is_direct(src):
+        if src and _is_direct(src) and not _is_challenge_url(src):
             urls.append(src)
     if not urls:
         return None
     urls.sort(key=_height_hint, reverse=True)
-    title = _title_from_html(html) or _title_from_html(player.text or '')
-    return _result('hentaihaven', episode_url, title, urls[0], [], stable=False)
+    return _result('hentaihaven', page_url, title, urls[0], [], stable=False)
+
+
+_CAPTURE_MEDIA_RE = re.compile(
+    rb'https?://[A-Za-z0-9\-._~:/?#\[\]@!$&\'()*+,;=%]{12,500}'
+    rb'\.(?:m3u8|mp4|m4v|webm)'
+    rb'(?:\?[A-Za-z0-9\-._~:/?#\[\]@!$&\'()*+,;=%]{0,800})?',
+    re.I)
+_CAPTURE_PLAYER_RE = re.compile(
+    rb'(?:https?:)?//[A-Za-z0-9\-._~:/?#\[\]@!$&\'()*+,;=%]{0,200}'
+    rb'player\.php\?data=[A-Za-z0-9\-._~%+=]{8,800}',
+    re.I)
+
+
+def _is_challenge_url(url):
+    low = str(url or '').lower()
+    return (
+        'cdn-cgi/' in low
+        or 'challenge-platform' in low
+        or 'challenges.cloudflare.com' in low
+    )
+
+
+def urls_from_capture(blob):
+    """Media and player URLs from a browser cache file or network log.
+
+    The Cloudflare check URL is not a video, even when its query is long.
+    """
+    if isinstance(blob, str):
+        blob = blob.encode('utf-8', 'replace')
+    blob = blob or b''
+    media = []
+    players = []
+    for match in _CAPTURE_MEDIA_RE.finditer(blob):
+        url = match.group(0).decode('ascii', 'ignore')
+        if _is_direct(url) and not _is_ad(url) and not _is_challenge_url(url):
+            media.append(url)
+    for match in _CAPTURE_PLAYER_RE.finditer(blob):
+        url = match.group(0).decode('ascii', 'ignore')
+        if url.startswith('//'):
+            url = 'https:' + url
+        if not _is_challenge_url(url):
+            players.append(url)
+    return {
+        'media': _unique(media),
+        'players': _unique(players),
+        'token': haven_token_from_html(blob.decode('utf-8', 'replace')),
+    }
+
+
+def resolve_hentaihaven(url, fetch):
+    global last_block
+    page = fetch('GET', url)
+    html = page.text or ''
+    episode_url = _haven_episode_url(getattr(page, 'url', '') or url, html)
+    if episode_url and episode_url.rstrip('/') != str(url).rstrip('/'):
+        page = fetch('GET', episode_url)
+        html = page.text or ''
+        episode_url = getattr(page, 'url', '') or episode_url
+    else:
+        episode_url = getattr(page, 'url', '') or url
+    html = html_unescape(html or '').replace('\\/', '/')
+    if _looks_like_challenge(html):
+        last_block = 'cloudflare'
+        print('[HENTAI] hentaihaven answered with the Cloudflare check, not the player', flush=True)
+        return None
+    match = re.search(r'(https?:)?(//[^"\'\s>]*player\.php\?data=[^"\'\s>]+)', html, re.I)
+    if not match:
+        match = re.search(r'(["\'])(/[^"\']*player\.php\?data=[^"\']+)', html, re.I)
+        player_url = _abs(episode_url, match.group(2)) if match else ''
+    else:
+        player_url = _abs(episode_url, (match.group(1) or 'https:') + match.group(2))
+    if not player_url:
+        return None
+    player = fetch('GET', player_url, headers={'Referer': episode_url})
+    player_html = player.text or ''
+    if _looks_like_challenge(player_html):
+        last_block = 'cloudflare'
+        print('[HENTAI] hentaihaven player was the Cloudflare check, not the token', flush=True)
+        return None
+    token = haven_token_from_html(player_html)
+    if not token:
+        return None
+    title = _title_from_html(html) or _title_from_html(player_html)
+    return haven_from_token(episode_url, token, fetch, title=title)
 
 
 def _hanime_slug(url):
@@ -758,14 +850,20 @@ def resolve_hentaimama(url, fetch):
 
 
 def resolve(url, fetch=None):
+    global last_block
+    last_block = ''
     fetch = fetch or _default_fetch
     kind = site_kind(url)
     if kind == 'hentaini':
-        return resolve_hentaini(url, fetch)
-    if kind == 'hentaihaven':
-        return resolve_hentaihaven(url, fetch)
-    if kind == 'hanime':
-        return resolve_hanime(url, fetch)
-    if kind == 'hentaimama':
-        return resolve_hentaimama(url, fetch)
-    return None
+        found = resolve_hentaini(url, fetch)
+    elif kind == 'hentaihaven':
+        found = resolve_hentaihaven(url, fetch)
+    elif kind == 'hanime':
+        found = resolve_hanime(url, fetch)
+    elif kind == 'hentaimama':
+        found = resolve_hentaimama(url, fetch)
+    else:
+        found = None
+    if found:
+        last_block = ''
+    return found
