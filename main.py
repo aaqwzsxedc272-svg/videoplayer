@@ -46520,7 +46520,11 @@ try {
         The master list this site captures first has no picture. mpv then
         runs the clock on the audio rendition and draws nothing.
         """
-        if self._mpv is None:
+        player = getattr(self, 'media_player', None)
+        mpv = getattr(player, '_mpv', None)
+        if mpv is None:
+            mpv = getattr(self, '_mpv', None)
+        if mpv is None:
             return
         audio = str((stream_info or {}).get('audio_url') or '').strip()
         host = ''
@@ -46529,13 +46533,20 @@ try {
         except Exception:
             host = ''
         split = bool(audio) or 'octopusmanifest.org' in host or 'laidy.top' in host
+
+        def _set(name, value):
+            setter = getattr(player, '_set_mpv_option', None)
+            if callable(setter) and setter(name, value):
+                return
+            mpv[name] = value
+
         try:
             if split and audio:
-                self._mpv['audio-files'] = [audio]
+                _set('audio-files', [audio])
                 self._hentai_audio_attached = True
                 print(f'[HENTAI] sound from {audio[:140]}', flush=True)
             elif getattr(self, '_hentai_audio_attached', False):
-                self._mpv['audio-files'] = []
+                _set('audio-files', [])
                 self._hentai_audio_attached = False
         except Exception as exc:
             print(f'[HENTAI] audio track not attached ({type(exc).__name__})', flush=True)
@@ -46543,10 +46554,10 @@ try {
             if split:
                 # d3d11va-copy drops the frame when this codec is not in
                 # hardware. auto-copy-safe can fall back and still show it.
-                self._mpv['hwdec'] = 'auto-copy-safe'
+                _set('hwdec', 'auto-copy-safe')
                 self._hentai_hwdec_soft = True
             elif getattr(self, '_hentai_hwdec_soft', False):
-                self._mpv['hwdec'] = 'd3d11va-copy' if os.name == 'nt' else 'auto-copy-safe'
+                _set('hwdec', 'd3d11va-copy' if os.name == 'nt' else 'auto-copy-safe')
                 self._hentai_hwdec_soft = False
         except Exception:
             pass
@@ -48744,7 +48755,10 @@ try {
             self.media_player.setTlsVerify(stream_info.get('tls_verify', True))
         except Exception:
             pass
-        self._apply_hentai_split_playback(stream_info, playback_target)
+        try:
+            self._apply_hentai_split_playback(stream_info, playback_target)
+        except Exception as exc:
+            print(f'[HENTAI] split playback skipped ({type(exc).__name__})', flush=True)
         self.media_player.setSource(QUrl(playback_target))
         self.play_button.setEnabled(True)
         self.add_to_recent_files(file_path)
