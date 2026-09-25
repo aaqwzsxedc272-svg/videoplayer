@@ -40880,13 +40880,51 @@ try {
             time.sleep(1.5)
         return []
 
-    def _open_terabox_login_window(self):
-        """Sign in inside the user's own Brave. The password is never stored."""
+    def _terabox_cookie_records_from_jar(self, cookies):
+        records = []
+        for cookie in cookies or []:
+            name = str(getattr(cookie, 'name', '') or '')
+            value = str(getattr(cookie, 'value', '') or '')
+            domain = str(getattr(cookie, 'domain', '') or '')
+            if not name or not value or not domain:
+                continue
+            records.append({
+                'name': name,
+                'value': value,
+                'domain': domain,
+                'path': str(getattr(cookie, 'path', '') or '/') or '/',
+                'secure': bool(getattr(cookie, 'secure', False)),
+                'expires': getattr(cookie, 'expires', None) or -1,
+                'httpOnly': True,
+            })
+        return records
+
+    def _read_saved_brave_login(self):
+        """Read a TeraBox login the user just made in normal Brave.
+
+        Does not open a Google page. A controlled browser is what Google
+        refuses with "this browser or app may not be secure".
+        """
+        cache = getattr(self, '_profile_cookie_cache', None)
+        if isinstance(cache, dict):
+            cache.clear()
+        domains = [
+            'terabox.com', '1024tera.com', '1024terabox.com', '4funbox.com',
+            'nephobox.com', 'mirrobox.com', 'terabox.app', 'dubox.com',
+        ]
         try:
-            from playwright.sync_api import sync_playwright
-        except Exception:
-            print('[TERABOX] sign-in needs playwright', flush=True)
-            return []
+            found = self._profile_cookies_for(domains)
+        except Exception as exc:
+            print(f'[TERABOX] could not read Brave ({type(exc).__name__})', flush=True)
+            found = []
+        records = self._terabox_cookie_records_from_jar(found)
+        if any(str(item.get('name') or '').lower() == 'ndus' and item.get('value') for item in records):
+            print('[TERABOX] login read from your Brave', flush=True)
+            return records
+        return []
+
+    def _open_terabox_login_window(self):
+        """Open TeraBox in the user's normal Brave. The password is never stored."""
         cancel = getattr(self, '_terabox_login_cancel', None)
         if cancel is None:
             cancel = threading.Event()
@@ -40897,76 +40935,83 @@ try {
             self._terabox_login_done = done
         cancel.clear()
         done.clear()
-        records = []
+        opened = self._open_url_in_brave('https://www.terabox.com/')
+        print('[TERABOX] opened in your Brave' if opened else '[TERABOX] could not open Brave', flush=True)
+        try:
+            self.terabox_login_notice.emit(
+                'TeraBox is open in your normal Brave, not a player window.\n\n'
+                'Sign in with Google there. Ignore any window that says the browser is not secure. '
+                'When TeraBox shows your account, close Brave and click Done.\n\n'
+                'The password is not saved. Later links play without asking.'
+            )
+        except Exception:
+            pass
+        while not done.is_set() and not cancel.is_set():
+            done.wait(1.0)
+        if cancel.is_set() or not done.is_set():
+            try:
+                self.terabox_login_notice.emit('')
+            except Exception:
+                pass
+            return []
+        records = self._read_saved_brave_login()
+        if records:
+            try:
+                self.terabox_login_notice.emit('')
+            except Exception:
+                pass
+            return records
+        done.clear()
+        print('[TERABOX] login not readable yet; Brave may still be open', flush=True)
+        try:
+            self.terabox_login_notice.emit(
+                'The login is not saved yet.\n\n'
+                'Close every Brave window, then click Done. '
+                'Do not sign in inside a window that says the browser is not secure.'
+            )
+        except Exception:
+            pass
+        while not done.is_set() and not cancel.is_set():
+            done.wait(1.0)
+        records = [] if cancel.is_set() else self._read_saved_brave_login()
+        if not records and not cancel.is_set():
+            records = self._export_brave_cookies_quietly()
+        try:
+            self.terabox_login_notice.emit('')
+        except Exception:
+            pass
+        return records
+
+    def _export_brave_cookies_quietly(self):
+        """Read cookies from the real Brave profile. Does not open a Google page."""
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception:
+            return []
         ctx = None
         try:
             with sync_playwright() as playwright:
-                try:
-                    ctx = self._launch_user_brave(playwright)
-                except Exception as exc:
-                    print(f'[TERABOX] your Brave is already open ({type(exc).__name__})', flush=True)
-                    ctx = None
-                if ctx is not None:
-                    try:
-                        self.terabox_login_notice.emit(
-                            'Your Brave account is open. Sign in to TeraBox with Google once.\n\n'
-                            'The password is not saved. The next link plays without asking.'
-                        )
-                    except Exception:
-                        pass
-                    page = ctx.pages[0] if ctx.pages else ctx.new_page()
-                    try:
-                        page.goto('https://www.terabox.com/', wait_until='domcontentloaded', timeout=30000)
-                    except Exception:
-                        pass
-                    records = self._wait_for_terabox_login(ctx, cancel)
-                    try:
-                        ctx.close()
-                    except Exception:
-                        pass
-                    ctx = None
-                    return records
-                self._open_url_in_brave('https://www.terabox.com/')
-                try:
-                    self.terabox_login_notice.emit(
-                        'TeraBox opened in your Brave.\n\n'
-                        'Sign in with Google there. Close Brave when that is done, then click Done. '
-                        'The password is not saved.'
-                    )
-                except Exception:
-                    pass
-                print('[TERABOX] waiting for you to finish in your Brave', flush=True)
-                while not done.is_set() and not cancel.is_set():
-                    done.wait(1.0)
-                if cancel.is_set() or not done.is_set():
-                    return []
-                try:
-                    ctx = self._launch_user_brave(playwright)
-                except Exception as exc:
-                    print(f'[TERABOX] still could not open your Brave account ({type(exc).__name__})', flush=True)
-                    return []
-                page = ctx.pages[0] if ctx.pages else ctx.new_page()
-                try:
-                    page.goto('https://www.terabox.com/', wait_until='domcontentloaded', timeout=30000)
-                except Exception:
-                    pass
-                records = self._wait_for_terabox_login(ctx, cancel, seconds=30)
+                ctx = self._launch_user_brave(playwright)
+                records = ctx.cookies() or []
                 try:
                     ctx.close()
                 except Exception:
                     pass
                 ctx = None
-                return records
+        except Exception as exc:
+            print(f'[TERABOX] Brave login still locked ({type(exc).__name__})', flush=True)
+            return []
         finally:
             try:
                 if ctx is not None:
                     ctx.close()
             except Exception:
                 pass
-            try:
-                self.terabox_login_notice.emit('')
-            except Exception:
-                pass
+        if any(str(item.get('name') or '').lower() == 'ndus' and item.get('value') for item in records):
+            print('[TERABOX] login read from your Brave', flush=True)
+            return records
+        print('[TERABOX] Brave account has no TeraBox login yet', flush=True)
+        return []
 
     def _ensure_terabox_login(self):
         """One Google sign-in, then the saved session is reused. No password is stored."""

@@ -485,8 +485,9 @@ GUEST_PREVIEW_MAX_SECONDS = 36.0
 SAVE_DIR = '/Antigravity'
 LOGIN_MESSAGE = (
     'TeraBox only plays the full video after the share is saved to your account. '
-    'Sign in with Google in the browser window. That session is kept for the next link. '
-    'The password is not saved. If you closed the window, play the link again.'
+    'Sign in with Google in your normal Brave, then click Done. '
+    'Do not use a window that says the browser is not secure. '
+    'The password is not saved.'
 )
 
 
