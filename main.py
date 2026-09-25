@@ -45014,6 +45014,22 @@ try {
 
         def _remember_browser_result(value):
             if isinstance(value, dict):
+                # These belong to THIS capture. A second click running at
+                # the same time overwrites the shared last-click jar, and
+                # the hentai row would then play the other episode.
+                try:
+                    value['captured_media'] = list(media_candidates)
+                except Exception:
+                    pass
+                if browser_cookies and not value.get('browser_cookies'):
+                    value['browser_cookies'] = browser_cookies
+                if browser_ua and not value.get('browser_ua'):
+                    value['browser_ua'] = browser_ua
+                try:
+                    if clicked_html and not value.get('captured_html'):
+                        value['captured_html'] = clicked_html
+                except Exception:
+                    pass
                 try:
                     self._last_browser_click_result = dict(value)
                 except Exception:
@@ -46682,18 +46698,19 @@ try {
         except Exception as exc:
             print(f'[HENTAI] Cloudflare click errored ({type(exc).__name__})', flush=True)
             bg = None
-        cookie = str(getattr(self, '_last_browser_click_cookies', '') or '')
-        ua = str(getattr(self, '_last_browser_click_ua', '') or '')
-        if isinstance(bg, dict):
-            cookie = cookie or str((bg.get('headers') or {}).get('Cookie') or bg.get('browser_cookies') or '')
-            ua = ua or str((bg.get('headers') or {}).get('User-Agent') or bg.get('browser_ua') or '')
+        # Only this click's jar. The shared last-click attributes are
+        # overwritten by whichever capture finishes next, and two haven
+        # pages pasted together were stored as the same stream.
+        own = bg if isinstance(bg, dict) else {}
+        cookie = str(own.get('browser_cookies') or (own.get('headers') or {}).get('Cookie') or '')
+        ua = str(own.get('browser_ua') or (own.get('headers') or {}).get('User-Agent') or '')
         if cookie:
             self._hentai_remember_clearance(source_url, cookie, ua)
         captured = []
-        if isinstance(bg, dict):
-            captured.append(bg.get('playback_url') or '')
-            captured.extend(bg.get('alternate_urls') or [])
-        captured.extend(getattr(self, '_last_browser_click_media', []) or [])
+        if own:
+            captured.append(own.get('playback_url') or '')
+            captured.extend(own.get('alternate_urls') or [])
+            captured.extend(own.get('captured_media') or [])
         playback, audio = hentai_sites.pick_split_stream(captured)
         if (
             playback
@@ -46704,7 +46721,7 @@ try {
             if audio:
                 print(f'[HENTAI] audio playlist: {audio[:140]}', flush=True)
             captions = hentai_sites.caption_tracks_from_blobs(
-                list(captured) + [str(getattr(self, '_last_browser_click_html', '') or '')])
+                list(captured) + [str(own.get('captured_html') or '')])
             if captions:
                 print(f'[HENTAI] {len(captions)} caption file(s)', flush=True)
             kind = hentai_sites.site_kind(source_url) or 'hentai'
@@ -46728,7 +46745,7 @@ try {
                 'stable': stable,
                 'origin_page': source_url,
             }
-        html = str(getattr(self, '_last_browser_click_html', '') or '')
+        html = str(own.get('captured_html') or '')
         if not html or hentai_sites._looks_like_challenge(html):
             print('[HENTAI] the Cloudflare click did not clear the page', flush=True)
             return None
@@ -65633,7 +65650,7 @@ if __name__ == "__main__":
 
                         try:
                             _goto_kwargs = {"wait_until": "domcontentloaded",
-                                            "timeout": 20000}
+                                            "timeout": 45000}
                             if nav_referer:
                                 _goto_kwargs["referer"] = nav_referer
                             page.goto(url, **_goto_kwargs)

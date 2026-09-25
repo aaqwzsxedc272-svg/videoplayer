@@ -651,6 +651,14 @@ def caption_tracks(urls):
     return tracks
 
 
+def _stream_family(url):
+    """Manifest id shared by one episode's playlists, or ''."""
+    match = re.search(
+        r'/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:/|$)',
+        str(url or ''), re.I)
+    return match.group(1).lower() if match else ''
+
+
 def pick_split_stream(urls):
     """Video playlist plus its audio sibling.
 
@@ -658,6 +666,10 @@ def pick_split_stream(urls):
     not carry the picture. Playing it leaves a clock running and a blank
     frame. The picture is the /v.m3u8 (or the vp9 playlist). Sound is
     the /a.m3u8 under snd/.
+
+    Two pages resolving at once used to hand this row the other page's
+    /v.m3u8, because that shape sorts above this page's master. Stay
+    with the manifest id of the first URL, which is this page's capture.
     """
     videos = []
     audios = []
@@ -687,6 +699,21 @@ def pick_split_stream(urls):
             masters.append(url)
         else:
             others.append(url)
+    anchor = ''
+    for raw in urls or []:
+        anchor = _stream_family(raw)
+        if anchor:
+            break
+    if anchor:
+        def _own(items):
+            same = [item for item in items if _stream_family(item) == anchor]
+            return same or [item for item in items if not _stream_family(item)]
+
+        videos = _own(videos)
+        vp9 = _own(vp9)
+        audios = _own(audios)
+        masters = _own(masters)
+        others = _own(others)
     playback = (videos or vp9 or others or masters or [''])[0]
     audio = audios[0] if audios and audios[0] != playback else ''
     return playback, audio

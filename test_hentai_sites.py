@@ -273,6 +273,27 @@ def test_caption_files_are_kept():
     assert [item['lang'] for item in buried] == ['en', 'ja']
 
 
+def test_split_stream_does_not_take_the_other_episode():
+    own = 'https://octopusmanifest.org/77c15e9d-befe-45e0-8eea-d345e09dfa8f/'
+    other = 'https://octopusmanifest.org/78ff108c-4e0e-40d2-84f3-f1137d94f86a/'
+    video, audio = sites.pick_split_stream([
+        own + 'playlist.m3u8',
+        other + 'vp_7sop/v.m3u8',
+        other + 'snd/a.m3u8',
+        own + 'vp_7sop/v.m3u8',
+        own + 'snd/a.m3u8',
+    ])
+    assert video == own + 'vp_7sop/v.m3u8'
+    assert audio == own + 'snd/a.m3u8'
+    video, audio = sites.pick_split_stream([
+        own + 'playlist.m3u8',
+        other + 'vp_7sop/v.m3u8',
+        other + 'snd/a.m3u8',
+    ])
+    assert video == own + 'playlist.m3u8'
+    assert audio == ''
+
+
 def test_split_playlist_uses_the_video_not_the_master():
     base = 'https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/'
     video, audio = sites.pick_split_stream([
@@ -352,6 +373,7 @@ def main():
         test_hanime_prefers_the_free_stream,
         test_hanime_one_stream,
         test_caption_files_are_kept,
+        test_split_stream_does_not_take_the_other_episode,
         test_split_playlist_uses_the_video_not_the_master,
         test_cleared_page_is_read_and_the_check_is_not,
         test_hentaihaven_challenge_is_not_a_video,
