@@ -123,6 +123,15 @@ def test_hanime_one_stream():
     assert found['title'] == 'Example 1'
 
 
+def test_hentaihaven_challenge_is_not_a_video():
+    fake = Fake([
+        ('hentaihaven.xxx', sites._Resp(
+            200, '<title>Un instant…</title><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>')),
+    ])
+    assert sites.resolve(
+        'https://hentaihaven.xxx/watch/example/episode-1/', fetch=fake) is None
+
+
 def test_hentaihaven_one_stream():
     token = sites.haven_encode_token({
         'en': 'aaa',
@@ -227,6 +236,7 @@ def main():
         test_hentaini_plays_hls_and_keeps_known_hosters,
         test_hentaini_series_page_uses_first_direct_episode,
         test_hanime_one_stream,
+        test_hentaihaven_challenge_is_not_a_video,
         test_hentaihaven_one_stream,
         test_hentaihaven_show_page_follows_episode,
         test_hentaimama_mirrors,

@@ -160,33 +160,63 @@ def haven_encode_token(payload):
     return 'sha512-' + data
 
 
+def _looks_like_challenge(text):
+    low = str(text or '').lower()
+    return (
+        'just a moment' in low
+        or 'un instant' in low
+        or 'cf-challenge' in low
+        or 'cdn-cgi/challenge-platform' in low
+        or 'challenges.cloudflare.com' in low
+    )
+
+
 def _default_fetch(method, url, headers=None, data=None, timeout=25):
     headers = dict(headers or {})
-    headers.setdefault('User-Agent', _UA)
-    headers.setdefault('Accept', 'text/html,application/json,*/*;q=0.8')
+    headers.setdefault('Accept', 'text/html,application/xhtml+xml,application/json,*/*;q=0.8')
+    headers.setdefault('Accept-Language', 'en-US,en;q=0.9')
     method = method.upper()
+    # A custom User-Agent on top of impersonation is what makes Cloudflare
+    # show "Just a moment". Leave the fingerprint's own agent in place.
     try:
         import curl_cffi.requests as cfreq
         fn = cfreq.post if method == 'POST' else cfreq.get
-        response = fn(
-            url, impersonate='chrome131', timeout=timeout,
-            headers=headers, data=data)
-        return _Resp(
-            getattr(response, 'status_code', 0),
-            getattr(response, 'text', '') or '',
-            getattr(response, 'headers', {}) or {},
-            getattr(response, 'url', url) or url)
+        last = None
+        for persona in ('chrome', 'chrome131', 'chrome124'):
+            try:
+                response = fn(
+                    url, impersonate=persona, timeout=timeout,
+                    headers=headers, data=data)
+            except Exception as exc:
+                last = exc
+                continue
+            body = getattr(response, 'text', '') or ''
+            status = getattr(response, 'status_code', 0)
+            if status == 200 and not _looks_like_challenge(body):
+                return _Resp(
+                    status, body,
+                    getattr(response, 'headers', {}) or {},
+                    getattr(response, 'url', url) or url)
+            last = response
+        if last is not None and not isinstance(last, Exception):
+            return _Resp(
+                getattr(last, 'status_code', 0),
+                getattr(last, 'text', '') or '',
+                getattr(last, 'headers', {}) or {},
+                getattr(last, 'url', url) or url)
     except Exception:
-        import requests
-        fn = requests.post if method == 'POST' else requests.get
-        response = fn(
-            url, timeout=timeout, headers=headers, data=data,
-            allow_redirects=True)
-        return _Resp(
-            getattr(response, 'status_code', 0),
-            getattr(response, 'text', '') or '',
-            getattr(response, 'headers', {}) or {},
-            getattr(response, 'url', url) or url)
+        pass
+    headers.setdefault('User-Agent', _UA)
+    import requests
+    fn = requests.post if method == 'POST' else requests.get
+    response = fn(
+        url, timeout=timeout, headers=headers, data=data,
+        allow_redirects=True)
+    return _Resp(
+        getattr(response, 'status_code', 0),
+        getattr(response, 'text', '') or '',
+        getattr(response, 'headers', {}) or {},
+        getattr(response, 'url', url) or url)
 
 
 def _header(headers, name):
@@ -441,6 +471,9 @@ def resolve_hentaihaven(url, fetch):
     else:
         episode_url = getattr(page, 'url', '') or url
     html = html_unescape(html or '').replace('\\/', '/')
+    if _looks_like_challenge(html):
+        print('[HENTAI] hentaihaven answered with the Cloudflare check, not the player', flush=True)
+        return None
     match = re.search(r'(https?:)?(//[^"\'\s>]*player\.php\?data=[^"\'\s>]+)', html, re.I)
     if not match:
         match = re.search(r'(["\'])(/[^"\']*player\.php\?data=[^"\']+)', html, re.I)

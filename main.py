@@ -30838,6 +30838,8 @@ try {
         # An empty scheme is a protocol-relative //host/path, which is real.
         if scheme and scheme not in ('http', 'https'):
             return True
+        if 'cdn-cgi/challenge-platform' in low or '/cdn-cgi/' in low or 'challenges.cloudflare.com' in low:
+            return True
         try:
             path = (urlparse(url).path or '').lower()
         except Exception:
@@ -46384,12 +46386,23 @@ try {
         except Exception:
             pass
 
-    def _is_listed_hentai_site(self, host_or_url):
+    def _is_listed_hentai_host(self, host_or_url):
+        text = str(host_or_url or '').strip().lower()
         try:
-            import hentai_sites
-            return bool(hentai_sites.site_kind(host_or_url))
+            if '://' in text:
+                text = (urlparse(text).netloc or '').lower()
         except Exception:
-            return False
+            pass
+        if text.startswith('www.'):
+            text = text[4:]
+        text = text.split(':', 1)[0]
+        return text in (
+            'hanime.tv', 'hentaihaven.xxx', 'hentaihaven.com',
+            'hentaini.com', 'hentaimama.io',
+        )
+
+    def _is_listed_hentai_site(self, host_or_url):
+        return self._is_listed_hentai_host(host_or_url)
 
     def _hentai_mirror_can_resolve(self, url):
         host = (urlparse(str(url or '')).netloc or '').lower()
@@ -46409,7 +46422,11 @@ try {
         try:
             import hentai_sites
         except Exception as exc:
-            print(f'[HENTAI] resolver missing ({type(exc).__name__})', flush=True)
+            print(
+                '[HENTAI] hentai_sites.py is not beside main.py '
+                f'({type(exc).__name__})',
+                flush=True,
+            )
             return None
         try:
             found = hentai_sites.resolve(source_url)
@@ -47517,8 +47534,20 @@ try {
         # store-na-phx-4.gofile.io, which *contains* "gofile.io" but is a
         # normal direct-download host, not a share page needing resolution.
         _gofile_share_hosts = {'gofile.io', 'gofile.to', 'www.gofile.io', 'www.gofile.to'}
-        if resolved is None and self._is_listed_hentai_site(host):
+        if resolved is None and self._is_listed_hentai_host(host):
             resolved = self._resolve_listed_hentai_site(source_url)
+            if not resolved:
+                # Field: the capture browser only received "Just a moment"
+                # and then played that challenge page as the video.
+                print(
+                    '[HENTAI] no stream; not opening a browser for '
+                    f'{source_url[:120]}',
+                    flush=True,
+                )
+                failures = getattr(self, '_stream_resolution_failures', {})
+                failures[source_url] = time.time()
+                self._stream_resolution_failures = failures
+                return None
 
         if resolved is None:
             # R64: turbo.cr is static-first (same reasoning as R49
@@ -64477,6 +64506,15 @@ import javguru_integration   # noqa  ← add this line
 import generic_jav_integration   # noqa
 import javhd_integration   # noqa
 import familypornhd_integration   # noqa
+try:
+    import hentai_sites  # noqa: F401
+    print('[HENTAI] resolver loaded', flush=True)
+except Exception as _hentai_import_exc:
+    print(
+        '[HENTAI] hentai_sites.py is not beside main.py '
+        f'({type(_hentai_import_exc).__name__})',
+        flush=True,
+    )
 if __name__ == "__main__":
     import traceback
     import logging
