@@ -40789,19 +40789,20 @@ try {
                 box.hide()
             return
         self.show_osd(text, duration=12000)
-        if box is None:
-            box = QMessageBox(self)
-            box.setWindowTitle('TeraBox sign-in')
-            box.setIcon(QMessageBox.Icon.Information)
-            box.setText(
-                'Sign in with Google in the browser window.\n\n'
-                'That session is kept on this computer, so the next link is saved and played without asking again. '
-                'The Gmail password is not saved.'
-            )
-            box.setStandardButtons(QMessageBox.StandardButton.Cancel)
-            box.buttonClicked.connect(lambda _button: self._cancel_terabox_login())
-            box.setModal(False)
-            self._terabox_login_box = box
+        if box is not None:
+            box.hide()
+            box.deleteLater()
+        box = QMessageBox(self)
+        box.setWindowTitle('TeraBox sign-in')
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(text)
+        box.setStandardButtons(QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+        done = box.button(QMessageBox.StandardButton.Ok)
+        if done is not None:
+            done.setText('Done')
+        box.buttonClicked.connect(self._on_terabox_login_button)
+        box.setModal(False)
+        self._terabox_login_box = box
         box.show()
         box.raise_()
         box.activateWindow()
@@ -40811,81 +40812,151 @@ try {
         if event is not None:
             event.set()
 
+    def _on_terabox_login_button(self, button):
+        box = getattr(self, '_terabox_login_box', None)
+        try:
+            cancelled = box is not None and box.standardButton(button) == QMessageBox.StandardButton.Cancel
+        except Exception:
+            cancelled = False
+        if cancelled:
+            self._cancel_terabox_login()
+            return
+        event = getattr(self, '_terabox_login_done', None)
+        if event is not None:
+            event.set()
+
+    def _brave_user_data_dir(self):
+        for browser, root in self._chromium_user_data_roots():
+            if browser == 'brave' and os.path.isdir(root):
+                return root
+        local = os.environ.get('LOCALAPPDATA') or ''
+        path = os.path.join(local, 'BraveSoftware', 'Brave-Browser', 'User Data')
+        return path if os.path.isdir(path) else ''
+
+    def _brave_last_profile(self, user_data):
+        try:
+            with open(os.path.join(user_data, 'Local State'), encoding='utf-8') as handle:
+                data = json.load(handle)
+            name = str(((data.get('profile') or {}).get('last_used')) or 'Default')
+        except Exception:
+            name = 'Default'
+        if name and os.path.isdir(os.path.join(user_data, name)):
+            return name
+        return 'Default'
+
+    def _launch_user_brave(self, playwright):
+        """Open the Brave profile this person already uses. Not a separate session."""
+        user_data = self._brave_user_data_dir()
+        exe = _find_installed_brave_executable()
+        if not user_data or not exe:
+            return None
+        profile = self._brave_last_profile(user_data)
+        print(f'[TERABOX] opening your Brave account ({profile})', flush=True)
+        return playwright.chromium.launch_persistent_context(
+            user_data,
+            executable_path=exe,
+            headless=False,
+            timeout=30000,
+            ignore_default_args=['--enable-automation'],
+            args=[
+                f'--profile-directory={profile}',
+                '--window-position=80,60',
+                '--window-size=1100,780',
+                '--no-first-run',
+                '--disable-blink-features=AutomationControlled',
+            ],
+        )
+
+    def _wait_for_terabox_login(self, ctx, cancel, seconds=180):
+        deadline = time.time() + seconds
+        while time.time() < deadline and not cancel.is_set():
+            try:
+                records = ctx.cookies() or []
+            except Exception:
+                return []
+            if any(str(item.get('name') or '').lower() == 'ndus' and item.get('value') for item in records):
+                print('[TERABOX] sign-in finished', flush=True)
+                return records
+            time.sleep(1.5)
+        return []
+
     def _open_terabox_login_window(self):
-        """Visible sign-in window. Returns cookie records once the account is logged in."""
-        exe = _find_installed_brave_executable() or self._browser_exe_for_user_data(
-            os.path.join(os.environ.get('LOCALAPPDATA') or '', 'Google', 'Chrome', 'User Data'))
-        if not exe:
-            print('[TERABOX] no Brave or Chrome found for sign-in', flush=True)
-            return []
+        """Sign in inside the user's own Brave. The password is never stored."""
         try:
             from playwright.sync_api import sync_playwright
         except Exception:
-            print('[TERABOX] sign-in window needs playwright', flush=True)
+            print('[TERABOX] sign-in needs playwright', flush=True)
             return []
         cancel = getattr(self, '_terabox_login_cancel', None)
         if cancel is None:
             cancel = threading.Event()
             self._terabox_login_cancel = cancel
+        done = getattr(self, '_terabox_login_done', None)
+        if done is None:
+            done = threading.Event()
+            self._terabox_login_done = done
         cancel.clear()
-        try:
-            self.terabox_login_notice.emit(
-                'Sign in with Google in the browser window. The password is not saved.'
-            )
-        except Exception:
-            pass
-        print('[TERABOX] sign-in window opened', flush=True)
-        profile = self._terabox_login_profile_dir()
-        ctx = None
+        done.clear()
         records = []
+        ctx = None
         try:
             with sync_playwright() as playwright:
-                ctx = playwright.chromium.launch_persistent_context(
-                    profile,
-                    executable_path=exe,
-                    headless=False,
-                    timeout=30000,
-                    args=[
-                        '--window-position=80,60',
-                        '--window-size=1100,780',
-                        '--no-first-run',
-                        '--no-default-browser-check',
-                        '--disable-sync',
-                    ],
-                )
+                try:
+                    ctx = self._launch_user_brave(playwright)
+                except Exception as exc:
+                    print(f'[TERABOX] your Brave is already open ({type(exc).__name__})', flush=True)
+                    ctx = None
+                if ctx is not None:
+                    try:
+                        self.terabox_login_notice.emit(
+                            'Your Brave account is open. Sign in to TeraBox with Google once.\n\n'
+                            'The password is not saved. The next link plays without asking.'
+                        )
+                    except Exception:
+                        pass
+                    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+                    try:
+                        page.goto('https://www.terabox.com/', wait_until='domcontentloaded', timeout=30000)
+                    except Exception:
+                        pass
+                    records = self._wait_for_terabox_login(ctx, cancel)
+                    try:
+                        ctx.close()
+                    except Exception:
+                        pass
+                    ctx = None
+                    return records
+                self._open_url_in_brave('https://www.terabox.com/')
+                try:
+                    self.terabox_login_notice.emit(
+                        'TeraBox opened in your Brave.\n\n'
+                        'Sign in with Google there. Close Brave when that is done, then click Done. '
+                        'The password is not saved.'
+                    )
+                except Exception:
+                    pass
+                print('[TERABOX] waiting for you to finish in your Brave', flush=True)
+                while not done.is_set() and not cancel.is_set():
+                    done.wait(1.0)
+                if cancel.is_set() or not done.is_set():
+                    return []
+                try:
+                    ctx = self._launch_user_brave(playwright)
+                except Exception as exc:
+                    print(f'[TERABOX] still could not open your Brave account ({type(exc).__name__})', flush=True)
+                    return []
                 page = ctx.pages[0] if ctx.pages else ctx.new_page()
                 try:
                     page.goto('https://www.terabox.com/', wait_until='domcontentloaded', timeout=30000)
                 except Exception:
                     pass
-                for label in ('Log in', 'Sign in', 'Login', 'Continue with Google'):
-                    if cancel.is_set():
-                        break
-                    try:
-                        page.get_by_text(label, exact=False).first.click(timeout=2000)
-                        break
-                    except Exception:
-                        continue
-                deadline = time.time() + 180
-                while time.time() < deadline and not cancel.is_set():
-                    try:
-                        records = ctx.cookies() or []
-                    except Exception:
-                        records = []
-                        break
-                    if any(str(item.get('name') or '').lower() == 'ndus' and item.get('value') for item in records):
-                        print('[TERABOX] sign-in finished', flush=True)
-                        break
-                    records = []
-                    time.sleep(1.5)
+                records = self._wait_for_terabox_login(ctx, cancel, seconds=30)
                 try:
                     ctx.close()
                 except Exception:
                     pass
                 ctx = None
-        except Exception as exc:
-            print(f'[TERABOX] sign-in window failed ({type(exc).__name__})', flush=True)
-            records = []
+                return records
         finally:
             try:
                 if ctx is not None:
@@ -40896,7 +40967,6 @@ try {
                 self.terabox_login_notice.emit('')
             except Exception:
                 pass
-        return records
 
     def _ensure_terabox_login(self):
         """One Google sign-in, then the saved session is reused. No password is stored."""
