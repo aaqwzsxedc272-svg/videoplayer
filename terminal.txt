@@ -1,58 +1,7 @@
+ have only one video "https://hanime.tv" and "https://hentaihaven.xxx"
 
-C:\Users\Mouad\Desktop>cd /d "C:\Users\Mouad\Desktop\video_player"
 
-C:\Users\Mouad\Desktop\video_player>python main.py
-[MetadataScraper] build link7-scene
-[JAVGURU] VideoPlayer patched — jav.guru URL detection active.
-[GENERIC_JAV] VideoPlayer patched — URL detection active. (build R63-page-row)
-[JAVHD] VideoPlayer patched — javhd.today URL detection active.
-[FAMILYPORNHD] VideoPlayer patched — HTML URL detection active.
-DEBUG: Data files will be saved in: C:\Users\Mouad\Desktop\video_player
-qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.3 LGPL version 2.1 or later
-[video_backend] Using libmpv renderer
-[COOKIES] mpv will use cookies from: C:\Users\Mouad\Desktop\video_player\cookies.txt
-[video_backend] mpv renderer: native D3D11 window
-[SUBS] caption detection build 7 (page scan, subtitle endpoint, session warm-up, no-Referer retry logged)
-[PASSWORDS] Loaded 54 cached passwords from disk
-Auto-selecting headphones at startup: Headphones (Roseland TWS RE-500 Stereo)
-Switching audio to: Headphones (Roseland TWS RE-500 Stereo)
-[BATTERY] Windows reported 3 device(s) with a charge: [('itel t1neo hands-free ag', 10), ('musicman bt-x78 hands-free ag', 70), ('roseland tws re-500 hands-free ag', 80)]
-[BATTERY]   pnp-direct=3
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=80%
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=80%
-[FAVICON] pornmz.net: 2 declared icon(s) — https://pornmz.net/wp-content/uploads/2019/05/Pornmz.png
-[FAVICON] pornmz.net: got site icon from https://pornmz.net/wp-content/uploads/2019/05/Pornmz.png
-[YTDLP] pornmz.net: no info -- ERROR: Unsupported URL: https://pornmz.net/video/id=pmz/taboo/23290755
-[SUBS] pornmz.net: no caption file and no subtitle endpoint referenced in the page
-[SUBS] wrote 0 subtitle line(s) from the page to C:\Users\Mouad\Desktop\video_player\subtitles_debug.txt -- that file says what the site actually offers
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=80%
-[HTML_RESOLVE] chose https://prog-public-ht.project1content.com/685/520/ec2/cd4/469/693/850/c38/2fb/e6f/1f/mediabook/mediabook_320p.mp4 (0s) from 5 candidate(s)
-[PLAYLIST][NAME] https://pornmz.net/video/id=pmz/taboo/23290755 : '23290755 [pornmz.net]' -> 'MomComesFirst Steph Wilde Carly Kiss - The Step Mom Daughter Encounter'
-[PLAYLIST][INFO] path='https://pornmz.net/video/id=pmz/taboo/23290755' rows=[0] duration='00:20' size='956.2 KB' quality='0.05'
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=80%
-[YTDLP] pornmz.net: no info -- ERROR: Unsupported URL: https://pornmz.net/video/id=pmz/taboo/23290755
-[SUBS] pornmz.net: no caption file and no subtitle endpoint referenced in the page
-[SUBS] wrote 0 subtitle line(s) from the page to C:\Users\Mouad\Desktop\video_player\subtitles_debug.txt -- that file says what the site actually offers
-[HTML_RESOLVE] chose https://prog-public-ht.project1content.com/685/520/ec2/cd4/469/693/850/c38/2fb/e6f/1f/mediabook/mediabook_320p.mp4 (0s) from 5 candidate(s)
-[STREAM][HTML][PLAYBACK_APPLY] source=https://pornmz.net/video/id=pmz/taboo/23290755 playback_url=https://prog-public-ht.project1content.com/685/520/ec2/cd4/469/693/850/c38/2fb/e6f/1f/mediabook/mediabook_320p.mp4 age_ms=30 has_cookie=False
-[STREAM][HTML][PLAYBACK_STATUS] source=https://pornmz.net/video/id=pmz/taboo/23290755 status=LoadingMedia
-[PLAYBACK][LOADFILE] https://prog-public-ht.project1content.com/685/520/ec2/cd4/469/693/850/c38/2fb/e6f/1f/mediabook/mediabook_320p.mp4
-[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=False target=https://prog-public-ht.project1content.com/685/520/ec2/cd4/469/693/850/c38/2fb/e6f/1f/mediabook/mediabook_320p.mp4
-[MPV][error][ffmpeg] tls: error:0A000086:lib(20)::reason(134)
 
-[PLAYBACK][END_FILE] https://prog-public-ht.project1content.com/685/520/ec2/cd4/469/693/850/c38/2fb/e6f/1f/mediabook/mediabook_320p.mp4 event=<MpvEventEndFile (7) err=0 p=0000000000000000 d={'event': b'end-file', 'reason': b'error', 'playlist_entry_id': 1, 'file_error': b'loading failed'}>
-[MPV][error][stream] Failed to open https://prog-public-ht.project1content.com/685/520/ec2/cd4/469/693/850/c38/2fb/e6f/1f/mediabook/mediabook_320p.mp4.
+these have mirrors multiple hosters 
 
-Looking for subtitle mapping for: https://pornmz.net/video/id=pmz/taboo/23290755
-No saved subtitle for this video or its mirrors: https://pornmz.net/video/id=pmz/taboo/23290755
-[SUBS] no usable caption track for https://pornmz.net/video/id=pmz/taboo/23290755 (0 offered by the resolver)
-[STREAM][HTML][PLAYBACK_STATUS] source=https://pornmz.net/video/id=pmz/taboo/23290755 status=InvalidMedia
-[PLAYBACK][LOAD_FAILED] retrying direct (tls_verify=False) current=https://pornmz.net/video/id=pmz/taboo/23290755 playback=https://prog-public-ht.project1content.com/685/520/ec2/cd4/469/693/850/c38/2fb/e6f/1f/mediabook/mediabook_320p.mp4 error=loading failed
-[STREAM][HTML][PLAYBACK_STATUS] source=https://pornmz.net/video/id=pmz/taboo/23290755 status=LoadingMedia
-[PLAYBACK][LOADFILE] https://prog-public-ht.project1content.com/685/520/ec2/cd4/469/693/850/c38/2fb/e6f/1f/mediabook/mediabook_320p.mp4
-[PLAYBACK] certificate check off for prog-public-ht.project1content.com (already refused it this session)
-[MPV][YTDL_FLAGS] ytdl=False is_direct_stream=False target=https://prog-public-ht.project1content.com/685/520/ec2/cd4/469/693/850/c38/2fb/e6f/1f/mediabook/mediabook_320p.mp4
-[PLAYBACK][FILE_LOADED] https://prog-public-ht.project1content.com/685/520/ec2/cd4/469/693/850/c38/2fb/e6f/1f/mediabook/mediabook_320p.mp4
-[STREAM][HTML][PLAYBACK_STATUS] source=https://pornmz.net/video/id=pmz/taboo/23290755 status=LoadedMedia
-[BATTERY][UI] selected=headphones (roseland tws re-500 stereo) matched=roseland tws re-500 hands-free ag value=80%
-[mpv][perf] profile=base 568x320 fps=25.00 bitrate=0kbps hwdec=d3d11va-copy config=['d3d11va-copy'] codec=H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 renderer=native-d3d11 mirror=presentation
+ "https://hentaini.com" and  "https://hentaimama.io"
