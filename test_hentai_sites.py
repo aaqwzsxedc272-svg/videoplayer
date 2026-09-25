@@ -228,6 +228,21 @@ def test_hentaimama_show_page_follows_episode():
     assert found['mirrors'] == ['https://voe.sx/e/abc']
 
 
+def test_split_playlist_uses_the_video_not_the_master():
+    base = 'https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/'
+    video, audio = sites.pick_split_stream([
+        base + 'playlist.m3u8',
+        'https://www.googletagmanager.com/gtm.js?id=1',
+        base + 'playlist_vp9.m3u8',
+        base + 'vp_7sop/v.m3u8',
+        base + 'snd/a.m3u8',
+        'https://cdn.havenclick.com/ads/ad.mp4',
+        'https://hentaihaven.xxx/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1?ray=abc',
+    ])
+    assert video == base + 'vp_7sop/v.m3u8'
+    assert audio == base + 'snd/a.m3u8'
+
+
 def test_cleared_page_is_read_and_the_check_is_not():
     token = sites.haven_encode_token({
         'en': 'aaa', 'iv': 'bbb', 'uri': 'https://player.example',
@@ -290,6 +305,7 @@ def main():
         test_hentaini_plays_hls_and_keeps_known_hosters,
         test_hentaini_series_page_uses_first_direct_episode,
         test_hanime_one_stream,
+        test_split_playlist_uses_the_video_not_the_master,
         test_cleared_page_is_read_and_the_check_is_not,
         test_hentaihaven_challenge_is_not_a_video,
         test_capture_ignores_the_cloudflare_page,

@@ -45066,6 +45066,7 @@ try {
 
         self._last_browser_click_ua = browser_ua or ''
         self._last_browser_click_cookies = browser_cookies or ''
+        self._last_browser_click_media = list(media_candidates)
         if not media_candidates and not html_b64:
             diag = '\n'.join(
                 l for l in combined.splitlines()
@@ -46513,6 +46514,43 @@ try {
                 continue
         return blobs
 
+    def _apply_hentai_split_playback(self, stream_info, playback_target):
+        """Play the video playlist, and the separate audio playlist with it.
+
+        The master list this site captures first has no picture. mpv then
+        runs the clock on the audio rendition and draws nothing.
+        """
+        if self._mpv is None:
+            return
+        audio = str((stream_info or {}).get('audio_url') or '').strip()
+        host = ''
+        try:
+            host = (urlparse(str(playback_target or '')).netloc or '').lower()
+        except Exception:
+            host = ''
+        split = bool(audio) or 'octopusmanifest.org' in host or 'laidy.top' in host
+        try:
+            if split and audio:
+                self._mpv['audio-files'] = [audio]
+                self._hentai_audio_attached = True
+                print(f'[HENTAI] sound from {audio[:140]}', flush=True)
+            elif getattr(self, '_hentai_audio_attached', False):
+                self._mpv['audio-files'] = []
+                self._hentai_audio_attached = False
+        except Exception as exc:
+            print(f'[HENTAI] audio track not attached ({type(exc).__name__})', flush=True)
+        try:
+            if split:
+                # d3d11va-copy drops the frame when this codec is not in
+                # hardware. auto-copy-safe can fall back and still show it.
+                self._mpv['hwdec'] = 'auto-copy-safe'
+                self._hentai_hwdec_soft = True
+            elif getattr(self, '_hentai_hwdec_soft', False):
+                self._mpv['hwdec'] = 'd3d11va-copy' if os.name == 'nt' else 'auto-copy-safe'
+                self._hentai_hwdec_soft = False
+        except Exception:
+            pass
+
     def _hentai_stashed_headers(self, url, max_age=3600):
         """Cookie and agent from the last Cloudflare click, if still fresh."""
         try:
@@ -46579,22 +46617,29 @@ try {
             ua = ua or str((bg.get('headers') or {}).get('User-Agent') or bg.get('browser_ua') or '')
         if cookie:
             self._hentai_remember_clearance(source_url, cookie, ua)
-        playback = str((bg or {}).get('playback_url') or '').strip() if isinstance(bg, dict) else ''
+        captured = []
+        if isinstance(bg, dict):
+            captured.append(bg.get('playback_url') or '')
+            captured.extend(bg.get('alternate_urls') or [])
+        captured.extend(getattr(self, '_last_browser_click_media', []) or [])
+        playback, audio = hentai_sites.pick_split_stream(captured)
         if (
             playback
-            and not self._fileditch_capture_is_garbage(source_url, bg)
-            and not self._capture_candidate_is_clearly_not_media(playback)
             and not hentai_sites._is_challenge_url(playback)
             and not hentai_sites._looks_like_challenge(str((bg or {}).get('title') or ''))
         ):
             print(f'[HENTAI] stream after the Cloudflare click: {playback[:140]}', flush=True)
+            if audio:
+                print(f'[HENTAI] audio playlist: {audio[:140]}', flush=True)
             return {
                 'provider': hentai_sites.site_kind(source_url) or 'hentai',
                 'title': (bg or {}).get('title') or '',
                 'playback_url': playback,
+                'audio_url': audio,
+                'tls_verify': False,
                 'mirrors': list((bg or {}).get('alternate_urls') or []),
-                'headers': dict((bg or {}).get('headers') or {}),
-                'content_type': (bg or {}).get('content_type') or '',
+                'headers': dict((bg or {}).get('headers') or {}) if isinstance(bg, dict) else {},
+                'content_type': 'application/vnd.apple.mpegurl',
                 'stable': False,
                 'origin_page': source_url,
             }
@@ -46702,6 +46747,10 @@ try {
             out['pre_resolved_playback_url'] = True
         if found.get('content_type'):
             out['content_type'] = found['content_type']
+        if found.get('audio_url'):
+            out['audio_url'] = found['audio_url']
+        if found.get('tls_verify') is False:
+            out['tls_verify'] = False
         print(
             f"[HENTAI] {out['resolver_provider']}: {out.get('title') or 'video'} "
             f"({len(out['mirrors'])} mirror(s))",
@@ -48680,15 +48729,22 @@ try {
             _tls_host = (urlparse(str(playback_target or '')).netloc or '').lower()
         except Exception:
             _tls_host = ''
-        if 'vkuser.net' in _tls_host or 'okcdn.ru' in _tls_host:
+        if (
+            'vkuser.net' in _tls_host or 'okcdn.ru' in _tls_host
+            or 'octopusmanifest.org' in _tls_host or 'laidy.top' in _tls_host
+            or provider in ('hentaihaven', 'hentai_site')
+            or self._is_listed_hentai_host(file_path)
+        ):
             # Same certificate mpv rejects on the first try. Do not wait
             # for that failure: the verify-off retry is the load that
-            # sits there until another link is pasted.
+            # sits there until another link is pasted. The hentaihaven
+            # CDN (octopusmanifest / laidy) fails the same check.
             stream_info['tls_verify'] = False
         try:
             self.media_player.setTlsVerify(stream_info.get('tls_verify', True))
         except Exception:
             pass
+        self._apply_hentai_split_playback(stream_info, playback_target)
         self.media_player.setSource(QUrl(playback_target))
         self.play_button.setEnabled(True)
         self.add_to_recent_files(file_path)

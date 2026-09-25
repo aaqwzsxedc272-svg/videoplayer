@@ -563,6 +563,47 @@ def _is_challenge_url(url):
     )
 
 
+def pick_split_stream(urls):
+    """Video playlist plus its audio sibling.
+
+    The master named playlist.m3u8 is what the page loads first. It does
+    not carry the picture. Playing it leaves a clock running and a blank
+    frame. The picture is the /v.m3u8 (or the vp9 playlist). Sound is
+    the /a.m3u8 under snd/.
+    """
+    videos = []
+    audios = []
+    masters = []
+    vp9 = []
+    others = []
+    for raw in urls or []:
+        url = str(raw or '').strip()
+        if not url or _is_challenge_url(url) or _is_ad(url):
+            continue
+        low = url.lower()
+        if '.m3u8' not in low or not low.startswith('http'):
+            continue
+        if any(token in low for token in (
+            '/ads/', 'havenclick', 'adtng.com', 'magsrv.com',
+            'sacdnssedge', 'bkcdn.net', 'googletagmanager',
+        )):
+            continue
+        path = (urlparse(url).path or '').lower()
+        if path.endswith('/a.m3u8') or '/snd/' in path:
+            audios.append(url)
+        elif path.endswith('playlist_vp9.m3u8'):
+            vp9.append(url)
+        elif path.endswith('/v.m3u8'):
+            videos.append(url)
+        elif path.endswith('/playlist.m3u8'):
+            masters.append(url)
+        else:
+            others.append(url)
+    playback = (videos or vp9 or others or masters or [''])[0]
+    audio = audios[0] if audios and audios[0] != playback else ''
+    return playback, audio
+
+
 def urls_from_capture(blob):
     """Media and player URLs from a browser cache file or network log.
 
