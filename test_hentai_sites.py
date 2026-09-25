@@ -228,6 +228,25 @@ def test_hentaimama_show_page_follows_episode():
     assert found['mirrors'] == ['https://voe.sx/e/abc']
 
 
+def test_caption_files_are_kept():
+    base = 'https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/s/'
+    tracks = sites.caption_tracks([
+        base + 'fr.vtt',
+        base + 'en.vtt',
+        base + 'en.vtt?x=1',
+        'https://cdn.havenclick.com/ads/ad.vtt',
+        base + 'zh.vtt',
+        'https://www.googletagmanager.com/gtm.js',
+    ])
+    assert [item['lang'] for item in tracks] == ['en', 'fr', 'zh']
+    assert tracks[0]['ext'] == 'vtt'
+    assert tracks[0]['url'] == base + 'en.vtt'
+    buried = sites.caption_tracks_from_blobs([
+        '<track src="' + base + 'en.vtt"> and ' + base + 'ja.vtt',
+    ])
+    assert [item['lang'] for item in buried] == ['en', 'ja']
+
+
 def test_split_playlist_uses_the_video_not_the_master():
     base = 'https://octopusmanifest.org/70460589-357e-413d-a0aa-09ba198623d4/'
     video, audio = sites.pick_split_stream([
@@ -305,6 +324,7 @@ def main():
         test_hentaini_plays_hls_and_keeps_known_hosters,
         test_hentaini_series_page_uses_first_direct_episode,
         test_hanime_one_stream,
+        test_caption_files_are_kept,
         test_split_playlist_uses_the_video_not_the_master,
         test_cleared_page_is_read_and_the_check_is_not,
         test_hentaihaven_challenge_is_not_a_video,

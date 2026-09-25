@@ -32550,7 +32550,7 @@ try {
         except Exception:
             return ''
 
-    def _fetch_caption_body(self, url, page_url=''):
+    def _fetch_caption_body(self, url, page_url='', extra=None):
         """Fetch one caption file, as the bytes to hand the player.
 
         Sends the page's own Referer and Origin, a browser TLS fingerprint
@@ -32564,6 +32564,10 @@ try {
         several runs to find.
         """
         headers = self._media_playback_headers(page_url, url)
+        if isinstance(extra, dict):
+            browser_ua = extra.get('User-Agent') or extra.get('user-agent')
+            if browser_ua:
+                headers['User-Agent'] = str(browser_ua)
         headers['Accept'] = 'text/vtt, application/octet-stream, text/plain, */*'
         headers['Sec-Fetch-Dest'] = 'empty'
         cookie_header = self._cookie_header_for(url)
@@ -46642,11 +46646,16 @@ try {
             print(f'[HENTAI] stream after the Cloudflare click: {playback[:140]}', flush=True)
             if audio:
                 print(f'[HENTAI] audio playlist: {audio[:140]}', flush=True)
+            captions = hentai_sites.caption_tracks_from_blobs(
+                list(captured) + [str(getattr(self, '_last_browser_click_html', '') or '')])
+            if captions:
+                print(f'[HENTAI] {len(captions)} caption file(s)', flush=True)
             return {
                 'provider': hentai_sites.site_kind(source_url) or 'hentai',
                 'title': (bg or {}).get('title') or '',
                 'playback_url': playback,
                 'audio_url': audio,
+                'subtitle_tracks': captions,
                 'tls_verify': False,
                 'mirrors': list((bg or {}).get('alternate_urls') or []),
                 'headers': dict((bg or {}).get('headers') or {}) if isinstance(bg, dict) else {},
@@ -46685,6 +46694,12 @@ try {
                 f"{found.get('title') or 'video'}",
                 flush=True,
             )
+            captions = hentai_sites.caption_tracks_from_blobs(
+                list(captured) + [html])
+            if captions and not found.get('subtitle_tracks'):
+                found = dict(found)
+                found['subtitle_tracks'] = captions
+                print(f'[HENTAI] {len(captions)} caption file(s)', flush=True)
             return found
         print('[HENTAI] the cleared page had no stream', flush=True)
         return None
@@ -46762,6 +46777,8 @@ try {
             out['audio_url'] = found['audio_url']
         if found.get('tls_verify') is False:
             out['tls_verify'] = False
+        if found.get('subtitle_tracks'):
+            out['subtitle_tracks'] = list(found['subtitle_tracks'])
         print(
             f"[HENTAI] {out['resolver_provider']}: {out.get('title') or 'video'} "
             f"({len(out['mirrors'])} mirror(s))",
@@ -48965,7 +48982,9 @@ try {
                     sub_url = str(track.get('url') or '').strip()
                     ext = str(track.get('ext') or 'vtt').lower().lstrip('.') or 'vtt'
                     lang = re.sub(r'[^A-Za-z0-9_-]+', '', str(track.get('lang') or 'sub')) or 'sub'
-                    body, status = self._fetch_caption_body(sub_url, file_path)
+                    body, status = self._fetch_caption_body(
+                        sub_url, file_path,
+                        extra=(stream_info or {}).get('headers'))
                     if not body:
                         print(f'[SUBS]   {sub_url[:110]} -> HTTP {status}, '
                               f'no caption body, skipped', flush=True)
@@ -65277,6 +65296,12 @@ if __name__ == "__main__":
                                 _announce_media_url(req_url, prefix='VOE_M3U8::')
                             elif _media_ext_re.search(urlparse(req_url).path or ''):
                                 _announce_media_url(req_url)
+                            elif re.search(r'[.](?:vtt|srt|ass|ssa)(?:[?#]|$)', urlparse(req_url).path or '', re.I):
+                                # Caption files. The page player requests
+                                # them; they are not the video, but dropping
+                                # the request is why the resolver offered
+                                # zero tracks.
+                                _announce_media_url(req_url)
                             elif _is_renamed_hls_playlist(req_url):
                                 _announce_media_url(req_url)
                             route.continue_()
@@ -65871,6 +65896,19 @@ if __name__ == "__main__":
                                                         if (api.getPlaylistItem) pushJwItem(api.getPlaylistItem());
                                                     } catch (e) {}
                                                 } catch (e) {}
+                                            }
+                                        }
+                                    } catch (e) {}
+                                    try {
+                                        for (const el of document.querySelectorAll('track')) {
+                                            push(el.src || el.getAttribute('src'), 0, 0, 0);
+                                        }
+                                    } catch (e) {}
+                                    try {
+                                        if (performance && performance.getEntriesByType) {
+                                            for (const entry of performance.getEntriesByType('resource')) {
+                                                const name = entry && entry.name;
+                                                if (name && /\\.vtt(?:[?#]|$)/i.test(name)) push(name, 0, 0, 0);
                                             }
                                         }
                                     } catch (e) {}

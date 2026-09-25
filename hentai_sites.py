@@ -563,6 +563,64 @@ def _is_challenge_url(url):
     )
 
 
+_CAPTION_LANGS = frozenset((
+    'ar', 'cs', 'da', 'de', 'el', 'en', 'es', 'fi', 'fr', 'he', 'hu',
+    'id', 'it', 'ja', 'ko', 'nl', 'pl', 'pt', 'ro', 'ru', 'sv', 'th',
+    'tr', 'uk', 'vi', 'zh',
+))
+
+
+_VTT_URL_RE = re.compile(
+    r'https?://[^\s\"\'<>\\]+?\.vtt(?:\?[^\s\"\'<>\\]*)?',
+    re.I,
+)
+
+
+def caption_tracks_from_blobs(blobs):
+    """Caption files named in a capture list or in page text."""
+    urls = []
+    for blob in blobs or []:
+        text = str(blob or '')
+        if not text:
+            continue
+        low = text.lower()
+        if low.startswith('http') and low.split('?', 1)[0].endswith('.vtt'):
+            urls.append(text)
+            continue
+        urls.extend(_VTT_URL_RE.findall(text))
+    return caption_tracks(urls)
+
+
+def caption_tracks(urls):
+    """Caption files the page player requested, English first."""
+    tracks = []
+    seen = set()
+    for raw in urls or []:
+        url = str(raw or '').split('#', 1)[0].strip()
+        low = url.lower()
+        if not low.startswith('http') or not low.split('?', 1)[0].endswith('.vtt'):
+            continue
+        if any(token in low for token in ('/ads/', 'havenclick', 'adtng.com', 'magsrv.com')):
+            continue
+        path = (urlparse(url).path or '').lower()
+        lang = path.rsplit('/', 1)[-1].rsplit('.', 1)[0]
+        if lang not in _CAPTION_LANGS:
+            lang = 'und'
+        key = low.split('?', 1)[0]
+        if key in seen:
+            continue
+        seen.add(key)
+        tracks.append({
+            'url': url,
+            'lang': lang,
+            'ext': 'vtt',
+            'name': lang,
+            'automatic': False,
+        })
+    tracks.sort(key=lambda item: (0 if item['lang'] == 'en' else 1, item['lang']))
+    return tracks
+
+
 def pick_split_stream(urls):
     """Video playlist plus its audio sibling.
 
