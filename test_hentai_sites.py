@@ -228,6 +228,40 @@ def test_hentaimama_show_page_follows_episode():
     assert found['mirrors'] == ['https://voe.sx/e/abc']
 
 
+def test_cleared_page_is_read_and_the_check_is_not():
+    token = sites.haven_encode_token({
+        'en': 'aaa', 'iv': 'bbb', 'uri': 'https://player.example',
+    })
+    watch = (
+        '<title>Example Episode 1 - Hentai Haven</title>'
+        '<iframe src="https://player.example/player.php?data=blob"></iframe>'
+    )
+    player = f'<meta name="x-secure-token" content="{token}">'
+    api = json.dumps({
+        'status': True,
+        'data': {'sources': [{'src': 'https://cdn.example/playlist.m3u8'}]},
+    })
+    inner = Fake([
+        ('player.php', sites._Resp(200, player)),
+        ('/api.php', sites._Resp(200, api)),
+    ])
+    found = sites.resolve(
+        'https://hentaihaven.xxx/watch/example/episode-1/',
+        fetch=sites.fetch_using_page(
+            'https://hentaihaven.xxx/watch/example/episode-1/', watch, inner))
+    assert found['playback_url'] == 'https://cdn.example/playlist.m3u8'
+    assert not any('episode-1' in url for _method, url, _data in inner.calls)
+    challenge = Fake([
+        ('hentaihaven.xxx', sites._Resp(200, '<title>should not be used</title>')),
+    ])
+    blocked = sites.fetch_using_page(
+        'https://hentaihaven.xxx/watch/example/episode-1/',
+        '<title>Just a moment...</title>',
+        challenge)
+    page = blocked('GET', 'https://hentaihaven.xxx/watch/example/episode-1/')
+    assert 'should not be used' in page.text
+
+
 def test_capture_ignores_the_cloudflare_page():
     blob = (
         b'https://hentaihaven.xxx/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1'
@@ -256,6 +290,7 @@ def main():
         test_hentaini_plays_hls_and_keeps_known_hosters,
         test_hentaini_series_page_uses_first_direct_episode,
         test_hanime_one_stream,
+        test_cleared_page_is_read_and_the_check_is_not,
         test_hentaihaven_challenge_is_not_a_video,
         test_capture_ignores_the_cloudflare_page,
         test_hentaihaven_one_stream,

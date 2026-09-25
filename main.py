@@ -44642,6 +44642,9 @@ try {
         # value at the worker boundary.  The FamilypornHD integration can use
         # this copy without trusting console text or a stale static result.
         self._last_browser_click_result = None
+        self._last_browser_click_html = ''
+        self._last_browser_click_ua = ''
+        self._last_browser_click_cookies = ''
 
         pw_args = [
             sys.executable, os.path.abspath(__file__),
@@ -45061,6 +45064,8 @@ try {
             if line.startswith('PAGE_HTML_B64::'):
                 html_b64 = line[len('PAGE_HTML_B64::'):]
 
+        self._last_browser_click_ua = browser_ua or ''
+        self._last_browser_click_cookies = browser_cookies or ''
         if not media_candidates and not html_b64:
             diag = '\n'.join(
                 l for l in combined.splitlines()
@@ -45079,6 +45084,7 @@ try {
                 clicked_html = ''
             if not clicked_title and clicked_html:
                 clicked_title = self._clean_remote_title(self._html_page_title(clicked_html))
+        self._last_browser_click_html = clicked_html or ''
         _title_blobs = []
         if clicked_html:
             _title_blobs.append(clicked_html)
@@ -45544,6 +45550,15 @@ try {
                       f"with no media shape (unverified fallback): "
                       f"{str(_shapeless[0])[:140]}")
             _non_ad = [c for c in _non_ad if not self._media_url_looks_like_preview(c)]
+            if _non_ad and self._is_listed_hentai_host(source_url):
+                # Fileditch clicks the check, then reads the page. Promoting
+                # this unverified URL is how the check page was played.
+                print(
+                    '[HENTAI] ignoring unverified capture; reading the page '
+                    'after the Cloudflare click',
+                    flush=True,
+                )
+                _non_ad = []
             if _non_ad:
                 best = _non_ad[0]
                 print(f"[BROWSER_CLICK] probe rejected all {len(normalized_candidates)} candidate(s) for {source_url}; using best-ranked capture anyway")
@@ -46460,9 +46475,16 @@ try {
         import hentai_sites
         headers = dict(headers or {})
         if not any(str(key).lower() == 'cookie' for key in headers):
-            cookie = self._hentai_cookie_header(url)
-            if cookie:
-                headers['Cookie'] = cookie
+            stashed = self._hentai_stashed_headers(url)
+            if stashed.get('Cookie'):
+                headers['Cookie'] = stashed['Cookie']
+                if stashed.get('User-Agent'):
+                    headers['User-Agent'] = stashed['User-Agent']
+                print('[HENTAI] reusing the Cloudflare clearance from the last click', flush=True)
+            else:
+                cookie = self._hentai_cookie_header(url)
+                if cookie:
+                    headers['Cookie'] = cookie
         return hentai_sites._default_fetch(
             method, url, headers=headers, data=data, timeout=timeout)
 
@@ -46491,128 +46513,124 @@ try {
                 continue
         return blobs
 
-    def _capture_hentai_from_brave(self, source_url):
-        """Open the page in the user's normal Brave and take the real stream.
+    def _hentai_stashed_headers(self, url, max_age=3600):
+        """Cookie and agent from the last Cloudflare click, if still fresh."""
+        try:
+            host = (urlparse(str(url or '')).netloc or '').lower()
+            if host.startswith('www.'):
+                host = host[4:]
+            jar = getattr(self, '_hentai_cookie_jar', None) or {}
+            entry = jar.get(host) or {}
+            if not entry or time.time() - float(entry.get('ts') or 0) > max_age:
+                return {}
+            headers = {}
+            if entry.get('cookie'):
+                headers['Cookie'] = entry['cookie']
+            if entry.get('ua'):
+                headers['User-Agent'] = entry['ua']
+            return headers
+        except Exception:
+            return {}
 
-        The headless window only ever received the Cloudflare check. This
-        uses the Brave they already browse with, and it never returns the
-        check URL as a video.
+    def _hentai_remember_clearance(self, source_url, cookie='', ua=''):
+        try:
+            host = (urlparse(str(source_url or '')).netloc or '').lower()
+            if host.startswith('www.'):
+                host = host[4:]
+            cookie = str(cookie or '').strip()
+            if not host or not cookie:
+                return
+            jar = getattr(self, '_hentai_cookie_jar', None)
+            if not isinstance(jar, dict):
+                jar = {}
+            jar[host] = {'cookie': cookie, 'ua': str(ua or '').strip(), 'ts': time.time()}
+            self._hentai_cookie_jar = jar
+            print(f'[HENTAI] stored the Cloudflare clearance for {host}', flush=True)
+        except Exception:
+            pass
+
+    def _resolve_hentai_after_cloudflare_click(self, source_url):
+        """Click the Cloudflare box the way fileditch does, then read the page.
+
+        The window stays off-screen. The check page is never played. After
+        the click, the dedicated resolver reads that page.
         """
         import hentai_sites
         print(
-            '[HENTAI] Cloudflare check. Opening the page in your Brave. '
-            'Pass the check there if it asks, and click play if the video '
-            'does not start. This app will not play the check page.',
+            '[HENTAI] Cloudflare check. Clicking it in the background, '
+            'same as fileditch, then reading the page.',
             flush=True,
         )
         try:
-            opened = self._open_url_in_brave(source_url)
+            bg = self._resolve_stream_via_browser_click(
+                source_url,
+                headed=True,
+                headed_hidden=True,
+                click_download=True,
+                max_watch=120,
+            )
         except Exception as exc:
-            print(f'[HENTAI] could not open Brave ({type(exc).__name__})', flush=True)
+            print(f'[HENTAI] Cloudflare click errored ({type(exc).__name__})', flush=True)
+            bg = None
+        cookie = str(getattr(self, '_last_browser_click_cookies', '') or '')
+        ua = str(getattr(self, '_last_browser_click_ua', '') or '')
+        if isinstance(bg, dict):
+            cookie = cookie or str((bg.get('headers') or {}).get('Cookie') or bg.get('browser_cookies') or '')
+            ua = ua or str((bg.get('headers') or {}).get('User-Agent') or bg.get('browser_ua') or '')
+        if cookie:
+            self._hentai_remember_clearance(source_url, cookie, ua)
+        playback = str((bg or {}).get('playback_url') or '').strip() if isinstance(bg, dict) else ''
+        if (
+            playback
+            and not self._fileditch_capture_is_garbage(source_url, bg)
+            and not self._capture_candidate_is_clearly_not_media(playback)
+            and not hentai_sites._is_challenge_url(playback)
+            and not hentai_sites._looks_like_challenge(str((bg or {}).get('title') or ''))
+        ):
+            print(f'[HENTAI] stream after the Cloudflare click: {playback[:140]}', flush=True)
+            return {
+                'provider': hentai_sites.site_kind(source_url) or 'hentai',
+                'title': (bg or {}).get('title') or '',
+                'playback_url': playback,
+                'mirrors': list((bg or {}).get('alternate_urls') or []),
+                'headers': dict((bg or {}).get('headers') or {}),
+                'content_type': (bg or {}).get('content_type') or '',
+                'stable': False,
+                'origin_page': source_url,
+            }
+        html = str(getattr(self, '_last_browser_click_html', '') or '')
+        if not html or hentai_sites._looks_like_challenge(html):
+            print('[HENTAI] the Cloudflare click did not clear the page', flush=True)
             return None
-        if not opened:
-            print('[HENTAI] Brave was not opened', flush=True)
-            return None
+        print('[HENTAI] reading the page after the Cloudflare click', flush=True)
+
+        def fetch(method, url, headers=None, data=None, timeout=25):
+            headers = dict(headers or {})
+            if cookie and not any(str(key).lower() == 'cookie' for key in headers):
+                headers['Cookie'] = cookie
+            if ua and not any(str(key).lower() == 'user-agent' for key in headers):
+                headers['User-Agent'] = ua
+            return self._hentai_fetch(method, url, headers=headers, data=data, timeout=timeout)
+
         try:
-            import generic_jav_integration as gji
-            cache_dirs = gji._brave_cache_dirs()
-        except Exception:
-            cache_dirs = []
-        netlog = str(getattr(self, '_brave_netlog_path', '') or '')
-        start = time.time()
-        deadline = start + 75
-        tried_players = set()
-        tried_tokens = set()
-        cursor = 0
-        announced = False
-        last_retry = 0
-        kind = hentai_sites.site_kind(source_url) or 'hentai'
-        while time.time() < deadline:
-            time.sleep(3)
-            blobs = []
-            for cache_dir in cache_dirs:
-                blobs.extend(self._recent_cache_blobs(cache_dir, start))
-            if netlog and os.path.isfile(netlog):
-                try:
-                    with open(netlog, 'rb') as handle:
-                        handle.seek(max(0, cursor - 2048))
-                        chunk = handle.read()
-                        cursor = max(0, cursor - 2048) + len(chunk)
-                    if chunk:
-                        blobs.append(chunk)
-                except Exception:
-                    pass
-            media = []
-            players = []
-            token = ''
-            for blob in blobs:
-                found = hentai_sites.urls_from_capture(blob)
-                media.extend(found.get('media') or [])
-                players.extend(found.get('players') or [])
-                if found.get('token') and not token:
-                    token = found['token']
-            media = hentai_sites._unique(media)
-            media = [url for url in media if not hentai_sites._is_challenge_url(url)]
-            if media:
-                media.sort(key=hentai_sites._height_hint, reverse=True)
-                title = ''
-                slug = re.search(r'/watch/([^/?#]+)', str(source_url), re.I)
-                if slug:
-                    title = slug.group(1).replace('-', ' ').title()
-                print(f'[HENTAI] stream from your Brave: {media[0][:140]}', flush=True)
-                return hentai_sites._result(
-                    kind, source_url, title, media[0], media[1:], stable=False)
-            if token and token not in tried_tokens and kind == 'hentaihaven':
-                tried_tokens.add(token)
-                try:
-                    found = hentai_sites.haven_from_token(
-                        source_url, token, self._hentai_fetch)
-                except Exception:
-                    found = None
-                if isinstance(found, dict) and found.get('playback_url'):
-                    print('[HENTAI] player token from your Brave', flush=True)
-                    return found
-            if kind == 'hentaihaven':
-                for player in hentai_sites._unique(players):
-                    if player in tried_players:
-                        continue
-                    tried_players.add(player)
-                    try:
-                        page = self._hentai_fetch(
-                            'GET', player, headers={'Referer': source_url})
-                        token2 = hentai_sites.haven_token_from_html(page.text or '')
-                    except Exception:
-                        token2 = ''
-                    if not token2 or token2 in tried_tokens:
-                        continue
-                    tried_tokens.add(token2)
-                    try:
-                        found = hentai_sites.haven_from_token(
-                            source_url, token2, self._hentai_fetch)
-                    except Exception:
-                        found = None
-                    if isinstance(found, dict) and found.get('playback_url'):
-                        print('[HENTAI] player.php from your Brave', flush=True)
-                        return found
-            if not announced and time.time() - start > 12:
-                announced = True
-                print(
-                    '[HENTAI] still waiting on your Brave for a stream, '
-                    'not the check page',
-                    flush=True,
-                )
-            if time.time() - last_retry > 20:
-                last_retry = time.time()
-                self._forget_hentai_cookies()
-                try:
-                    found = hentai_sites.resolve(source_url, fetch=self._hentai_fetch)
-                except Exception:
-                    found = None
-                if isinstance(found, dict) and found.get('playback_url'):
-                    if not hentai_sites._is_challenge_url(found.get('playback_url')):
-                        print('[HENTAI] page opened after the Brave check', flush=True)
-                        return found
-        print('[HENTAI] your Brave did not yield a stream', flush=True)
+            found = hentai_sites.resolve(
+                source_url, fetch=hentai_sites.fetch_using_page(source_url, html, fetch))
+        except Exception as exc:
+            print(f'[HENTAI] page after the click failed ({type(exc).__name__})', flush=True)
+            return None
+        if isinstance(found, dict) and (
+            found.get('playback_url') or found.get('mirrors')
+        ):
+            playback = str(found.get('playback_url') or '')
+            if playback and hentai_sites._is_challenge_url(playback):
+                return None
+            print(
+                f"[HENTAI] {found.get('provider') or 'page'} after the click: "
+                f"{found.get('title') or 'video'}",
+                flush=True,
+            )
+            return found
+        print('[HENTAI] the cleared page had no stream', flush=True)
         return None
 
     def _resolve_listed_hentai_site(self, source_url):
@@ -46633,9 +46651,9 @@ try {
             found = None
         if not isinstance(found, dict) and getattr(hentai_sites, 'last_block', '') == 'cloudflare':
             try:
-                found = self._capture_hentai_from_brave(source_url)
+                found = self._resolve_hentai_after_cloudflare_click(source_url)
             except Exception as exc:
-                print(f'[HENTAI] Brave capture failed ({type(exc).__name__})', flush=True)
+                print(f'[HENTAI] Cloudflare click failed ({type(exc).__name__})', flush=True)
                 found = None
         if not isinstance(found, dict):
             return None

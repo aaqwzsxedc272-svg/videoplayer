@@ -193,8 +193,9 @@ def _default_fetch(method, url, headers=None, data=None, timeout=25):
     headers.setdefault('Accept', 'text/html,application/xhtml+xml,application/json,*/*;q=0.8')
     headers.setdefault('Accept-Language', 'en-US,en;q=0.9')
     method = method.upper()
-    # A custom User-Agent on top of impersonation is what makes Cloudflare
-    # show "Just a moment". Leave the fingerprint's own agent in place.
+    # A made-up User-Agent on top of impersonation is what makes Cloudflare
+    # show "Just a moment". Keep one only when the caller is replaying the
+    # browser that just clicked the check — that cookie is tied to its agent.
     last = None
     try:
         import curl_cffi.requests as cfreq
@@ -847,6 +848,43 @@ def resolve_hentaimama(url, fetch):
     return _result(
         'hentaimama', url, title, playback,
         direct[1:] + _unique(mirrors), stable=bool(playback))
+
+
+def same_document(left, right):
+    try:
+        a = urlparse(str(left or ''))
+        b = urlparse(str(right or ''))
+    except Exception:
+        return False
+    host_a = (a.netloc or '').lower()
+    host_b = (b.netloc or '').lower()
+    if host_a.startswith('www.'):
+        host_a = host_a[4:]
+    if host_b.startswith('www.'):
+        host_b = host_b[4:]
+    return bool(host_a) and host_a == host_b and (a.path or '').rstrip('/').lower() == (b.path or '').rstrip('/').lower()
+
+
+def fetch_using_page(page_url, html, fetch):
+    """Serve a page the browser already cleared, then fetch the rest normally.
+
+    The Cloudflare check is not a page. It is never served.
+    """
+    served = {'done': False}
+
+    def wrapped(method, url, headers=None, data=None, timeout=25):
+        if (
+            str(method or '').upper() == 'GET'
+            and not served['done']
+            and html
+            and not _looks_like_challenge(html)
+            and same_document(url, page_url)
+        ):
+            served['done'] = True
+            return _Resp(200, html, {}, url)
+        return fetch(method, url, headers=headers, data=data, timeout=timeout)
+
+    return wrapped
 
 
 def resolve(url, fetch=None):
