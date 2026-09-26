@@ -30766,8 +30766,16 @@ try {
             path = (urlparse(url).path or '').lower()
         except Exception:
             return False
-        return any(path.endswith(suffix)
-                   for suffix in self._PLAYABLE_MEDIA_SUFFIXES)
+        # KVS pages (watchporn.to and the same player) put a slash between
+        # the extension and the signed query:
+        #   /get_file/.../7546_720p.mp4/?v-acctoken=...
+        # The path is then ...mp4/ . endswith('.mp4') missed it, the film
+        # sorted out of the 12-slot window, and a Stripchat HLS that did
+        # fit was played as the video.
+        return any(
+            path.endswith(suffix) or path.endswith(suffix + '/')
+            for suffix in self._PLAYABLE_MEDIA_SUFFIXES
+        )
 
     def _capture_candidate_is_obfuscated_master(self, url):
         """True for the embedded player's disguised HLS master.
@@ -31992,7 +32000,17 @@ try {
             ]
         except Exception:
             extra = []
-        return window + extra
+        # The signed film on a KVS page. Ads are announced first and fill
+        # the 12 slots; without this the get_file URL never reaches ranking
+        # and the overlay HLS is what plays.
+        extra_files = []
+        for u in items[limit:]:
+            if u in window or u in extra or u in extra_files:
+                continue
+            low = str(u or '').lower()
+            if '/get_file/' in low and '.mp4' in low:
+                extra_files.append(u)
+        return window + extra + extra_files
 
     @staticmethod
     def _is_disguised_hls_manifest(url):
@@ -43117,6 +43135,10 @@ try {
             'bkcdn', 'bxcdn', '/library/', 'adnetwork', 'popunder', 'popcash',
             'exoclick', 'juicyads', 'trafficjunky', '/ads/', '/advert',
             'sacdnssedge', 'exdynsrv',
+            # The Stripchat widget on watchporn.to. Its HLS probes as a
+            # real playlist (edge-hls.growcdnssedge.com) and used to win
+            # the capture over the page's own get_file film.
+            'growcdnssedge', 'doppiocdn', 'stripchat.com', 'whitetrafsa',
         ))
 
     def _direct_candidate_is_full_video(self, url, page_url, external_hoster=False):
@@ -43712,7 +43734,11 @@ try {
             # embed page), sanitize and dedupe every candidate before probing.
             normalized_candidates = []
             seen_candidates = set()
-            for raw_candidate in self._browser_capture_candidate_window(media_candidates):
+            _rank_inputs = list(self._browser_capture_candidate_window(media_candidates))
+            for _verified in verified_candidates:
+                if _verified not in _rank_inputs:
+                    _rank_inputs.append(_verified)
+            for raw_candidate in _rank_inputs:
                 candidate = self._normalize_extracted_media_url(raw_candidate, page_url)
                 if not candidate or candidate.startswith(('blob:', 'about:')):
                     continue
@@ -43770,6 +43796,17 @@ try {
                 embed_slug = (embed_slug_match.group(1) or '').lower() if embed_slug_match else ''
             except Exception:
                 embed_slug = ''
+
+            _ad_network = [c for c in normalized_candidates if self._media_url_looks_like_ad(c)]
+            if _ad_network:
+                normalized_candidates = [
+                    c for c in normalized_candidates if c not in _ad_network
+                ]
+                verified_normalized.difference_update(_ad_network)
+                print(
+                    f"[AD_SKIP] dropped {len(_ad_network)} ad-network capture(s): "
+                    f"{_ad_network[0][:140]}"
+                )
 
             def _candidate_score(url):
                 score = 0
@@ -45211,7 +45248,11 @@ try {
             )
             normalized_candidates = []
             seen_candidates = set()
-            for raw_candidate in self._browser_capture_candidate_window(media_candidates):
+            _rank_inputs = list(self._browser_capture_candidate_window(media_candidates))
+            for _verified in verified_candidates:
+                if _verified not in _rank_inputs:
+                    _rank_inputs.append(_verified)
+            for raw_candidate in _rank_inputs:
                 candidate = self._normalize_extracted_media_url(raw_candidate, source_url)
                 if not candidate or candidate.startswith(('blob:', 'about:')):
                     continue
@@ -45414,6 +45455,20 @@ try {
             def _measured_duration(url):
                 return (measured_normalized.get(url) or (0.0, 0, 0))[0]
 
+            # A Stripchat / bkcdn overlay probes as a perfectly valid
+            # playlist. Drop it before ranking so it cannot fill the six
+            # probe slots and be played as the film.
+            _ad_network = [c for c in normalized_candidates if self._media_url_looks_like_ad(c)]
+            if _ad_network:
+                normalized_candidates = [
+                    c for c in normalized_candidates if c not in _ad_network
+                ]
+                verified_normalized.difference_update(_ad_network)
+                print(
+                    f"[AD_SKIP] dropped {len(_ad_network)} ad-network capture(s): "
+                    f"{_ad_network[0][:140]}"
+                )
+
             # Ranking before probing: prefer the delivery-CDN families these
             # players actually use (mxcontent.net / mixdrop), then HLS
             # manifests, then signed-looking links. Video ads layered over
@@ -45448,6 +45503,11 @@ try {
                     score += 12
                 if self._terabox_url_is_thumbnail(url):
                     score -= 20
+                if '/get_file/' in lower_url and '.mp4' in lower_url:
+                    # The page's own signed film. Must beat a foreign HLS
+                    # that merely probed, which is how the Stripchat widget
+                    # was played instead of the watchporn video.
+                    score += 8
                 if '.m3u8' in lower_url:
                     score += 2
                 if re.search(r'[?&](s|token|sig|signature|expires?|exp|e)=', lower_url):
