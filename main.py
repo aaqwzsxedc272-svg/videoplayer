@@ -32389,7 +32389,9 @@ try {
                 response.close()
                 return None
             content_type = str(response.headers.get('Content-Type', '')).lower()
-            if content_type.startswith('text/html'):
+            if content_type.startswith('text/html') or content_type.startswith('image/'):
+                # A get_file URL can answer 200 with a 1x6 GIF while the
+                # path still says .mp4. That is not the film.
                 response.close()
                 return None
             final_url = response.url or target_url
@@ -44923,7 +44925,7 @@ try {
                             _pw_media_at = time.time()
                         if (
                             _pw_get_file_at is None
-                            and self._is_page_get_file_film(line.split('::', 1)[-1])
+                            and self._get_file_rendition_height(line.split('::', 1)[-1]) >= 480
                         ):
                             try:
                                 _film_host = (urlparse(line.split('::', 1)[-1]).netloc or '').lower()
@@ -45525,10 +45527,12 @@ try {
                 if self._terabox_url_is_thumbnail(url):
                     score -= 20
                 if '/get_file/' in lower_url and '.mp4' in lower_url:
-                    # The page's own signed film. Must beat a foreign HLS
-                    # that merely probed, which is how the Stripchat widget
-                    # was played instead of the watchporn video.
-                    score += 8
+                    # A labeled rendition is the film. The unsuffixed
+                    # /7546.mp4 on the same page is a 1x6 GIF stub.
+                    if re.search(r'_\d{3,4}p\.mp4', lower_url):
+                        score += 8
+                    else:
+                        score -= 6
                 if '.m3u8' in lower_url:
                     score += 2
                 if re.search(r'[?&](s|token|sig|signature|expires?|exp|e)=', lower_url):
@@ -45913,6 +45917,21 @@ try {
         if self._media_url_looks_like_preview(url):
             return False
         return True
+
+    def _get_file_rendition_height(self, url):
+        """720 from ``7546_720p.mp4/``, 0 for the unsuffixed stub.
+
+        basename() of a path that ends in ``.mp4/`` is empty, so the
+        height hint was 0 for every rendition and the stub sorted first.
+        That stub answers with a 1x6 GIF.
+        """
+        match = re.search(r'_(\d{3,4})p\.mp4', str(url or ''), re.IGNORECASE)
+        if not match:
+            return 0
+        try:
+            return int(match.group(1))
+        except Exception:
+            return 0
 
     @staticmethod
     def _hls_playlist_total_seconds(playlist_text):
@@ -47641,15 +47660,22 @@ try {
         get_file_films = [
             item for item in candidates
             if self._is_page_get_file_film(item[1])
+            and self._get_file_rendition_height(item[1]) >= 480
         ]
         if get_file_films:
             get_file_films.sort(
-                key=lambda item: self._media_url_height_hint(item[1]),
+                key=lambda item: self._get_file_rendition_height(item[1]),
                 reverse=True,
             )
             for _pattern_index, film_url in get_file_films[:3]:
                 playback_headers = self._media_playback_headers(page_url, film_url)
-                probe_headers = {'Accept': '*/*'}
+                probe_headers = {
+                    'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.5',
+                    # Without a range the unsuffixed URL, and sometimes a
+                    # labeled one, answers with the 1x6 GIF. The player
+                    # asks with a range and gets the file or the zload redirect.
+                    'Range': 'bytes=0-',
+                }
                 if playback_headers.get('Origin'):
                     probe_headers['Origin'] = playback_headers.get('Origin')
                 direct = self._probe_remote_media_candidate(
@@ -47666,12 +47692,25 @@ try {
                     )
                     continue
                 playback = str(direct.get('playback_url') or film_url)
+                ctype = str(direct.get('content_type') or '').lower()
+                try:
+                    size_bytes = int(direct.get('size_bytes') or 0)
+                except Exception:
+                    size_bytes = 0
+                # The unsuffixed get_file URL, and a labeled one asked
+                # without the player, answer 200 with a 1x6 GIF and stay
+                # on this URL. The film is the redirect (srv*.zload.cc).
+                stayed = '/get_file/' in playback.lower()
                 if (
                     self._media_url_looks_like_preview(playback)
                     or self._media_url_looks_like_ad(playback)
+                    or ctype.startswith('image/')
+                    or 'gif' in ctype
+                    or (stayed and size_bytes < 200000)
                 ):
                     print(
-                        f'[HTML_RESOLVE] get_file probe was an ad {playback[:140]}',
+                        f'[HTML_RESOLVE] get_file probe was a stub '
+                        f'({ctype or "no type"}, {size_bytes} bytes) {playback[:140]}',
                         flush=True,
                     )
                     continue
@@ -47692,7 +47731,8 @@ try {
                 )
                 return direct
             print(
-                '[HTML_RESOLVE] get_file film did not answer; not probing chapter links',
+                '[HTML_RESOLVE] labeled get_file did not answer with the film; '
+                'not playing the GIF stub',
                 flush=True,
             )
             return None
