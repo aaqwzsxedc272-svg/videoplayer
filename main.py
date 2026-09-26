@@ -44878,6 +44878,7 @@ try {
                 160, int(max_watch) + (12 if early_m3u8 else 45))
             _pw_last_line_at = time.time()
             _pw_verified_at = None
+            _pw_get_file_at = None
             _pw_html_at = None
             _pw_media_at = None
             _pw_m3u8_at = None
@@ -44920,6 +44921,18 @@ try {
                     elif line.startswith('MEDIA_URL::'):
                         if _pw_media_at is None:
                             _pw_media_at = time.time()
+                        if (
+                            _pw_get_file_at is None
+                            and self._is_page_get_file_film(line.split('::', 1)[-1])
+                        ):
+                            try:
+                                _film_host = (urlparse(line.split('::', 1)[-1]).netloc or '').lower()
+                                _page_host = (urlparse(source_url).netloc or '').lower()
+                            except Exception:
+                                _film_host = ''
+                                _page_host = ''
+                            if _film_host.replace('www.', '') == _page_host.replace('www.', ''):
+                                _pw_get_file_at = time.time()
                         if (_pw_manifest_at is None
                                 and self._capture_line_is_manifest(line)):
                             _pw_manifest_at = time.time()
@@ -44951,6 +44964,14 @@ try {
                     # (modal, unresponsive CDP). Don't sit out the whole
                     # deadline: kill the tree and advance with what we
                     # have.
+                    if (_pw_get_file_at is not None
+                            and _now - _pw_get_file_at > 3):
+                        # The page already handed over its signed film.
+                        # Waiting for the <video> duration sits through the
+                        # Stripchat widget. Three seconds is slack for the
+                        # cookie line, not for the player to finish loading.
+                        _kill_pw_tree('page get_file film already captured')
+                        break
                     if (_pw_verified_at is not None
                             and _now - _pw_verified_at > 2.5):
                         # VERIFIED_MEDIA is emitted only after the page's
@@ -45877,6 +45898,21 @@ try {
     def _media_url_looks_like_preview(self, url):
         low = str(url or '').lower()
         return any(token in low for token in self._PREVIEW_MEDIA_URL_TOKENS)
+
+    def _is_page_get_file_film(self, url):
+        """The signed film a KVS page (watchporn.to) already printed.
+
+        The path is /get_file/.../7546_720p.mp4/?v-acctoken=... . Probing
+        the chapter links (?t=300) and then opening a browser until the
+        player reports a duration is what made a paste that used to start
+        immediately sit there. A preview file on the same path is not this.
+        """
+        low = str(url or '').lower()
+        if '/get_file/' not in low or '.mp4' not in low:
+            return False
+        if self._media_url_looks_like_preview(url):
+            return False
+        return True
 
     @staticmethod
     def _hls_playlist_total_seconds(playlist_text):
@@ -47329,7 +47365,8 @@ try {
             'Accept-Language': 'en-US,en;q=0.5',
         })
         try:
-            response = requests.get(source_url, headers=request_headers, timeout=15, allow_redirects=True)
+            session = requests.Session()
+            response = session.get(source_url, headers=request_headers, timeout=15, allow_redirects=True)
         except Exception:
             return None
         content_type = str(response.headers.get('Content-Type', '')).lower()
@@ -47598,6 +47635,67 @@ try {
         # a hoster link is on the page.
         for _pattern_index, _candidate_url in candidates:
             print(f'[HTML_RESOLVE] page candidate {_candidate_url[:180]}', flush=True)
+        # The film is already in the page. Probe that signed file and play
+        # it. Do not spend the probe window on ?t= chapter links, and do
+        # not open a browser to wait for the player to report a duration.
+        get_file_films = [
+            item for item in candidates
+            if self._is_page_get_file_film(item[1])
+        ]
+        if get_file_films:
+            get_file_films.sort(
+                key=lambda item: self._media_url_height_hint(item[1]),
+                reverse=True,
+            )
+            for _pattern_index, film_url in get_file_films[:3]:
+                playback_headers = self._media_playback_headers(page_url, film_url)
+                probe_headers = {'Accept': '*/*'}
+                if playback_headers.get('Origin'):
+                    probe_headers['Origin'] = playback_headers.get('Origin')
+                direct = self._probe_remote_media_candidate(
+                    film_url,
+                    referer=page_url,
+                    headers=probe_headers,
+                    title=page_title,
+                    session=session,
+                )
+                if not direct:
+                    print(
+                        f'[HTML_RESOLVE] get_file probe failed {film_url[:140]}',
+                        flush=True,
+                    )
+                    continue
+                playback = str(direct.get('playback_url') or film_url)
+                if (
+                    self._media_url_looks_like_preview(playback)
+                    or self._media_url_looks_like_ad(playback)
+                ):
+                    print(
+                        f'[HTML_RESOLVE] get_file probe was an ad {playback[:140]}',
+                        flush=True,
+                    )
+                    continue
+                direct['headers'] = playback_headers
+                direct['title'] = page_title or direct.get('title')
+                direct['resolver_provider'] = 'html'
+                direct['resolved_at_ms'] = int(time.time() * 1000)
+                # The redirect (srv*.zload.cc) is the file. mpv's TLS check
+                # rejects that host; the browser path already plays it with
+                # the check off.
+                direct['tls_verify'] = False
+                if subtitle_tracks:
+                    direct['subtitle_tracks'] = subtitle_tracks
+                print(
+                    '[HTML_RESOLVE] playing the get_file film already on the page: '
+                    f'{playback[:140]}',
+                    flush=True,
+                )
+                return direct
+            print(
+                '[HTML_RESOLVE] get_file film did not answer; not probing chapter links',
+                flush=True,
+            )
+            return None
         hoster_urls = self._anchor_hoster_urls(html, page_url)
         full_candidates = [
             item for item in candidates
@@ -47655,6 +47753,16 @@ try {
         ordered = list(ordered or [])
         if not ordered:
             return None
+        # Chapter links and model pages match the loose HTML patterns and
+        # used to fill the eight probe slots. The film, later in the same
+        # list, was never asked. Probe files first.
+        _media_first = [
+            item for item in ordered
+            if self._capture_candidate_has_media_shape(item[1])
+            or self._is_page_get_file_film(item[1])
+        ]
+        if _media_first:
+            ordered = _media_first
         short_limit = int(getattr(self, '_HTML_SHORT_FILE_BYTES', 4 * 1024 * 1024) or 0)
         durations = {}
         for _pattern_index, candidate in ordered[:8]:
