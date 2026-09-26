@@ -30675,6 +30675,7 @@ try {
             host = (urlparse(url).netloc or '').lower()
             trusted = (
                 'turbocdn' in host
+                or 'fileditch' in host
                 or 'okcdn.ru' in host
                 or host.endswith('.okcdn.ru')
                 or 'mycdn.me' in host
@@ -38928,7 +38929,16 @@ try {
             jar = getattr(self, '_fileditch_cookie_jar', None)
             if not isinstance(jar, dict):
                 jar = {}
-            jar[host] = {'cookie': cookie, 'ua': ua, 'ts': time.time()}
+            playback = str((bg or {}).get('playback_url') or '').strip()
+            entry = {'cookie': cookie, 'ua': ua, 'ts': time.time()}
+            if playback and not self._fileditch_capture_is_garbage(source_url, bg):
+                entry['playback_url'] = playback
+                entry['headers'] = dict((bg or {}).get('headers') or {})
+                try:
+                    entry['resolved_at_ms'] = int((bg or {}).get('resolved_at_ms') or time.time() * 1000)
+                except Exception:
+                    entry['resolved_at_ms'] = int(time.time() * 1000)
+            jar[host] = entry
             self._fileditch_cookie_jar = jar
             print(f"[FILEDITCH] stored Cloudflare clearance cookies for {host} — later links may resolve without any browser window")
         except Exception:
@@ -38952,6 +38962,49 @@ try {
             return headers
         except Exception:
             return {}
+
+    def _fileditch_stashed_playback(self, source_url):
+        """The signed file from the capture that just finished.
+
+        Playing the same link opens a second resolve. The page fetch only
+        gets HTML, so that resolve used to open the browser again. The
+        signed CDN url is already in hand and still valid.
+        """
+        try:
+            host = urlparse(str(source_url or '')).netloc.lower()
+            entry = (getattr(self, '_fileditch_cookie_jar', None) or {}).get(host) or {}
+            playback = str(entry.get('playback_url') or '').strip()
+            if not playback:
+                return None
+            if self._signed_playback_url_is_expired(playback, grace_seconds=90):
+                return None
+            if self._signed_url_expiry_epoch(playback) <= 0:
+                if time.time() - float(entry.get('ts') or 0) > 600:
+                    return None
+            headers = dict(entry.get('headers') or {})
+            if entry.get('cookie') and not headers.get('Cookie'):
+                headers['Cookie'] = entry['cookie']
+            if entry.get('ua') and not headers.get('User-Agent'):
+                headers['User-Agent'] = entry['ua']
+            try:
+                resolved_at_ms = int(entry.get('resolved_at_ms') or 0)
+            except Exception:
+                resolved_at_ms = 0
+            if resolved_at_ms <= 0:
+                resolved_at_ms = int(time.time() * 1000)
+            return {
+                'playback_url': playback,
+                'download_url': playback,
+                'headers': headers,
+                'source_url': source_url,
+                'title': self._clean_remote_title(self._fileditch_filename_from_url(source_url)),
+                'tls_verify': False,
+                'pre_resolved_playback_url': True,
+                'resolver_provider': 'fileditch_browser',
+                'resolved_at_ms': resolved_at_ms,
+            }
+        except Exception:
+            return None
 
     def _resolve_fileditch_via_browser(self, source_url, title=''):
         """BACKGROUND browser capture for fileditch links (Cloudflare).
@@ -38984,6 +39037,8 @@ try {
             bg = dict(bg)
             bg['resolver_provider'] = 'fileditch_browser'
             bg['tls_verify'] = False
+            bg['pre_resolved_playback_url'] = True
+            bg.setdefault('resolved_at_ms', int(time.time() * 1000))
             bg.setdefault('source_url', source_url)
             if title and not self._clean_remote_title(bg.get('title')):
                 bg['title'] = title
@@ -39008,6 +39063,10 @@ try {
         host = (parsed.netloc or '').lower()
         if not self._is_fileditch_host(host):
             return None
+        stashed = self._fileditch_stashed_playback(source_url)
+        if stashed:
+            print('[FILEDITCH] reusing the file already opened — no browser')
+            return stashed
         try:
             import requests
         except Exception:
@@ -65628,6 +65687,89 @@ try {
             print(f"Error during close: {e}")
         event.accept()
 
+def _child_browser_pid(root_pid):
+    """Chrome/Brave/Edge started by this capture, when Playwright hides the pid.
+
+    A persistent profile returns a context, not a Browser, so the private
+    process walk prints 'pid was not found' and the taskbar button is never
+    removed. The browser is still a child of this capture process.
+    """
+    if os.name != 'nt':
+        return 0
+    try:
+        root_pid = int(root_pid or 0)
+    except Exception:
+        return 0
+    if root_pid <= 0:
+        return 0
+    names = {
+        'chrome.exe', 'brave.exe', 'msedge.exe', 'chromium.exe',
+        'chrome', 'brave', 'msedge', 'chromium',
+    }
+    try:
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        TH32CS_SNAPPROCESS = 0x00000002
+
+        class PROCESSENTRY32W(ctypes.Structure):
+            _fields_ = [
+                ('dwSize', wintypes.DWORD),
+                ('cntUsage', wintypes.DWORD),
+                ('th32ProcessID', wintypes.DWORD),
+                ('th32DefaultHeapID', ctypes.c_size_t),
+                ('th32ModuleID', wintypes.DWORD),
+                ('cntThreads', wintypes.DWORD),
+                ('th32ParentProcessID', wintypes.DWORD),
+                ('pcPriClassBase', ctypes.c_long),
+                ('dwFlags', wintypes.DWORD),
+                ('szExeFile', wintypes.WCHAR * 260),
+            ]
+
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+        kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+        kernel32.Process32FirstW.restype = wintypes.BOOL
+        kernel32.Process32NextW.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        invalid = ctypes.c_void_p(-1).value
+        if not snap or snap == invalid:
+            return 0
+        parents = {}
+        browsers = []
+        try:
+            entry = PROCESSENTRY32W()
+            entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+            ok = kernel32.Process32FirstW(snap, ctypes.byref(entry))
+            while ok:
+                pid = int(entry.th32ProcessID)
+                parents[pid] = int(entry.th32ParentProcessID)
+                name = str(entry.szExeFile or '').lower()
+                if name in names:
+                    browsers.append(pid)
+                ok = kernel32.Process32NextW(snap, ctypes.byref(entry))
+        finally:
+            kernel32.CloseHandle(snap)
+
+        def _under(pid, hops=0):
+            if pid == root_pid:
+                return True
+            if hops > 6:
+                return False
+            parent = parents.get(pid)
+            if not parent:
+                return False
+            return _under(parent, hops + 1)
+
+        for pid in browsers:
+            if _under(pid):
+                return pid
+    except Exception:
+        return 0
+    return 0
+
+
 def _quiet_offscreen_browser_taskbar(root_pid, should_stop=None, interval=0.2, max_seconds=180):
     """Keep an off-screen capture browser off the taskbar.
 
@@ -66164,9 +66306,17 @@ if __name__ == "__main__":
                         # fine, the parent still tree-kills by our pid).
                         try:
                             _pw_pid = None
-                            _pw_seen = [browser, getattr(browser, '_impl_obj', None)]
-                            _pw_inner = getattr(_pw_seen[-1], '_browser', None) if _pw_seen[-1] is not None else None
-                            _pw_seen.extend([_pw_inner, getattr(_pw_inner, '_impl_obj', None)])
+                            _ctx_browser = getattr(browser, 'browser', None)
+                            if callable(_ctx_browser):
+                                try:
+                                    _ctx_browser = _ctx_browser()
+                                except Exception:
+                                    _ctx_browser = None
+                            _pw_seen = [browser, getattr(browser, '_impl_obj', None), _ctx_browser]
+                            _pw_inner = getattr(_pw_seen[1], '_browser', None) if _pw_seen[1] is not None else None
+                            _pw_seen.extend([_pw_inner, getattr(_pw_inner, '_impl_obj', None) if _pw_inner is not None else None])
+                            if _ctx_browser is not None:
+                                _pw_seen.append(getattr(_ctx_browser, '_impl_obj', None))
                             for _pw_obj in _pw_seen:
                                 if _pw_obj is None:
                                     continue
@@ -66177,6 +66327,8 @@ if __name__ == "__main__":
                                 _pw_pid = getattr(_pw_proc, 'pid', None)
                                 if _pw_pid:
                                     break
+                            if not _pw_pid:
+                                _pw_pid = _child_browser_pid(os.getpid())
                             if _pw_pid:
                                 _PW_STATE['browser_pid'] = int(_pw_pid)
                                 print('PW_BROWSER_PID::' + str(int(_pw_pid)))
@@ -66193,7 +66345,16 @@ if __name__ == "__main__":
                                         name='quiet-capture-browser',
                                     ).start()
                             elif hidden_headed:
-                                print('[BROWSER_CLICK] capture window pid was not found', flush=True)
+                                print('[BROWSER_CLICK] capture window pid was not found — hiding this capture\'s child windows', flush=True)
+                                threading.Thread(
+                                    target=_quiet_offscreen_browser_taskbar,
+                                    args=(os.getpid(),),
+                                    kwargs={
+                                        'should_stop': lambda: _PW_STATE.get('browser') is None,
+                                    },
+                                    daemon=True,
+                                    name='quiet-capture-browser',
+                                ).start()
                         except Exception:
                             pass
                         page = browser.new_page()
