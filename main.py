@@ -36122,20 +36122,17 @@ try {
         source_url = self._canonicalize_remote_source_url(self._sanitize_url(source_url or ''))
         if not self._is_gofile_folder_page_url(source_url):
             return
-        if not self._lookup_cached_remote_password('gofile', source_url):
-            self._remote_password_for_url(
-                'gofile',
-                source_url,
-                force_prompt=True,
-                remember=True,
-                reason='This GoFile folder is password protected. The password will be shown on the page so you can paste it.',
-            )
-        if not self._lookup_cached_remote_password('gofile', source_url):
-            self.show_osd('No GoFile password to show. The site was not opened.', duration=3000)
-            return
-        print(f'[GOFILE] Opening the in-app page once for {source_url}. The contents API will not be called.')
+        # Do not ask first. A public folder has no password, and the box
+        # was blocking the page. Ask later only if GoFile itself refuses it.
+        saved = self._lookup_cached_remote_password('gofile', source_url)
+        if saved:
+            print(f'[GOFILE] Opening the in-app page once for {source_url}. The contents API will not be called.')
+        else:
+            print(f'[GOFILE] No saved password for {source_url}; opening the page without asking')
         if not self._open_gofile_share_page(source_url, user_requested=True):
             self.show_osd('Could not open the GoFile page. The contents API was not called.', duration=4000)
+            return
+        if not saved:
             return
         self._show_gofile_password_bar(source_url)
         self.show_osd('GoFile password is in the box on the page. Copy it if the field is not filled.', duration=5000)
@@ -36165,9 +36162,11 @@ try {
         )
 
     def _on_gofile_password_field(self, source_url, result):
+        # GoFile's page includes a password box even when the folder is
+        # public. That is not a lock. The contents response is.
         if str(result or '').strip().lower() != 'yes':
             return
-        self._offer_gofile_page_password(source_url)
+        print(f'[GOFILE] Ignored a password box on {source_url}; the contents response did not refuse the folder')
 
     def _offer_gofile_page_password(self, source_url):
         key = self._gofile_folder_cache_key(source_url)
@@ -50233,20 +50232,12 @@ try {
             return [self._pasted_folder_entry(source_url, 'filester', children)]
         if provider == 'gofile':
             # Do not call the contents API. Those token retries blocked the IP.
-            # The UI opens the in-app page once and shows the saved password.
-            if not self._lookup_cached_remote_password('gofile', source_url):
-                print(f'[GOFILE] No saved password for {source_url}; asking once, then opening the in-app page')
-                self._remote_password_for_url(
-                    'gofile',
-                    source_url,
-                    force_prompt=True,
-                    remember=True,
-                    reason='This GoFile folder is password protected. The password will be shown on the page so you can paste it.',
-                )
-            if not self._lookup_cached_remote_password('gofile', source_url):
-                print(f'[GOFILE] No password for {source_url}; the site was not opened')
-                return []
-            print(f'[GOFILE] Saved password for {source_url}; the in-app page will open once, with no API call')
+            # Do not ask for a password either. A public folder has none, and
+            # the page itself asks only if GoFile refuses the folder.
+            if self._lookup_cached_remote_password('gofile', source_url):
+                print(f'[GOFILE] Saved password for {source_url}; the in-app page will open once, with no API call')
+            else:
+                print(f'[GOFILE] No saved password for {source_url}; opening the page without asking')
             entry = self._pasted_folder_entry(source_url, 'gofile', [])
             entry['children'] = []
             entry['open_in_browser'] = True
