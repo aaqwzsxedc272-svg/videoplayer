@@ -25033,6 +25033,12 @@ try {
                 'incorrect password', 'password required', 'requires password',
             ))
 
+        if provider_key == 'filester':
+            # Filester's page template includes a password box on files that
+            # are not protected. Only an API payload that refuses the file
+            # is a lock. A token, or the HTML page itself, is not.
+            return self._filester_payload_needs_password(data, text)
+
         parts = [str(provider or '')]
         if isinstance(data, dict):
             for key in ('status', 'message', 'error', 'code', 'description'):
@@ -25054,6 +25060,41 @@ try {
             'requires password', 'password required', 'passwordrequired',
             'error-password', 'wrong password', 'invalid password',
             'folder password', 'file password', 'unlock', 'locked',
+            ))
+
+    def _filester_payload_needs_password(self, data=None, text=''):
+        if isinstance(data, dict):
+            if any(str(data.get(key) or '').strip() for key in ('file', 'token', 'view_url', 'path')):
+                return False
+            for key in ('password_required', 'passwordRequired', 'requires_password', 'requiresPassword'):
+                if data.get(key) is True:
+                    return True
+            status_parts = []
+            for key in ('status', 'message', 'error', 'code', 'description'):
+                if data.get(key) is not None:
+                    status_parts.append(str(data.get(key)))
+            errors = data.get('errors')
+            if isinstance(errors, (str, int, float)):
+                status_parts.append(str(errors))
+            elif isinstance(errors, dict):
+                status_parts.extend(str(value) for value in errors.values() if value is not None)
+            haystack = ' '.join(status_parts).lower()
+            if haystack and any(token in haystack for token in (
+                'password required', 'passwordrequired', 'requires password',
+                'wrong password', 'invalid password', 'incorrect password',
+                'password protected', 'protected by password', 'enter password',
+            )):
+                return True
+            if data:
+                return False
+        body = str(text or '').lstrip()
+        lowered = body[:800].lower()
+        if not lowered or lowered.startswith(('<!doctype', '<html', '<!')):
+            return False
+        return any(token in lowered for token in (
+            'password required', 'passwordrequired', 'requires password',
+            'wrong password', 'invalid password', 'incorrect password',
+            'password protected', 'protected by password',
         ))
 
     def _prompt_remote_password(self, provider, source_url, reason=''):
