@@ -25371,6 +25371,9 @@ try {
             return password, prompted
         if prompted:
             return '', True
+        saved = self._lookup_cached_remote_password('filester', source_url)
+        if saved:
+            return saved, prompted
         entered = self._remote_password_for_url(
             'filester',
             source_url,
@@ -25403,6 +25406,73 @@ try {
                 pass
             candidates.append(password)
         return self._unique_paths(candidates)
+
+    def _filester_unlock_session(self, session, page_url, html, password, headers=None):
+        """POST Filester's #password-form and keep the access cookie on *session*.
+
+        The v2 API does not accept the password as a JSON field. The page form
+        wants ``password`` = base64(``password|unix_ms|nonce``) plus ``nonce``.
+        A successful submit sets ``folder_access_token``; the next v2 call on
+        this session then returns the file.
+        """
+        password = self._clean_remote_password(password)
+        if not password or session is None:
+            return False
+        headers = dict(headers or self._stream_request_headers(page_url))
+        headers.pop('Content-Type', None)
+        html = str(html or '')
+        nonce = ''
+        nonce_match = re.search(
+            r'''name\s*=\s*['"]nonce['"][^>]*value\s*=\s*['"]([^'"]+)['"]'''
+            r'''|value\s*=\s*['"]([^'"]+)['"][^>]*name\s*=\s*['"]nonce['"]''',
+            html,
+            re.IGNORECASE,
+        )
+        if nonce_match:
+            nonce = html_unescape(next((group for group in nonce_match.groups() if group), '')).strip()
+        action = page_url
+        action_match = re.search(
+            r'''<form\b[^>]*id\s*=\s*['"]password-form['"][^>]*action\s*=\s*['"]([^'"]*)['"]'''
+            r'''|<form\b[^>]*action\s*=\s*['"]([^'"]*)['"][^>]*id\s*=\s*['"]password-form['"]''',
+            html,
+            re.IGNORECASE,
+        )
+        if action_match:
+            action_value = html_unescape(next((group for group in action_match.groups() if group is not None), '')).strip()
+            if action_value:
+                action = urljoin(page_url, action_value)
+        if nonce:
+            encoded = base64.b64encode(
+                f"{password}|{int(time.time() * 1000)}|{nonce}".encode('utf-8')
+            ).decode('ascii')
+            payload = {'nonce': nonce, 'password': encoded}
+        else:
+            payload = {'password': password}
+        try:
+            response = session.post(
+                action,
+                data=payload,
+                headers=headers,
+                timeout=15,
+                allow_redirects=True,
+            )
+        except Exception as exc:
+            print(f"[FILESTER] password form submit failed: {exc}")
+            return False
+        cookie = ''
+        try:
+            for item in session.cookies:
+                if getattr(item, 'name', '') == 'folder_access_token' and getattr(item, 'value', ''):
+                    cookie = item.value
+                    break
+        except Exception:
+            cookie = ''
+        still_locked = self._filester_page_has_password_form(getattr(response, 'text', '') or '')
+        print(
+            f"[FILESTER] password form status={getattr(response, 'status_code', 0)} "
+            f"cookie={'yes' if cookie else 'no'} still_locked={still_locked} {page_url}"
+        )
+        return bool(cookie) or (bool(getattr(response, 'ok', False)) and not still_locked)
 
     def _filester_password_form_payloads(self, password):
         password = str(password or '').strip()
@@ -37271,6 +37341,7 @@ try {
         filester_password = ''
         filester_password_prompted = False
         page_locked = False
+        html = ''
         title = None
         size_bytes = None
         file_type = None
@@ -37402,34 +37473,67 @@ try {
                     print(f"[FILESTER] Resolved via v2 API: {source_url}")
                     return resolved
             # Neither public endpoint returned a file. Ask only when the
-            # page itself has Filester's password form.
+            # page itself has Filester's password form. A saved password is
+            # reused; the form sets folder_access_token, then v2 is asked again
+            # on that same session. A JSON password field is not how this site
+            # unlocks a file.
             if page_locked and not filester_password_prompted:
-                print(f"[FILESTER] password form on page; asking: {source_url}")
+                saved_password = self._lookup_cached_remote_password('filester', source_url)
+                if saved_password:
+                    print(f"[FILESTER] using saved password for {source_url}")
+                else:
+                    print(f"[FILESTER] password form on page; asking: {source_url}")
                 filester_password, filester_password_prompted = self._filester_password_for_attempt(
                     source_url,
                     filester_password,
                     filester_password_prompted,
                     reason="This Filester file is password protected.",
                 )
-                if filester_password:
-                    for endpoint, download_mode in (
-                        ('/v2/api/public/view', False),
-                        ('/v2/api/public/download', True),
-                    ):
-                        retry_response = request_session.post(
-                            f"{parsed.scheme or 'https'}://{parsed.netloc}{endpoint}",
-                            json={'file_slug': slug, 'password': filester_password},
-                            headers=v2_headers,
-                            timeout=15,
-                        )
-                        try:
-                            retry_data = retry_response.json() if retry_response.ok else {}
-                        except Exception:
-                            retry_data = {}
-                        resolved = _probe_filester_v2_token_data(retry_data, download=download_mode)
-                        if resolved:
-                            print(f"[FILESTER] Resolved via v2 API: {source_url}")
-                            return resolved
+                if not filester_password:
+                    print(f"[FILESTER] locked and no password; not opening {source_url}")
+                    return None
+                unlocked = self._filester_unlock_session(
+                    request_session,
+                    source_url,
+                    html,
+                    filester_password,
+                    request_headers,
+                )
+                if not unlocked:
+                    self._submit_remote_password_form(
+                        request_session,
+                        source_url,
+                        html,
+                        filester_password,
+                        headers=request_headers,
+                    )
+                for endpoint, download_mode in (
+                    ('/v2/api/public/view', False),
+                    ('/v2/api/public/download', True),
+                ):
+                    retry_response = request_session.post(
+                        f"{parsed.scheme or 'https'}://{parsed.netloc}{endpoint}",
+                        json={'file_slug': slug},
+                        headers=v2_headers,
+                        timeout=15,
+                    )
+                    retry_data = {}
+                    try:
+                        retry_data = retry_response.json() if retry_response.content else {}
+                    except Exception:
+                        retry_data = {}
+                    if not isinstance(retry_data, dict):
+                        retry_data = {}
+                    print(
+                        f"[FILESTER] v2 {endpoint} after password "
+                        f"status={retry_response.status_code} keys={list(retry_data.keys())[:8]}"
+                    )
+                    resolved = _probe_filester_v2_token_data(retry_data, download=download_mode)
+                    if resolved:
+                        print(f"[FILESTER] Resolved via v2 API: {source_url}")
+                        return resolved
+                print(f"[FILESTER] password did not open {source_url}")
+                return None
         except Exception as exc:
             print(f"[FILESTER] v2 API failed for {source_url}: {exc}")
 
@@ -48430,6 +48534,12 @@ try {
         # store-na-phx-4.gofile.io), which are normal direct file links.
         if resolved is None and host in _gofile_share_hosts:
             print(f"[GOFILE] Hard stop after provider resolver for {source_url}; skipping generic probe and yt-dlp fallbacks")
+            return None
+
+        # Filester has no yt-dlp extractor. A locked page that did not unlock
+        # must not be scraped again, or the password dialog opens a second time.
+        if resolved is None and 'filester' in host:
+            print(f"[FILESTER] Hard stop after password/v2 for {source_url}; skipping yt-dlp")
             return None
 
         # R53: packed-JS embed HLS hosts already ran static unpack + a
