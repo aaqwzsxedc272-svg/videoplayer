@@ -25062,6 +25062,14 @@ try {
             'folder password', 'file password', 'unlock', 'locked',
             ))
 
+    def _filester_page_has_password_form(self, html):
+        """Filester only locks a file when the page contains #password-form."""
+        return bool(re.search(
+            r'''id\s*=\s*['"]password-form['"]''',
+            str(html or ''),
+            re.IGNORECASE,
+        ))
+
     def _filester_payload_needs_password(self, data=None, text=''):
         if isinstance(data, dict):
             if any(str(data.get(key) or '').strip() for key in ('file', 'token', 'view_url', 'path')):
@@ -25069,33 +25077,10 @@ try {
             for key in ('password_required', 'passwordRequired', 'requires_password', 'requiresPassword'):
                 if data.get(key) is True:
                     return True
-            status_parts = []
-            for key in ('status', 'message', 'error', 'code', 'description'):
-                if data.get(key) is not None:
-                    status_parts.append(str(data.get(key)))
-            errors = data.get('errors')
-            if isinstance(errors, (str, int, float)):
-                status_parts.append(str(errors))
-            elif isinstance(errors, dict):
-                status_parts.extend(str(value) for value in errors.values() if value is not None)
-            haystack = ' '.join(status_parts).lower()
-            if haystack and any(token in haystack for token in (
-                'password required', 'passwordrequired', 'requires password',
-                'wrong password', 'invalid password', 'incorrect password',
-                'password protected', 'protected by password', 'enter password',
-            )):
-                return True
-            if data:
-                return False
-        body = str(text or '').lstrip()
-        lowered = body[:800].lower()
-        if not lowered or lowered.startswith(('<!doctype', '<html', '<!')):
-            return False
-        return any(token in lowered for token in (
-            'password required', 'passwordrequired', 'requires password',
-            'wrong password', 'invalid password', 'incorrect password',
-            'password protected', 'protected by password',
-        ))
+            # A message that mentions a password is not a lock. Public
+            # Filester replies include that wording and the file still opens.
+            return self._filester_page_has_password_form(text)
+        return self._filester_page_has_password_form(text)
 
     def _prompt_remote_password(self, provider, source_url, reason=''):
         provider_label = str(provider or 'Remote').strip().title()
@@ -37207,8 +37192,11 @@ try {
 
         request_headers = self._stream_request_headers(source_url)
         request_session = requests.Session()
-        filester_password = self._remote_password_for_url('filester', source_url, force_prompt=False)
+        # Do not borrow a saved password yet. A password from another
+        # Filester link makes a public file look locked.
+        filester_password = ''
         filester_password_prompted = False
+        page_locked = False
         title = None
         size_bytes = None
         file_type = None
@@ -37216,41 +37204,9 @@ try {
             page_response = request_session.get(source_url, headers=request_headers, timeout=15, allow_redirects=True)
             if page_response.ok:
                 html = page_response.text or ''
-                if self._remote_response_needs_password('filester', None, html):
-                    if not filester_password:
-                        filester_password, filester_password_prompted = self._filester_password_for_attempt(
-                            source_url,
-                            filester_password,
-                            filester_password_prompted,
-                            reason="This Filester file is password protected.",
-                        )
-                    unlocked = None
-                    if filester_password:
-                        unlocked = self._submit_remote_password_form(
-                            request_session,
-                            page_response.url or source_url,
-                            html,
-                            filester_password,
-                            headers=request_headers,
-                        )
-                        if unlocked is None or self._remote_response_needs_password('filester', None, unlocked.text or ''):
-                            filester_password, filester_password_prompted = self._filester_password_for_attempt(
-                                source_url,
-                                filester_password,
-                                filester_password_prompted,
-                                rejected=True,
-                                reason="That Filester password was rejected.",
-                            )
-                            if filester_password:
-                                unlocked = self._submit_remote_password_form(
-                                    request_session,
-                                    page_response.url or source_url,
-                                    html,
-                                    filester_password,
-                                    headers=request_headers,
-                                )
-                    if unlocked is not None and not self._remote_response_needs_password('filester', None, unlocked.text or ''):
-                        html = unlocked.text or ''
+                page_locked = self._filester_page_has_password_form(html)
+                if not page_locked and re.search(r'password', html[:8000], re.IGNORECASE):
+                    print(f"[FILESTER] no password form; not asking: {source_url}")
                 title = self._html_page_title(html)
                 name_match = re.search(r'window\.fileName\s*=\s*["\']([^"\']+)["\']', html, re.IGNORECASE)
                 if name_match:
@@ -37355,8 +37311,6 @@ try {
                 ('/v2/api/public/download', True),
             ):
                 v2_payload = {'file_slug': slug}
-                if filester_password:
-                    v2_payload['password'] = filester_password
                 v2_response = request_session.post(
                     f"{parsed.scheme or 'https'}://{parsed.netloc}{endpoint}",
                     json=v2_payload,
@@ -37369,31 +37323,39 @@ try {
                         v2_data = v2_response.json() or {}
                     except Exception:
                         v2_data = {}
-                if self._remote_response_needs_password('filester', v2_data, v2_response.text) and not filester_password_prompted:
-                    rejected = bool(filester_password) and self._remote_password_was_rejected('filester', v2_data, v2_response.text)
-                    filester_password, filester_password_prompted = self._filester_password_for_attempt(
-                        source_url,
-                        filester_password,
-                        filester_password_prompted,
-                        rejected=rejected,
-                        reason="That Filester password was rejected." if rejected else "This Filester file is password protected.",
-                    )
-                    if filester_password:
-                        retry_payload = {'file_slug': slug, 'password': filester_password}
-                        v2_response = request_session.post(
-                            f"{parsed.scheme or 'https'}://{parsed.netloc}{endpoint}",
-                            json=retry_payload,
-                            headers=v2_headers,
-                            timeout=15,
-                        )
-                        try:
-                            v2_data = v2_response.json() if v2_response.ok else {}
-                        except Exception:
-                            v2_data = {}
                 resolved = _probe_filester_v2_token_data(v2_data, download=download_mode)
                 if resolved:
                     print(f"[FILESTER] Resolved via v2 API: {source_url}")
                     return resolved
+            # Neither public endpoint returned a file. Ask only when the
+            # page itself has Filester's password form.
+            if page_locked and not filester_password_prompted:
+                print(f"[FILESTER] password form on page; asking: {source_url}")
+                filester_password, filester_password_prompted = self._filester_password_for_attempt(
+                    source_url,
+                    filester_password,
+                    filester_password_prompted,
+                    reason="This Filester file is password protected.",
+                )
+                if filester_password:
+                    for endpoint, download_mode in (
+                        ('/v2/api/public/view', False),
+                        ('/v2/api/public/download', True),
+                    ):
+                        retry_response = request_session.post(
+                            f"{parsed.scheme or 'https'}://{parsed.netloc}{endpoint}",
+                            json={'file_slug': slug, 'password': filester_password},
+                            headers=v2_headers,
+                            timeout=15,
+                        )
+                        try:
+                            retry_data = retry_response.json() if retry_response.ok else {}
+                        except Exception:
+                            retry_data = {}
+                        resolved = _probe_filester_v2_token_data(retry_data, download=download_mode)
+                        if resolved:
+                            print(f"[FILESTER] Resolved via v2 API: {source_url}")
+                            return resolved
         except Exception as exc:
             print(f"[FILESTER] v2 API failed for {source_url}: {exc}")
 
@@ -37401,34 +37363,35 @@ try {
         view_url = None
         try:
             view_payload = {'file_slug': slug}
-            if filester_password:
-                view_payload['password'] = filester_password
             token_response = request_session.post(
                 f"{parsed.scheme or 'https'}://{parsed.netloc}/api/public/view",
                 json=view_payload,
                 headers=self._stream_request_headers(source_url, {'Content-Type': 'application/json'}),
                 timeout=15,
             )
+            data = {}
             if token_response.ok:
-                data = token_response.json()
-                if self._remote_response_needs_password('filester', data, token_response.text) and not filester_password_prompted:
-                    rejected = bool(filester_password) and self._remote_password_was_rejected('filester', data, token_response.text)
-                    filester_password, filester_password_prompted = self._filester_password_for_attempt(
-                        source_url,
-                        filester_password,
-                        filester_password_prompted,
-                        rejected=rejected,
-                        reason="That Filester password was rejected." if rejected else "This Filester file is password protected.",
+                try:
+                    data = token_response.json() or {}
+                except Exception:
+                    data = {}
+            view_url = str((data or {}).get('view_url') or '').strip() or None
+            if not view_url and page_locked and not filester_password_prompted:
+                filester_password, filester_password_prompted = self._filester_password_for_attempt(
+                    source_url,
+                    filester_password,
+                    filester_password_prompted,
+                    reason="This Filester file is password protected.",
+                )
+                if filester_password:
+                    token_response = request_session.post(
+                        f"{parsed.scheme or 'https'}://{parsed.netloc}/api/public/view",
+                        json={'file_slug': slug, 'password': filester_password},
+                        headers=self._stream_request_headers(source_url, {'Content-Type': 'application/json'}),
+                        timeout=15,
                     )
-                    if filester_password:
-                        token_response = request_session.post(
-                            f"{parsed.scheme or 'https'}://{parsed.netloc}/api/public/view",
-                            json={'file_slug': slug, 'password': filester_password},
-                            headers=self._stream_request_headers(source_url, {'Content-Type': 'application/json'}),
-                            timeout=15,
-                        )
-                        data = token_response.json() if token_response.ok else {}
-                view_url = str((data or {}).get('view_url') or '').strip() or None
+                    data = token_response.json() if token_response.ok else {}
+                    view_url = str((data or {}).get('view_url') or '').strip() or None
         except Exception:
             pass
 
@@ -37471,14 +37434,13 @@ try {
                                               timeout=15, allow_redirects=True)
             if scrape_resp.ok:
                 scrape_html = scrape_resp.text or ''
-                if self._remote_response_needs_password('filester', None, scrape_html):
-                    if not filester_password:
-                        filester_password = self._remote_password_for_url(
-                            'filester',
-                            source_url,
-                            force_prompt=True,
-                            reason="This Filester file is password protected.",
-                        )
+                if page_locked and self._filester_page_has_password_form(scrape_html) and not filester_password_prompted:
+                    filester_password, filester_password_prompted = self._filester_password_for_attempt(
+                        source_url,
+                        filester_password,
+                        filester_password_prompted,
+                        reason="This Filester file is password protected.",
+                    )
                     unlocked = self._submit_remote_password_form(
                         request_session,
                         scrape_resp.url or source_url,
