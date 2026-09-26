@@ -38791,6 +38791,96 @@ try {
         except Exception:
             return None
 
+    @staticmethod
+    def _capture_url_is_cloudflare_noise(url):
+        """A challenge asset is not the file. Closing on it abandons the check."""
+        low = str(url or '').strip().lower()
+        if not low:
+            return True
+        if (
+            'cdn-cgi/' in low
+            or 'challenges.cloudflare.com' in low
+            or 'cloudflareinsights.com' in low
+            or 'turnstile' in low
+        ):
+            return True
+        path = low.split('?', 1)[0]
+        return path.endswith((
+            '.js', '.css', '.png', '.jpg', '.jpeg',
+            '.svg', '.ico', '.gif', '.woff', '.woff2', '.map',
+        ))
+
+    def _fileditch_fetch_with_clearance(self, source_url, cookies, user_agent='', title=''):
+        """The file URL is the page itself once Cloudflare has cleared."""
+        cookies = str(cookies or '').strip()
+        if 'cf_clearance=' not in cookies:
+            return None
+        headers = self._stream_request_headers(source_url, {
+            'Cookie': cookies,
+            'Accept': '*/*',
+            'Range': 'bytes=0-1023',
+            'Referer': source_url,
+        })
+        if user_agent:
+            headers['User-Agent'] = user_agent
+        response = None
+        try:
+            import requests
+            try:
+                response = requests.get(
+                    source_url,
+                    headers=headers,
+                    timeout=25,
+                    allow_redirects=True,
+                    stream=True,
+                )
+            except Exception as exc:
+                print(f'[FILEDITCH] clearance fetch retrying without certificate check: {exc}')
+                response = requests.get(
+                    source_url,
+                    headers=headers,
+                    timeout=25,
+                    allow_redirects=True,
+                    stream=True,
+                    verify=False,
+                )
+        except Exception as exc:
+            print(f'[FILEDITCH] clearance fetch failed: {exc}')
+            return None
+        try:
+            status = int(getattr(response, 'status_code', 0) or 0)
+            content_type = str(response.headers.get('Content-Type') or '').lower()
+            final_url = str(getattr(response, 'url', '') or source_url)
+        finally:
+            try:
+                response.close()
+            except Exception:
+                pass
+        challenged = (
+            status in (401, 403, 429, 503)
+            or 'text/html' in content_type
+            or 'just a moment' in content_type
+        )
+        print(
+            f'[FILEDITCH] clearance fetch status={status} type={content_type[:60]} '
+            f'url={final_url[:140]}'
+        )
+        if status not in (200, 206) or challenged:
+            return None
+        play_headers = dict(headers)
+        play_headers.pop('Range', None)
+        return {
+            'playback_url': final_url or source_url,
+            'download_url': final_url or source_url,
+            'headers': play_headers,
+            'source_url': source_url,
+            'title': title or self._clean_remote_title(self._fileditch_filename_from_url(source_url)),
+            'content_type': content_type,
+            'tls_verify': False,
+            'resolver_provider': 'fileditch_browser',
+            'resolved_at_ms': int(time.time() * 1000),
+        }
+
     def _fileditch_capture_is_garbage(self, source_url, bg):
         """A Cloudflare challenge page is not a capture result.
 
@@ -38893,12 +38983,20 @@ try {
         if bg and not self._fileditch_capture_is_garbage(source_url, bg):
             bg = dict(bg)
             bg['resolver_provider'] = 'fileditch_browser'
+            bg['tls_verify'] = False
             bg.setdefault('source_url', source_url)
             if title and not self._clean_remote_title(bg.get('title')):
                 bg['title'] = title
             print(f"[FILEDITCH] background browser capture resolved: {str(bg.get('playback_url'))[:160]}")
             self._fileditch_remember_cookies(source_url, bg)
             return bg
+        cookies = str(getattr(self, '_last_browser_click_cookies', '') or '')
+        ua = str(getattr(self, '_last_browser_click_ua', '') or '')
+        cleared = self._fileditch_fetch_with_clearance(source_url, cookies, ua, title)
+        if cleared:
+            print(f"[FILEDITCH] opened the file after the Cloudflare check: {str(cleared.get('playback_url'))[:160]}")
+            self._fileditch_remember_cookies(source_url, cleared)
+            return cleared
         if bg:
             print(f"[FILEDITCH] background browser capture only got the Cloudflare challenge page (not the file) — rejected")
         else:
@@ -45111,8 +45209,10 @@ try {
                         if _pw_media_at is None:
                             _pw_media_at = _pw_m3u8_at
                     elif line.startswith('MEDIA_URL::'):
-                        if _pw_media_at is None:
-                            _pw_media_at = time.time()
+                        _media_value = line.split('::', 1)[-1].strip()
+                        if not self._capture_url_is_cloudflare_noise(_media_value):
+                            if _pw_media_at is None:
+                                _pw_media_at = time.time()
                         if (
                             _pw_get_file_at is None
                             and self._get_file_rendition_height(line.split('::', 1)[-1]) >= 480
@@ -66178,10 +66278,27 @@ if __name__ == "__main__":
                         _prefix_tier = {'MEDIA_URL::': 0, 'VOE_M3U8::': 1, 'VERIFIED_MEDIA::': 2}
                         _announced_tier = {}
 
+                        def _is_cf_noise(raw_url):
+                            low = str(raw_url or '').strip().lower()
+                            if not low:
+                                return True
+                            if (
+                                'cdn-cgi/' in low
+                                or 'challenges.cloudflare.com' in low
+                                or 'cloudflareinsights.com' in low
+                                or 'turnstile' in low
+                            ):
+                                return True
+                            path = low.split('?', 1)[0]
+                            return path.endswith((
+                                '.js', '.css', '.png', '.jpg', '.jpeg',
+                                '.svg', '.ico', '.gif', '.woff', '.woff2',
+                            ))
+
                         def _announce_media_url(raw_url, prefix='MEDIA_URL::'):
                             nonlocal found_url, _first_capture_at, _m3u8_at
                             u = str(raw_url or '').strip()
-                            if not u:
+                            if not u or _is_cf_noise(u):
                                 return
                             # The page's own URL is NOT a capture. Fileditch
                             # links are .mp4-looking PAGE urls, so the route
@@ -66333,13 +66450,26 @@ if __name__ == "__main__":
                             # land here, and the parent must send them along
                             # with playback or the CDN 403s again.
                             def _report_cookies():
+                                parts = []
                                 try:
                                     _ck = page.evaluate('() => document.cookie') or ''
                                     if _ck:
-                                        print('BROWSER_COOKIES::' + _ck[:3000])
-                                        sys.stdout.flush()
+                                        parts.append(_ck)
                                 except Exception:
                                     pass
+                                try:
+                                    for _c in page.context.cookies() or []:
+                                        _name = str(_c.get('name') or '')
+                                        _value = str(_c.get('value') or '')
+                                        if _name and _value:
+                                            parts.append(_name + '=' + _value)
+                                except Exception:
+                                    pass
+                                if not parts:
+                                    return
+                                _merged = '; '.join(parts)
+                                print('BROWSER_COOKIES::' + _merged[:3000])
+                                sys.stdout.flush()
 
                             _report_cookies()
 
@@ -66406,7 +66536,7 @@ if __name__ == "__main__":
                                     return False
                                 if not _cf_hint_shown:
                                     _cf_hint_shown = True
-                                    print('[BROWSER_CLICK] Cloudflare challenge detected - auto-clicking the verify box; if it does not clear in ~10s, open the background browser from the taskbar and click it yourself - the capture keeps waiting')
+                                    print('[BROWSER_CLICK] Cloudflare challenge detected - clicking the verify box in the background')
                                     sys.stdout.flush()
                                 # 1) a real, clickable checkbox element in
                                 #    any challenge frame
@@ -66454,6 +66584,37 @@ if __name__ == "__main__":
                                 except Exception:
                                     pass
                                 return False
+
+                            def _challenge_cleared():
+                                try:
+                                    title = (page.title() or '').lower()
+                                except Exception:
+                                    title = ''
+                                if (
+                                    'just a moment' in title
+                                    or 'checking your browser' in title
+                                    or 'attention required' in title
+                                ):
+                                    return False
+                                try:
+                                    names = {
+                                        str(c.get('name') or '')
+                                        for c in (page.context.cookies() or [])
+                                    }
+                                except Exception:
+                                    names = set()
+                                if 'cf_clearance' not in names:
+                                    return False
+                                try:
+                                    still = any(
+                                        'challenges.cloudflare.com' in str(fr.url or '')
+                                        for fr in page.frames
+                                    )
+                                except Exception:
+                                    still = False
+                                return not still
+
+                            _fileditch_clear_announced = False
 
                             def _skip_ad():
                                 # Pre-roll ads on these players often become
@@ -67046,7 +67207,26 @@ if __name__ == "__main__":
                                         _announce_media_url(_u, prefix='VERIFIED_MEDIA::')
                                     else:
                                         _announce_media_url(_u)
+                                if click_download and not _fileditch_clear_announced and _challenge_cleared():
+                                    _fileditch_clear_announced = True
+                                    _report_cookies()
+                                    print('FILEDITCH_CLEAR::' + url)
+                                    sys.stdout.flush()
+                                    if found_url is None:
+                                        try:
+                                            page.wait_for_timeout(4000)
+                                        except Exception:
+                                            time.sleep(4)
+                                        if found_url is None:
+                                            # The file is this page once the
+                                            # wall is gone. Do not sit on the
+                                            # challenge assets.
+                                            found_url = url
+                                            print('[BROWSER_CLICK] file-host capture complete - closing the browser early')
+                                            sys.stdout.flush()
+                                            break
                                 if (click_download and found_url is not None
+                                        and not _is_cf_noise(found_url)
                                         and _first_capture_at is not None
                                         and (time.time() - _first_capture_at) >= 8.0):
                                     # R44 file-host captures (fileditch): the
