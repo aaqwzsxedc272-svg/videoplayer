@@ -43476,6 +43476,15 @@ try {
         playback = str(resolved.get('playback_url') or '')
         if not playback or playback == source_url:
             return False
+        # A just-extracted vid-* mp4 is the film. It shares the saved row's
+        # CDN host and has no duration yet, which the same-host test below
+        # would call a preview — then the stale link is scraped and
+        # static.eporner.com/na.mp4 (the one-minute clip) is what plays.
+        provider = str(resolved.get('resolver_provider') or '').strip().lower()
+        if provider in ('eporner', 'eporner_cdn_direct') and not self._eporner_url_is_error_clip(playback):
+            return False
+        if self._eporner_url_is_error_clip(playback):
+            return True
         if (
             self._media_url_looks_like_preview(playback)
             or self._media_url_is_site_promo(playback)
@@ -48606,8 +48615,22 @@ try {
         if self._resolved_stream_is_page_preview(resolved, source_url):
             print(f'[HTML_RESOLVE] yt-dlp returned a preview for {source_url}; looking for the full video', flush=True)
             resolved = None
+        _eporner_cdn_source = (
+            'eporner' in host
+            and (
+                any(host.startswith(prefix) for prefix in ('vid-', 'cdn.', 'gvideo.', 's1.', 's2.', 's3.', 's4.', 's5.', 's6.'))
+                or '-cdn.eporner' in host
+            )
+        )
+        if resolved is None and _eporner_cdn_source:
+            # Scraping the expired vid-* URL is what returned na.mp4.
+            print(f'[EPORNER] not scraping the expired CDN link ({source_url[:140]})', flush=True)
+            return None
         if resolved is None:
             resolved = self._resolve_stream_from_html(source_url)
+        if isinstance(resolved, dict) and self._eporner_url_is_error_clip(resolved.get('playback_url')):
+            print(f'[EPORNER] refusing the one-minute error clip for {source_url[:140]}', flush=True)
+            return None
 
         if resolved is None and self._is_ok_host(host):
             # The page ladder and yt-dlp already ran. A capture browser
@@ -49735,6 +49758,18 @@ try {
         }
 
     # ── Eporner Playwright extractor ─────────────────────────────────────────
+
+    def _eporner_url_is_error_clip(self, url):
+        """True for Eporner's stand-in, not a rendition of the film."""
+        try:
+            parsed = urlparse(str(url or ''))
+            host = (parsed.netloc or '').lower()
+            path = (parsed.path or '').lower().rstrip('/')
+        except Exception:
+            return False
+        if 'eporner' not in host:
+            return False
+        return path.endswith('/na.mp4') or path.endswith('na.mp4')
 
     def _eporner_cdn_epoch(self, url):
         match = re.search(r'/(\d{10})_\d{1,3}(?:\.\d{1,3}){3}_', str(url or ''))
