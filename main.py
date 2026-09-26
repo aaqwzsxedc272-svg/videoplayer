@@ -25169,10 +25169,12 @@ try {
                         r'/d/' + re.escape(str(content_id)) + r'(?:[/?#]|$)',
                         re.IGNORECASE,
                     )
+                    id_token = str(content_id).strip().lower()
                     for key, value in store.items():
-                        if not str(key).startswith('gofile:'):
+                        key_text = str(key or '')
+                        if not key_text.lower().startswith('gofile:'):
                             continue
-                        if pattern.search(str(key)):
+                        if pattern.search(key_text) or id_token in key_text.lower():
                             cached = self._clean_remote_password(value)
                             if cached:
                                 return cached
@@ -26838,6 +26840,10 @@ try {
         except Exception:
             return ''
         if not self._is_jav_site_host(host):
+            return ''
+        # Eporner hosts the film itself. A collapsed mirror (tnaflix, an old
+        # CDN link) is not a substitute — that is the dead or one-minute clip.
+        if self._is_eporner_page_url(source_url):
             return ''
         active = ''
         try:
@@ -35660,8 +35666,9 @@ try {
             print('[GOFILE][CONTENTS] No current GoFile page URL to attach parsed entries to.')
             return
         if self._gofile_captures_need_password(captures):
-            print('[GOFILE][CONTENTS] Password required; asking once instead of reloading the page')
-            self._offer_gofile_page_password(page_source_url)
+            print(f'[GOFILE][CONTENTS] Folder is locked: {page_source_url}')
+            self._gofile_mark_locked(page_source_url)
+            self._insert_saved_gofile_password(page_source_url)
             return
 
         folder_entries = []
@@ -35926,13 +35933,78 @@ try {
             print(f"[GOFILE] Could not install the saved-password page script: {exc}")
 
     def _gofile_captures_need_password(self, captures):
+        """True only when the folder listing itself is locked.
+
+        A public folder can mention a password and still return its files.
+        The locked shape is no children plus passwordStatus / canAccess false,
+        or the older error-passwordRequired status.
+        """
+        saw_media = False
+        locked = False
+        open_status = {
+            '', 'ok', 'none', 'null', 'public', 'unlocked', 'false',
+            'success', 'nopassword', 'no-password',
+        }
         for capture in captures or []:
             if not isinstance(capture, dict):
                 continue
             status = str(capture.get('status') or '').strip()
+            data = capture.get('data') if isinstance(capture.get('data'), dict) else {}
+            children = data.get('children') if isinstance(data, dict) else None
+            has_children = isinstance(children, (dict, list)) and bool(children)
+            if has_children or (data.get('type') == 'file' and data.get('link')):
+                saw_media = True
+                continue
             if status in ('error-passwordRequired', 'error-passwordWrong'):
-                return True
-        return False
+                locked = True
+                continue
+            password_status = str(
+                data.get('passwordStatus') or data.get('password_status') or ''
+            ).strip().lower()
+            if password_status and password_status not in open_status:
+                locked = True
+            elif data.get('canAccess') is False and (
+                'password' in data or 'passwordStatus' in data
+            ):
+                locked = True
+        return locked and not saw_media
+
+    def _gofile_mark_locked(self, source_url):
+        key = self._gofile_folder_cache_key(source_url)
+        if not key:
+            return
+        locked = getattr(self, '_gofile_locked_ids', None)
+        if not isinstance(locked, set):
+            locked = set()
+            self._gofile_locked_ids = locked
+        locked.add(key)
+
+    def _insert_saved_gofile_password(self, source_url, ask=True):
+        """Put this folder's saved password on the page. Ask only if none is saved."""
+        source_url = self._canonicalize_remote_source_url(self._sanitize_url(source_url))
+        password = self._lookup_cached_remote_password('gofile', source_url)
+        if not password:
+            if ask:
+                print(f'[GOFILE] Folder is locked and no password is saved for {source_url}; asking once')
+                self._offer_gofile_page_password(source_url)
+            return
+        digest = self._gofile_saved_password_hash(source_url)
+        if digest:
+            self._install_gofile_password_page_script(digest)
+        self._show_gofile_password_bar(source_url)
+        key = self._gofile_folder_cache_key(source_url)
+        reloaded = getattr(self, '_gofile_password_reloaded', None)
+        if not isinstance(reloaded, set):
+            reloaded = set()
+            self._gofile_password_reloaded = reloaded
+        view = getattr(self, 'gofile_web_view', None)
+        if key and key not in reloaded and view is not None:
+            reloaded.add(key)
+            print(f'[GOFILE] Inserting saved password and reloading {source_url}')
+            view.setUrl(QUrl.fromUserInput(str(source_url)))
+            QTimer.singleShot(1500, lambda url=source_url: self._fill_gofile_page_password(url))
+            return
+        self._fill_gofile_page_password(source_url)
 
     def _gofile_folder_entries_from_api_data(self, data, source_url):
         folder_entries = []
@@ -36163,10 +36235,15 @@ try {
 
     def _on_gofile_password_field(self, source_url, result):
         # GoFile's page includes a password box even when the folder is
-        # public. That is not a lock. The contents response is.
+        # public. That is not a lock. Only a locked contents response is.
         if str(result or '').strip().lower() != 'yes':
             return
-        print(f'[GOFILE] Ignored a password box on {source_url}; the contents response did not refuse the folder')
+        source_url = self._canonicalize_remote_source_url(self._sanitize_url(source_url))
+        key = self._gofile_folder_cache_key(source_url)
+        if not key or key not in getattr(self, '_gofile_locked_ids', set()):
+            print(f'[GOFILE] Ignored a password box on {source_url}; the folder is not locked')
+            return
+        self._insert_saved_gofile_password(source_url)
 
     def _offer_gofile_page_password(self, source_url):
         key = self._gofile_folder_cache_key(source_url)
@@ -36179,8 +36256,7 @@ try {
         if key in offered:
             return
         if self._lookup_cached_remote_password('gofile', source_url):
-            self._show_gofile_password_bar(source_url)
-            self._fill_gofile_page_password(source_url)
+            self._insert_saved_gofile_password(source_url, ask=False)
             return
         offered.add(key)
         try:
@@ -36198,8 +36274,7 @@ try {
         )
         if not password:
             return
-        self._show_gofile_password_bar(source_url)
-        self._fill_gofile_page_password(source_url)
+        self._insert_saved_gofile_password(source_url, ask=False)
 
     def _start_gofile_saved_password_unlock(self, source_url):
         if self._gofile_token_rejected(source_url):
@@ -48316,15 +48391,34 @@ try {
                     )
                 )
                 if _is_eporner_cdn_host:
-                    # Signed vid-* URLs 403 if extra headers are added. mpv
-                    # still needs tls-verify=no (ffmpeg 0A000086).
-                    resolved = {
-                        'playback_url': source_url,
-                        'headers': {},
-                        'tls_verify': False,
-                        'resolver_provider': 'eporner_cdn_direct',
-                        'resolved_at_ms': int(time.time() * 1000),
-                    }
+                    # A saved vid-* link is IP-bound. Once it ages out, the
+                    # CDN still returns 200, but the body is the 480x360
+                    # one-minute error clip. Re-extract the page instead.
+                    if 'eporner' in host and self._eporner_cdn_url_is_stale(source_url):
+                        refreshed = self._refresh_stale_eporner_playback(
+                            source_url, reason='expired CDN token')
+                        if refreshed and refreshed.get('playback_url'):
+                            resolved = refreshed
+                        else:
+                            print(
+                                '[EPORNER] not playing the expired CDN link; '
+                                'it is the one-minute error clip '
+                                f'({source_url[:140]})'
+                            )
+                            return None
+                    else:
+                        # Signed vid-* URLs 403 if extra headers are added. mpv
+                        # still needs tls-verify=no (ffmpeg 0A000086).
+                        resolved = {
+                            'playback_url': source_url,
+                            'headers': {},
+                            'tls_verify': False,
+                            'resolver_provider': 'eporner_cdn_direct',
+                            'resolved_at_ms': int(time.time() * 1000),
+                        }
+                        page = self._eporner_page_url_for_playback(source_url)
+                        if page:
+                            resolved['eporner_source_url'] = page
                 else:
                     resolved = self._resolve_stream_with_ytdlp(source_url, allow_mpv_ytdl=not force_direct_ytdlp)
 
@@ -49531,6 +49625,148 @@ try {
         }
 
     # ── Eporner Playwright extractor ─────────────────────────────────────────
+
+    def _eporner_cdn_epoch(self, url):
+        match = re.search(r'/(\d{10})_\d{1,3}(?:\.\d{1,3}){3}_', str(url or ''))
+        if not match:
+            return 0
+        try:
+            return int(match.group(1))
+        except Exception:
+            return 0
+
+    def _eporner_cdn_url_is_stale(self, url, max_age_s=90 * 60):
+        """True when a saved Eporner CDN link would play the error clip.
+
+        The number in ``/<epoch>_<ip>_`` is the mint or expiry time. A value
+        more than 90 minutes behind now is the 480x360 one-minute stand-in,
+        not the film. A link minted in this session is still the film.
+        """
+        url = str(url or '').strip()
+        if not url or 'eporner' not in url.lower():
+            return True
+        epoch = self._eporner_cdn_epoch(url)
+        if epoch <= 0:
+            return True
+        return epoch < time.time() - max_age_s
+
+    def _eporner_claimed_height(self, url):
+        match = re.search(r'(?:^|[^\d])(\d{3,4})p(?:\.|$|[^\d])', str(url or ''), re.IGNORECASE)
+        if not match:
+            return 0
+        try:
+            return int(match.group(1))
+        except Exception:
+            return 0
+
+    def _eporner_page_url_for_playback(self, source_url):
+        source_url = str(source_url or '').strip()
+        if self._is_eporner_page_url(source_url):
+            return source_url
+        cache = getattr(self, '_stream_resolution_cache', {}) or {}
+        cached = cache.get(source_url) if isinstance(cache, dict) else {}
+        if isinstance(cached, dict):
+            for key in ('eporner_source_url', 'origin_page', 'page_url'):
+                page = str(cached.get(key) or '').strip()
+                if self._is_eporner_page_url(page):
+                    return page
+        match = re.search(r'gvideo\.eporner\.com/([A-Za-z0-9]+)/', source_url, re.IGNORECASE)
+        if match:
+            return f'https://www.eporner.com/video-{match.group(1)}/'
+        # Mirror grouping hides Eporner pages (they are treated as the site,
+        # not the hoster). Read the raw groups so a saved CDN row can find
+        # the page that still has the film.
+        candidates = []
+        try:
+            target_key = self._mirror_path_key(source_url)
+        except Exception:
+            target_key = ''
+        mirrors = getattr(self, '_playlist_url_mirrors', {}) or {}
+        if isinstance(mirrors, dict) and target_key:
+            candidates.extend(mirrors.get(source_url) or [])
+            for primary, values in mirrors.items():
+                values = values or []
+                if self._mirror_path_key(primary) == target_key or any(
+                    self._mirror_path_key(value) == target_key for value in values
+                ):
+                    candidates.append(primary)
+                    candidates.extend(values)
+        needle = source_url.split('?', 1)[0]
+        if isinstance(cache, dict) and needle:
+            for key, entry in cache.items():
+                if not isinstance(entry, dict):
+                    continue
+                play = str(entry.get('playback_url') or '')
+                page = str(entry.get('eporner_source_url') or '')
+                if needle in play or (page and needle in str(entry.get('playback_url') or '')):
+                    candidates.append(key)
+                    if page:
+                        candidates.append(page)
+        for mirror in candidates:
+            if self._is_eporner_page_url(mirror):
+                return str(mirror)
+        return ''
+
+    def _refresh_stale_eporner_playback(self, source_url, reason=''):
+        page = self._eporner_page_url_for_playback(source_url)
+        if not page:
+            print(
+                f'[EPORNER] stale link has no page to re-extract ({reason}) '
+                f'{str(source_url)[:140]}'
+            )
+            return None
+        print(f'[EPORNER] saved link is stale ({reason}); extracting the page again: {page[:140]}')
+        prepared = self._prepare_eporner_playlist_entry(page)
+        if not isinstance(prepared, dict) or not prepared.get('source_url'):
+            return None
+        return {
+            'playback_url': prepared['source_url'],
+            'headers': prepared.get('headers') or {},
+            'title': prepared.get('title') or '',
+            'tls_verify': False,
+            'resolver_provider': 'eporner',
+            'resolved_at_ms': int(time.time() * 1000),
+            'eporner_source_url': prepared.get('eporner_source_url') or page,
+        }
+
+    def _reject_eporner_error_clip(self, size):
+        """A stale Eporner token still decodes: 480x360 instead of the film."""
+        current = getattr(self, 'current_file', None)
+        if not current or not self._is_remote_url(current):
+            return
+        cache = getattr(self, '_stream_resolution_cache', {}) or {}
+        cached = cache.get(current) if isinstance(cache, dict) else {}
+        if not isinstance(cached, dict):
+            cached = {}
+        playback = str(cached.get('playback_url') or current)
+        if 'eporner' not in playback.lower() and not self._is_eporner_page_url(current):
+            return
+        claimed = self._eporner_claimed_height(playback) or self._eporner_claimed_height(current)
+        try:
+            height = int(size.height())
+            width = int(size.width())
+        except Exception:
+            return
+        if claimed < 720 or height <= 0 or height > 480:
+            return
+        retried = getattr(self, '_eporner_error_clip_retried', None)
+        if not isinstance(retried, set):
+            retried = set()
+            self._eporner_error_clip_retried = retried
+        if current in retried:
+            return
+        retried.add(current)
+        print(
+            f'[EPORNER] decoded {width}x{height} but the link says {claimed}p; '
+            'extracting the page again'
+        )
+        self.show_osd('Eporner link expired; loading the film again', duration=2400)
+        for key in ('playback_url', 'download_url', 'resolved_at_ms'):
+            cached.pop(key, None)
+        cache[current] = cached
+        self._stream_resolution_cache = cache
+        self._remote_autoplay_after_resolve.add(current)
+        self._resolve_remote_stream_async(current, force=True)
 
     def _is_eporner_page_url(self, url):
         """True for top-level Eporner watch/video page URLs (not CDN hosts)."""
@@ -53998,11 +54234,29 @@ try {
                         isinstance(_retry_state, dict)
                         and bool(_retry_state.get(file_path))
                     )
+                    _eporner_needs_refresh = False
+                    if self._is_eporner_page_url(file_path):
+                        _cached_play = str(_cached_entry.get('playback_url') or '')
+                        try:
+                            _play_host = (urlparse(_cached_play).netloc or '').lower()
+                        except Exception:
+                            _play_host = ''
+                        # A saved page must not replay a tnaflix mirror or an
+                        # hours-old CDN link. Both are the error clip.
+                        if (
+                            not _cached_play
+                            or 'eporner' not in _play_host
+                            or self._eporner_cdn_url_is_stale(_cached_play)
+                        ):
+                            _eporner_needs_refresh = True
+                            _signed_still_fresh = False
+                            _recent_capture = False
                     if (
                         _cached_entry.get('playback_url')
                         and (_signed_still_fresh or _recent_capture)
                         and not _family_capture_stale
                         and not _had_load_failure
+                        and not _eporner_needs_refresh
                     ):
                         # Paste already resolved this, and the CDN url says
                         # it is still good. Re-resolving mints a new
@@ -54036,6 +54290,7 @@ try {
                     if (
                         _had_load_failure
                         or _family_capture_stale
+                        or _eporner_needs_refresh
                         or (
                             not _signed_still_fresh
                             and (
@@ -58723,6 +58978,12 @@ try {
             if current_path.endswith(VIDEO_EXTENSIONS + AUDIO_EXTENSIONS) or '/dload/' in current_path:
                 cached_url = str(current or '').strip()
         failed_url = str(playback_url or cached_url or '').strip()
+        # A saved Eporner page that played a dead mirror (tnaflix 410) or an
+        # expired CDN link must be extracted again. Retrying that same target
+        # is what the duplicate-apply guard then skips.
+        eporner_must_refresh = self._is_eporner_page_url(current) or (
+            'eporner' in failed_url.lower() and self._eporner_cdn_url_is_stale(failed_url)
+        )
         try:
             failed_parsed = urlparse(failed_url)
             failed_is_local_proxy = (
@@ -58778,7 +59039,8 @@ try {
             for sig in ('certificate verify failed', 'error:0a000086', 'ssl routines', 'tls:')
         )
         should_retry_tls_disabled = bool(
-            looks_like_tls_cert_failure
+            not eporner_must_refresh
+            and looks_like_tls_cert_failure
             and cached_url
             and self._is_remote_url(cached_url)
             and not cached.get('use_mpv_ytdl')
@@ -58814,7 +59076,8 @@ try {
             self._start_current_media_playback()
             return
         should_proxy_direct_stream = bool(
-            cached_url
+            not eporner_must_refresh
+            and cached_url
             and self._is_remote_url(cached_url)
             and not cached.get('use_mpv_ytdl')
             and not state.get('local_proxy_tried')
@@ -58853,7 +59116,8 @@ try {
                 self._start_current_media_playback()
                 return
         should_retry_direct_headers = bool(
-            cached_url
+            not eporner_must_refresh
+            and cached_url
             and self._is_remote_url(cached_url)
             and not cached.get('use_mpv_ytdl')
             and not state.get('minimal_headers_tried')
@@ -58894,7 +59158,8 @@ try {
         # attached — same idea as the GoFile Referer/cookie handling above,
         # just triggered from a page visit instead of the in-app share view.
         should_try_browser_cookies = bool(
-            cached_url
+            not eporner_must_refresh
+            and cached_url
             and self._is_remote_url(cached_url)
             and not cached.get('use_mpv_ytdl')
             and str(cached.get('resolver_provider') or '').strip().lower() in ('html', 'mixdrop_browser', 'browser_click', 'fileditch_browser')
@@ -58916,7 +59181,7 @@ try {
             print(f"[PLAYBACK][LOAD_FAILED] retrying with browser-captured cookies current={current[:120]} playback={failed_url[:160]} error={error_message}")
             self._retry_html_stream_with_browser_cookies(current, cached)
             return
-        if count >= 3:
+        if count >= 3 and not eporner_must_refresh:
             self.play_button.setEnabled(True)
             self.show_osd("Stream URL failed after refresh", duration=3200)
             print(f"[PLAYBACK][LOAD_FAILED] giving up current={current[:120]} playback={failed_url[:160]} error={error_message}")
@@ -61451,6 +61716,10 @@ try {
         self.video_view.viewport().update()
     def video_native_size_changed(self, size):
         self.video_item.setSize(size)
+        try:
+            self._reject_eporner_error_clip(size)
+        except Exception:
+            pass
         # Defer the transform update to the next event-loop iteration so we don't
         # block the multimedia decoder thread during the size-change callback.
         # This is especially important for 4K content where the initial frame decode
