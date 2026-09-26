@@ -39069,8 +39069,11 @@ try {
             # TeraBox file URLs are signed and die within minutes. Re-mint
             # on the next play unless this one was just opened.
             or self._is_terabox_host(text)
-            # hanime / hentaihaven mint a short-lived stream. The page URL
-            # stays in the playlist, so the next play has to ask again.
+            # hanime mints a short-lived stream. The page URL stays in
+            # the playlist, so the next play has to ask again. Haven's
+            # playlist held for the play 20 minutes later, so that one
+            # is reused for half an hour (see the TTL below) and only
+            # asked again after that, or after a load failure.
             or text in ('hanime.tv', 'hentaihaven.xxx', 'hentaihaven.com')
             or text.endswith('.hanime.tv')
             or text.endswith('.hentaihaven.xxx')
@@ -39096,6 +39099,12 @@ try {
             return 150000
         if self._is_terabox_host(text):
             return 180000
+        # A haven capture is a real browser. The field play 20 minutes
+        # later minted the same playlist, so that second window was not
+        # earning anything. Reuse it for half an hour; a load failure
+        # still asks the page again.
+        if text in ('hentaihaven.xxx', 'hentaihaven.com') or text.endswith('.hentaihaven.xxx') or text.endswith('.hentaihaven.com'):
+            return 1800000
         return 0
 
     def _can_reuse_recent_signed_playback(self, source_url, stream_info):
@@ -53777,6 +53786,8 @@ try {
                     # use_mpv_ytdl nor pre_resolved_playback_url.
                     _signed_still_fresh = self._cached_signed_playback_is_trustworthy(
                         _cached_entry.get('playback_url'))
+                    _recent_capture = self._can_reuse_recent_signed_playback(
+                        file_path, _cached_entry)
                     # A load failure already recorded for this row means the
                     # cached url did not play. Don't hand mpv the same one
                     # again; fall through and resolve a fresh signature.
@@ -53787,7 +53798,7 @@ try {
                     )
                     if (
                         _cached_entry.get('playback_url')
-                        and _signed_still_fresh
+                        and (_signed_still_fresh or _recent_capture)
                         and not _family_capture_stale
                         and not _had_load_failure
                     ):
@@ -53800,6 +53811,10 @@ try {
                             if self._is_ok_host(urlparse(file_path).netloc or ''):
                                 print('[OKRU] playing the stream already '
                                       f'resolved for {file_path[:80]}',
+                                      flush=True)
+                            elif _recent_capture and not _signed_still_fresh:
+                                print('[STREAM] playing the capture already '
+                                      f'stored for {file_path[:80]}',
                                       flush=True)
                         except Exception:
                             pass
@@ -65432,17 +65447,26 @@ if __name__ == "__main__":
                         # first (best effort - private API, any failure is
                         # fine, the parent still tree-kills by our pid).
                         try:
-                            _pw_impl = getattr(browser, '_impl_obj', None)
-                            _pw_proc = getattr(_pw_impl, '_browser_process', None)
-                            if _pw_proc is None:
-                                _pw_impl2 = getattr(_pw_impl, '_browser', None)
-                                _pw_proc = getattr(_pw_impl2, '_browser_process', None)
-                            _pw_pid = getattr(_pw_proc, 'pid', None)
+                            _pw_pid = None
+                            _pw_seen = [browser, getattr(browser, '_impl_obj', None)]
+                            _pw_inner = getattr(_pw_seen[-1], '_browser', None) if _pw_seen[-1] is not None else None
+                            _pw_seen.extend([_pw_inner, getattr(_pw_inner, '_impl_obj', None)])
+                            for _pw_obj in _pw_seen:
+                                if _pw_obj is None:
+                                    continue
+                                _pw_proc = (
+                                    getattr(_pw_obj, '_browser_process', None)
+                                    or getattr(_pw_obj, '_process', None)
+                                )
+                                _pw_pid = getattr(_pw_proc, 'pid', None)
+                                if _pw_pid:
+                                    break
                             if _pw_pid:
                                 _PW_STATE['browser_pid'] = int(_pw_pid)
                                 print('PW_BROWSER_PID::' + str(int(_pw_pid)))
                                 sys.stdout.flush()
                                 if hidden_headed:
+                                    print('[BROWSER_CLICK] capture window will stay off the taskbar', flush=True)
                                     threading.Thread(
                                         target=_quiet_offscreen_browser_taskbar,
                                         args=(int(_pw_pid),),
@@ -65452,6 +65476,8 @@ if __name__ == "__main__":
                                         daemon=True,
                                         name='quiet-capture-browser',
                                     ).start()
+                            elif hidden_headed:
+                                print('[BROWSER_CLICK] capture window pid was not found', flush=True)
                         except Exception:
                             pass
                         page = browser.new_page()
